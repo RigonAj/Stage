@@ -68,11 +68,11 @@ At high ball speed, the event trail can artificially increase the apparent radiu
 
 ### 2D event view and circle fitting
 
-![2D event view](docs/images/ball_tracking_2d.png)
+![2D event view](images/ball_tracking_2d.png)
 
 ### 3D trajectory view
 
-![3D trajectory view](docs/images/ball_tracking_3d.png)
+![3D trajectory view](images/ball_tracking_3d.png)
 
 ---
 
