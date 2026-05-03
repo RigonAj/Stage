@@ -1,0 +1,56 @@
+# ROS 2 / colcon generated folders anywhere in the repo
+**/build/
+**/install/
+**/log/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Compiled objects and libraries
+*.o
+*.obj
+*.lo
+*.slo
+*.a
+*.lib
+*.la
+*.lai
+*.so
+*.dylib
+*.dll
+*.gch
+*.pch
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Event recordings / runtime outputs
+*.bin
+*.bag
+*.db3
+tmp/
+**/tmp/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# Editor / language-server caches
+.vscode/
+.cache/
+.ccls-cache/
+.clangd/
+__pycache__/
+*.py[cod]
