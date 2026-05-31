@@ -158,10 +158,12 @@ void DvCamera::Filter() {
 }
 
 void DvCamera::Undistort() {
-    if (!calibration.ready
-        || Filtered.isEmpty()
-        || calibration.cameraMatrix.empty()
-        || calibration.distortionCoefficients.empty()) {
+    rawFilteredPoints_.clear();
+    rawFilteredTimestamps_.clear();
+    undistortedFilteredPoints_.clear();
+    undistortedFilteredTimestamps_.clear();
+
+    if (Filtered.isEmpty()) {
         return;
     }
 
@@ -172,6 +174,8 @@ void DvCamera::Undistort() {
     distortedPoints.reserve(Filtered.size());
     timestamps.reserve(Filtered.size());
     polarities.reserve(Filtered.size());
+    rawFilteredPoints_.reserve(Filtered.size());
+    rawFilteredTimestamps_.reserve(Filtered.size());
 
     for (const auto& e : Filtered) {
         distortedPoints.emplace_back(
@@ -181,33 +185,63 @@ void DvCamera::Undistort() {
 
         timestamps.emplace_back(e.timestamp());
         polarities.emplace_back(e.polarity());
+        rawFilteredPoints_.emplace_back(
+            static_cast<float>(e.x()),
+            static_cast<float>(e.y())
+        );
+        rawFilteredTimestamps_.emplace_back(e.timestamp());
     }
 
     if (distortedPoints.empty()) {
         return;
     }
 
+    if (!calibration.ready
+        || calibration.cameraMatrix.empty()
+        || calibration.distortionCoefficients.empty()) {
+        return;
+    }
+
     std::vector<cv::Point2f> undistortedPoints;
 
-    cv::undistortPoints(
-        distortedPoints,
-        undistortedPoints,
-        calibration.cameraMatrix,
-        calibration.distortionCoefficients,
-        cv::noArray(),
-        calibration.cameraMatrix
-    );
+    if (calibration.useFisheyeModel) {
+        cv::fisheye::undistortPoints(
+            distortedPoints,
+            undistortedPoints,
+            calibration.cameraMatrix,
+            calibration.distortionCoefficients,
+            cv::noArray(),
+            calibration.cameraMatrix
+        );
+    }
+    else {
+        cv::undistortPoints(
+            distortedPoints,
+            undistortedPoints,
+            calibration.cameraMatrix,
+            calibration.distortionCoefficients,
+            cv::noArray(),
+            calibration.cameraMatrix
+        );
+    }
 
     dv::EventStore output;
+    undistortedFilteredPoints_.reserve(undistortedPoints.size());
+    undistortedFilteredTimestamps_.reserve(undistortedPoints.size());
 
     for (size_t i = 0; i < undistortedPoints.size(); ++i) {
-        const int x = static_cast<int>(std::lround(undistortedPoints[i].x));
-        const int y = static_cast<int>(std::lround(undistortedPoints[i].y));
+        const float xf = undistortedPoints[i].x;
+        const float yf = undistortedPoints[i].y;
+        const int x = static_cast<int>(std::lround(xf));
+        const int y = static_cast<int>(std::lround(yf));
 
         if (x >= 0
             && x < calibration.imageSize.width
             && y >= 0
             && y < calibration.imageSize.height) {
+
+            undistortedFilteredPoints_.emplace_back(xf, yf);
+            undistortedFilteredTimestamps_.emplace_back(timestamps[i]);
 
             output.emplace_back(
                 timestamps[i],
@@ -219,6 +253,38 @@ void DvCamera::Undistort() {
     }
 
     Filtered = std::move(output);
+}
+
+void DvCamera::KeepRecentFiltered(double windowSeconds) {
+    if (Filtered.isEmpty()) {
+        return;
+    }
+
+    if (windowSeconds <= 0.0) {
+        windowSeconds = 0.001;
+    }
+
+    for (const auto& e : Filtered) {
+        recentFiltered_.emplace_back(e);
+    }
+
+    if (recentFiltered_.isEmpty()) {
+        return;
+    }
+
+    const int64_t newestTimestamp = recentFiltered_.getHighestTime();
+    const int64_t windowUs = static_cast<int64_t>(windowSeconds * 1.0e6);
+    const int64_t cutoffTimestamp = newestTimestamp - std::max<int64_t>(windowUs, 1);
+
+    dv::EventStore output;
+    for (const auto& e : recentFiltered_) {
+        if (e.timestamp() >= cutoffTimestamp) {
+            output.emplace_back(e);
+        }
+    }
+
+    recentFiltered_ = std::move(output);
+    Filtered = recentFiltered_;
 }
 
 void DvCamera::Echantillon(int maxevent) {
@@ -270,18 +336,16 @@ void DvCamera::Cluster(Box box,float alpha, int bandwidth, uint32_t minNb) {
         boxed_.emplace_back(e);
         avg_time += e.timestamp();
         ++n;
-
         if (e.timestamp() > max_time) max_time = e.timestamp();
-        
     }
 
     if (n == 0) return;
-    
+
 
     avg_time /= n;
 
-    const int64_t time_limit = static_cast<int64_t>(static_cast<float>(max_time - avg_time) * alpha) + avg_time;
-
+    int64_t time_limit = static_cast<int64_t>(static_cast<float>(max_time - avg_time) * alpha) + avg_time;
+    if(alpha <= 0.01) time_limit = -1;
     DBCloud cloud;
     std::vector<bool> cloudPolarities;
     std::vector<int64_t> cloudTimestamps;
@@ -305,7 +369,7 @@ void DvCamera::Cluster(Box box,float alpha, int bandwidth, uint32_t minNb) {
     }
 
     if (cloud.empty()) return;
-    
+
 
     DBSCANType dbscan(cloud, bandwidth, minNb, 10000);
     dbscan.formClusters();
@@ -335,6 +399,7 @@ void DvCamera::Cluster(Box box,float alpha, int bandwidth, uint32_t minNb) {
         cluster.polarities.reserve(indices.size());
         cluster.timestamps.reserve(indices.size());
         cluster.maxTimestamp = std::numeric_limits<int64_t>::min();
+        cluster.minTimestamp = std::numeric_limits<int64_t>::max();
 
         for (const uint32_t idx : indices) {
             if (idx >= cloud.size()) {
@@ -344,10 +409,8 @@ void DvCamera::Cluster(Box box,float alpha, int bandwidth, uint32_t minNb) {
             cluster.points.emplace_back(cloud[idx][0], cloud[idx][1]);
             cluster.polarities.emplace_back(cloudPolarities[idx]);
             cluster.timestamps.emplace_back(cloudTimestamps[idx]);
-
-            if (cloudTimestamps[idx] > cluster.maxTimestamp) {
-                cluster.maxTimestamp = cloudTimestamps[idx];
-            }
+            cluster.minTimestamp = std::min(cloudTimestamps[idx],cluster.minTimestamp);
+            cluster.maxTimestamp = std::max(cloudTimestamps[idx],cluster.maxTimestamp);
         }
 
         if (!cluster.points.empty()) {
@@ -355,4 +418,3 @@ void DvCamera::Cluster(Box box,float alpha, int bandwidth, uint32_t minNb) {
         }
     }
 }
-

@@ -8,8 +8,14 @@
 #include "RegressionAccumulator.hpp"
 #include "util.hpp"
 
+enum class BallSliceMode : int {
+    RecentEvents = 0,
+    TemporalWindows = 1,
+    EventCountWindows = 2
+};
+
 struct BallTrackerSettings {
-    float ballRadiusMm = 20.0f;
+    float ballRadiusMm = 60.0f;
     bool positiveOnly = false;
     float coef = 0.45f;
     float filterSize = 115.0f;
@@ -17,12 +23,18 @@ struct BallTrackerSettings {
     float rayonCote = 0.0f;
     float symCoef = 29.0f;
     float symCoef2 = 157.0f;
+    float alpha = 50.0f;
+    bool radiusGateEnabled = true;
+    BallSliceMode sliceMode = BallSliceMode::RecentEvents;
+    int temporalSliceCount = 5;
+    int eventsPerSlice = 100;
 };
 
 struct BallTrackerClusterInput {
     std::vector<cv::Point2f> points;
     std::vector<polar> polarities;
     int64_t maxTimestamp = 0;
+    int64_t minTimestamp =100;
 
     std::size_t size() const { return points.size(); }
 };
@@ -33,9 +45,20 @@ struct BallTrackerResult {
     bool hasCircle = false;
     Circle circle{0.0f, 0.0f, 0.0f};
     cv::Point2f arrowEnd{0.0f, 0.0f};
+    int64_t circleTimestampUs = 0;
 
-    bool parabola2DValid = false;
-    coef2 parabola2D{};
+    bool imageTrajectory2DValid = false;
+    coef imageXFit{};
+    coef2 imageYFit{};
+    float imageTMin = 0.0f;
+    float imageTMax = 0.0f;
+    bool imageSpaceTrajectory2DValid = false;
+    coef2 imageYFromXFit{};
+    float imageXMin = 0.0f;
+    float imageXMax = 0.0f;
+
+    std::vector<cv::Point2f> acceptedTracePoints;
+    std::vector<int64_t> acceptedTraceTimestamps;
 
     std::optional<BallPose3D> pose;
     int64_t poseTimestampUs = 0;
@@ -43,12 +66,17 @@ struct BallTrackerResult {
     bool updatedTrajectory = false;
     Vector3 worldPosition{0.0f, 0.0f, 0.0f};
     std::vector<Vector3> worldTrack;
+    std::vector<float> worldTrackTimes;
     coef xFit{};
     coef yFit{};
     coef2 zFit{};
     float tMin = 0.0f;
     float tMax = 0.0f;
     bool trajectoryValid = false;
+
+    std::vector<BallPose3D> track_ball_poses_;
+    coef plan;
+
 };
 
 class BallTracker {
@@ -90,8 +118,16 @@ private:
     std::vector<cv::Point2f> circle_centers_;
     float dr_ = 0.0f;
 
-    coef2 parabola_{};
-    QuadraticRegression image_parabola_reg_;
+    LinearRegression image_x_reg_;
+    QuadraticRegression image_y_reg_;
+    QuadraticRegression image_y_from_x_reg_;
+    coef image_x_fit_{};
+    coef2 image_y_fit_{};
+    coef2 image_y_from_x_fit_{};
+    std::vector<float> image_track_time_seconds_;
+    float image_track_x_min_ = 0.0f;
+    float image_track_x_max_ = 0.0f;
+    int64_t image_track_start_timestamp_us_ = -1;
 
     std::vector<Vector3> world_track_;
     std::vector<float> track_time_seconds_;
@@ -108,4 +144,7 @@ private:
     int64_t last_max_time_ = 0;
 
     std::optional<BallPose3D> last_ball_pose_;
+    std::vector<BallPose3D> track_ball_poses_;
+
 };
+coef FitLinear(const std::vector<BallPose3D>& poses);

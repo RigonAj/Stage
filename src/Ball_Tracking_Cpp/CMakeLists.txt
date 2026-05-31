@@ -22,6 +22,7 @@ find_package(Eigen3 REQUIRED)
 find_package(fmt REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(TBB REQUIRED)
+find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
 pkg_check_modules(RAYLIB REQUIRED raylib)
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
@@ -49,6 +50,7 @@ target_include_directories(talker PRIVATE
   ${DBSCAN_DIR}
   ${RAYLIB_INCLUDE_DIRS}
   ${LIBUSB_INCLUDE_DIRS}
+  ${HDF5_INCLUDE_DIRS}
 )
 
 target_link_libraries(talker
@@ -57,6 +59,7 @@ target_link_libraries(talker
   fmt::fmt
   ${RAYLIB_LINK_LIBRARIES}
   ${LIBUSB_LIBRARIES}
+  ${HDF5_LIBRARIES}
   TBB::tbb
   GL
   m

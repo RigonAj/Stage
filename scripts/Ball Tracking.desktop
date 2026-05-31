@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Ball Tracking
+Comment=Lance le programme ROS2 de suivi de balle
+Path=/home/rigon/Dv-Rosws/Dv-Rosws
+Exec=gnome-terminal -- /home/rigon/Dv-Rosws/Dv-Rosws/scripts/launch_ball_tracking_terminal.sh
+Terminal=false
+Categories=Science;

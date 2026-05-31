@@ -7,12 +7,12 @@ struct coef {
     float a = 0.0f;
     float b = 0.0f;
 };
-
 struct coef2 {
     float a = 0.0f;
     float b = 0.0f;
     float c = 0.0f;
 };
+
 
 class LinearRegression {
 public:

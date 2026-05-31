@@ -3,9 +3,9 @@
 <package format="3">
   <name>ball_tracking_cpp</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Event-based 3D ball tracking with a DVXplorer camera.</description>
   <maintainer email="rigonajvazi@proton.me">riajvazi</maintainer>
-  <license>TODO: License declaration</license>
+  <license>MIT</license>
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
   <buildtool_depend>ament_cmake</buildtool_depend>

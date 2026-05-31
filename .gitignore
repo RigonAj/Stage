@@ -3,6 +3,13 @@
 **/install/
 **/log/
 
+# Local agent notes
+AGENT.md
+AGENTS.md
+
+# Local dependencies
+.deps/
+
 # CMake generated files
 CMakeFiles/
 CMakeCache.txt
@@ -32,25 +39,33 @@ Testing/
 *.out
 *.app
 
-# Event recordings / runtime outputs
-*.bin
-*.bag
-*.db3
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*~
+.cache/
+.ccls-cache/
+.clangd/
+
+# Temporary source snapshots
 tmp/
 **/tmp/
+
+# Event recordings and converted datasets
+recordings/
+*.bin
+*.h5
+*.hdf5
+*.bag
+*.db3
 
 # Logs and temporary files
 *.log
 *.tmp
 *.bak
-*.swp
-*.swo
-*~
 
-# Editor / language-server caches
-.vscode/
-.cache/
-.ccls-cache/
-.clangd/
+# Python cache
 __pycache__/
 *.py[cod]
+.pytest_cache/

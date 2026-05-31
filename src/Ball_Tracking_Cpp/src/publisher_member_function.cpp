@@ -3,13 +3,16 @@
 #include "util.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <iomanip>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <utility>
 #include <vector>
 
+#include <opencv2/calib3d.hpp>
 #include <opencv2/highgui.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
@@ -24,9 +27,16 @@ public:
           box(0, 0, resolution.width, resolution.height),
           camera(),
           gui(camera.Filtered, ui),
-          tracker() {
+	          tracker() {
+        gui.SetTracePoseCalibration(camera.calibration, BALL_RADIUS_MM);
+        gui.SetTraceRawSource(
+            &camera.RawFilteredPoints(),
+            &camera.RawFilteredTimestamps());
+        gui.SetTraceFloatSource(
+            &camera.UndistortedFilteredPoints(),
+            &camera.UndistortedFilteredTimestamps());
 
-        timer_ = this->create_wall_timer(4ms, std::bind(&Pub::timer_callback, this));
+        timer_ = this->create_wall_timer(1ms, std::bind(&Pub::timer_callback, this));
         pose_publisher_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("ball_position_3d_mm", 10);
     }
 
@@ -55,6 +65,10 @@ private:
     DvCamera camera;
     Gui gui;
     BallTracker tracker;
+
+    std::optional<BallTrackerResult> paused_reader_tracking_cache_;
+    double paused_reader_tracking_time_seconds_ = -1.0;
+    double paused_reader_tracking_window_seconds_ = -1.0;
 };
 int main(int argc, char *argv[]) {
     rclcpp::init(argc, argv);
@@ -73,7 +87,12 @@ void Pub::timer_callback() {
 
     gui.ClearCurrentBall3D();
 
-    if (ui.Lector() < 0.01f) {
+    if (gui.ClearPoses) {
+        resetTracks();
+        gui.ClearPoses = false;
+    }
+
+    if (!ui.UseReader()) {
         camera.NextBatch();
 
         if (!camera.isCameraRunning()) {
@@ -82,14 +101,17 @@ void Pub::timer_callback() {
 
         if (!camera.EventsAvailable()) {gui.Update();return; }
 
-        if (ui.Record() && camera.Events.has_value()) gui.WriteStore(*camera.Events);
-
         camera.Filter();
-        camera.Undistort();
+
+        if (ui.Record() && camera.FilteredAvailable()) {
+            gui.WriteStore(camera.Filtered);
+        }
+
+        camera.KeepRecentFiltered(ui.PlaybackWindowSeconds());
     }
     else {
         dv::EventStore readerEvents;
-        gui.ReadStore(readerEvents, ui.Lector(), ui.Time_Slice());
+        gui.ReadStore(readerEvents);
 
         if (readerEvents.isEmpty()) {
             camera.Events.reset();
@@ -98,7 +120,6 @@ void Pub::timer_callback() {
         }
         camera.Events = std::move(readerEvents);
         camera.Filtered = *camera.Events;
-        camera.Undistort();
     }
 
     if (!camera.FilteredAvailable()) {
@@ -107,13 +128,12 @@ void Pub::timer_callback() {
         return;
     }
 
-    gui.nb_event = camera.EventCount();
+    camera.Undistort();
+    gui.nb_event = camera.FilteredCount();
 
     camera.Echantillon(ui.Maxevent());
 
     const auto t_pre_end = clock::now();
-
-    if (gui.ClearPoses) {resetTracks();gui.ClearPoses = false;}
 
     const auto t_cluster_start = clock::now();
 
@@ -124,10 +144,61 @@ void Pub::timer_callback() {
     const auto t_cluster_end = clock::now();
     const auto t_post_start = clock::now();
 
-    const BallTrackerResult tracking = tracker.Update(
-        trackerClusters,
-        camera.calibration,
-        trackerSettings());
+    const double readerTimeSeconds = ui.PlaybackTimeSeconds();
+    const double readerWindowSeconds = ui.PlaybackWindowSeconds();
+    const bool canReusePausedReaderTracking =
+        ui.UseReader()
+        && !ui.PlaybackPlaying()
+        && paused_reader_tracking_cache_.has_value()
+        && std::fabs(readerTimeSeconds - paused_reader_tracking_time_seconds_) < 1.0e-9
+        && std::fabs(readerWindowSeconds - paused_reader_tracking_window_seconds_) < 1.0e-9;
+
+    BallTrackerResult tracking;
+
+    if (canReusePausedReaderTracking) {
+        tracking = *paused_reader_tracking_cache_;
+    }
+    else {
+        tracking = tracker.Update(
+            trackerClusters,
+            camera.calibration,
+            trackerSettings());
+
+        if (ui.UseReader()) {
+            paused_reader_tracking_cache_ = tracking;
+            paused_reader_tracking_time_seconds_ = readerTimeSeconds;
+            paused_reader_tracking_window_seconds_ = readerWindowSeconds;
+        }
+        else {
+            paused_reader_tracking_cache_.reset();
+            paused_reader_tracking_time_seconds_ = -1.0;
+            paused_reader_tracking_window_seconds_ = -1.0;
+        }
+    }
+
+    if (tracking.hasCircle) {
+        gui.SetTraceMotionWindow(
+            tracking.circle,
+            {tracking.imageYFromXFit.a, tracking.imageYFromXFit.b, tracking.imageYFromXFit.c},
+            tracking.imageSpaceTrajectory2DValid,
+            tracking.imageXMin,
+            tracking.imageXMax,
+            tracking.circleTimestampUs);
+    }
+    else {
+        gui.ClearTraceMotionWindow();
+    }
+
+    if (ui.TraceUseRawInput()) {
+        gui.AppendTraceEvents(
+            camera.RawFilteredPoints(),
+            camera.RawFilteredTimestamps());
+    }
+    else {
+        gui.AppendTraceEvents(
+            camera.UndistortedFilteredPoints(),
+            camera.UndistortedFilteredTimestamps());
+    }
 
     drawTrackerResult(tracking);
 
@@ -155,15 +226,32 @@ std::vector<BallTrackerClusterInput> Pub::buildTrackerClusters() const {
 
     for (const auto &cluster : cameraClusters) {
         BallTrackerClusterInput input;
-        input.points = cluster.points;
         input.maxTimestamp = cluster.maxTimestamp;
-        input.polarities.reserve(cluster.size());
+        input.minTimestamp = cluster.minTimestamp;
 
-        for (size_t i = 0; i < cluster.size(); ++i) {
+        const std::vector<cv::Point2f> &points = cluster.points;
+
+        input.points.reserve(points.size());
+        input.polarities.reserve(points.size());
+
+        for (size_t i = 0; i < points.size(); ++i) {
+            const cv::Point2f &point = points[i];
+
+            if (camera.calibration.ready
+                && (point.x < 0.0f
+                    || point.x >= static_cast<float>(camera.calibration.imageSize.width)
+                    || point.y < 0.0f
+                    || point.y >= static_cast<float>(camera.calibration.imageSize.height))) {
+                continue;
+            }
+
+            input.points.emplace_back(point);
             input.polarities.emplace_back(polar{cluster.polarities[i], cluster.timestamps[i]});
         }
 
-        output.emplace_back(std::move(input));
+        if (!input.points.empty()) {
+            output.emplace_back(std::move(input));
+        }
     }
 
     return output;
@@ -179,6 +267,11 @@ BallTrackerSettings Pub::trackerSettings() const {
     settings.rayonCote = ui.rayon_cote;
     settings.symCoef = ui.Sym_coef();
     settings.symCoef2 = ui.Sym_coef2();
+    settings.alpha = ui.Alpha();
+    settings.radiusGateEnabled = ui.TraceUseRadiusGate();
+    settings.sliceMode = static_cast<BallSliceMode>(ui.SliceMode());
+    settings.temporalSliceCount = ui.TemporalSlices();
+    settings.eventsPerSlice = ui.EventsPerSlice();
     return settings;
 }
 
@@ -195,10 +288,15 @@ void Pub::drawTrackerResult(const BallTrackerResult &result) {
         gui.AddRect(box.x, box.y, box.w, box.h, RED);
     }
 
-    if (result.parabola2DValid) {
-        gui.Parabole(result.parabola2D.a, result.parabola2D.b, result.parabola2D.c);
+    if (result.imageTrajectory2DValid) {
+        gui.SetImageTrajectory2D(
+            {result.imageXFit.a, result.imageXFit.b},
+            {result.imageYFit.a, result.imageYFit.b, result.imageYFit.c},
+            result.imageTMin,
+            result.imageTMax,
+            true
+        );
     }
-
     if (result.pose.has_value()) {
         std::ostringstream label;
         label.setf(std::ios::fixed);
@@ -214,6 +312,7 @@ void Pub::drawTrackerResult(const BallTrackerResult &result) {
 
         gui.SetTrajectory3D(
             result.worldTrack,
+            result.worldTrackTimes,
             {result.xFit.a, result.xFit.b},
             {result.yFit.a, result.yFit.b},
             {result.zFit.a, result.zFit.b, result.zFit.c},
@@ -225,8 +324,14 @@ void Pub::drawTrackerResult(const BallTrackerResult &result) {
 
 void Pub::resetTracks() {
     tracker.Reset();
-    gui.Parabole(0.0f, 0.0f, 0.0f);
+    paused_reader_tracking_cache_.reset();
+    paused_reader_tracking_time_seconds_ = -1.0;
+    paused_reader_tracking_window_seconds_ = -1.0;
+    gui.ClearImageTrajectory2D();
     gui.ClearTrajectory3D();
+    gui.ClearTrace3D();
+    gui.ClearTraceMotionWindow();
+    gui.ResetTraceAccumulation();
     gui.ClearCurrentBall3D();
 }
 
@@ -250,7 +355,7 @@ void Pub::draw2DOverlay(const BallPose3D &pose) {
         BLACK,
         18);
 
-    std::string s = fmt::format("d={:.1f} mm  r_u={:.1f} px", pose.depthMm, pose.RadiusPx);
+    std::string s = fmt::format("d={:.1f} mm  r={:.1f} px", pose.depthMm, pose.RadiusPx);
 
     gui.AddLabel(
         pose.circle.x + 14.0f,

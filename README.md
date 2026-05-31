@@ -1,125 +1,140 @@
-# Event-Based 3D Ball Tracking with DVXplorer and ROS 2
+# Event-Based 3D Ball Tracking
 
-This project is a ROS 2 C++ application for detecting and tracking a moving ball using an event-based camera.  
-It uses a DVXplorer event camera, OpenCV calibration, DBSCAN clustering, circle fitting, 3D pose estimation, and a Raylib-based visualization interface.
+ROS 2 C++ project for detecting and tracking a moving ball with a DVXplorer event camera.
 
-The long-term objective is to estimate the 3D trajectory of a ball in real time and provide this information to a robotic system capable of catching the ball.
+The application reads asynchronous camera events, filters noise, clusters event points, estimates the 3D position of the ball, and displays the result in 2D, 3D, top-view, RMSE, and trace-analysis views.
 
----
+## Processing Pipeline
 
-## Project Overview
+1. Acquire event batches from a DVXplorer camera or from a recorded file.
+2. Filter background activity with `dv-processing`.
+3. Undistort event coordinates using the OpenCV calibration file.
+4. Keep a recent time window and downsample events for real-time processing.
+5. Cluster events with DBSCAN.
+6. Fit a circle on the best ball cluster.
+7. Estimate the 3D position from the apparent circle radius.
+8. Accumulate 3D positions and fit a trajectory.
+9. Display the tracking result with Raylib/raygui.
 
-The system processes asynchronous events from a DVXplorer camera and estimates the position of a ball in 3D space.
+## 3D Position Estimation
 
-Main processing pipeline:
+The main tracker estimates the ball position from the fitted image circle.
 
-1. Acquire event batches from the DVXplorer camera.
-2. Apply background activity filtering.
-3. Undistort event coordinates using OpenCV camera calibration.
-4. Downsample events for real-time processing.
-5. Cluster events using DBSCAN.
-6. Fit a circle on the detected ball cluster.
-7. Estimate the 3D ball position from the apparent circle radius.
-8. Fit and display the 3D trajectory.
-9. Publish the estimated pose through ROS 2.
+For a ball with known real radius `R` and detected image radius `r`, depth is estimated as:
 
----
+```text
+Z = fx * R / r
+X = ((u - cx) / fx) * Z
+Y = ((v - cy) / fy) * Z
+```
 
-## Features
+Where:
 
-- DVXplorer event camera support.
-- ROS 2 node for real-time processing.
-- Event filtering using `dv-processing`.
-- OpenCV camera calibration support.
-- DBSCAN-based event clustering.
-- Circle fitting for ball detection.
-- 3D pose estimation from apparent ball radius.
-- 3D trajectory visualization.
-- Raylib and Raygui graphical interface.
-- Event recording and playback system.
-- ROS 2 topic publishing for external robotic control.
+- `(u, v)` is the circle center in pixels;
+- `r` is the detected circle radius in pixels;
+- `fx`, `fy`, `cx`, `cy` come from the OpenCV camera calibration;
+- `X`, `Y`, `Z` are returned in millimeters by the tracker.
 
----
+The displayed 3D world coordinates are converted to meters for the Raylib scene.
 
-## Current Status
+## Trajectory Fit
 
-The project is currently functional as a real-time prototype.
+Each valid 3D estimate is added to the trajectory history. The current trajectory model is:
 
-Implemented:
+```text
+X(t) = a*t + b
+Y(t) = a*t + b
+Z(t) = a*t^2 + b*t + c
+```
 
-- event acquisition;
-- camera calibration loading;
-- event undistortion;
-- event clustering;
-- circle fitting;
-- 3D position estimation;
-- trajectory fitting;
-- 2D and 3D visualization;
-- ROS 2 publishing.
+This keeps the lateral/depth components simple while allowing a parabolic component for the vertical motion.
 
-Known limitation:
+## Trace View
 
-The depth estimation is very sensitive to the detected circle radius.  
-At high ball speed, the event trail can artificially increase the apparent radius, which may cause the estimated ball depth to be inaccurate.
+Fast ball motion can create a long event trail. In that case, fitting a circle can overestimate the apparent radius and make the ball look too close.
 
----
+The `Trace` view provides a second geometric analysis:
 
-## Screenshots
+1. follow the detected ball using a moving window;
+2. accumulate recent raw or undistorted events inside that window;
+3. estimate the trail direction with PCA;
+4. transform events into a local trace frame:
 
-### 2D event view and circle fitting
+```text
+s = position along the trail
+h = position normal to the trail
+```
 
-![2D event view](images/ball_tracking_2d.png)
+5. split the trail along `s`;
+6. detect dense upper/lower borders in each slice using a 1D histogram on `h`;
+7. fit upper, middle, and lower curves;
+8. measure local trail width on the normal direction;
+9. convert center point plus width in pixels into 3D points.
 
-### 3D trajectory view
+For trace-based depth, the measured width is treated as the apparent diameter:
 
-![3D trajectory view](images/ball_tracking_3d.png)
+```text
+Z = f_effective * real_diameter / width_px
+```
 
----
+The trace algorithm is documented in `trace_algorithm_explanation.html`.
 
-## Repository Structure
+## Repository Layout
 
 ```text
 .
 ├── build.sh
 ├── calibration_camera_DVXplorer_DXA00265-2026_04_23_13_33_50.xml
-├── README.md
-├── src
-│   └── Ball_Tracking_Cpp
-│       ├── CMakeLists.txt
-│       ├── package.xml
-│       ├── include
-│       │   └── Ball_Tracking_Cpp
-│       │       ├── BallTracker.hpp
-│       │       ├── Camera.hpp
-│       │       ├── EventWriter.h
-│       │       ├── Gui.h
-│       │       ├── RegressionAccumulator.hpp
-│       │       └── util.hpp
-│       └── src
-│           ├── BallTracker.cpp
-│           ├── Camera.cpp
-│           ├── EventWriter.cpp
-│           ├── Gui.cpp
-│           ├── publisher_member_function.cpp
-│           └── DBSCAN
-└── .gitignore
+├── images/
+├── scripts/
+├── src/
+│   ├── Ball_Tracking_Cpp/
+│   │   ├── include/Ball_Tracking_Cpp/
+│   │   └── src/
+│   └── ball_tracking/
+├── Stage.pdf
+├── trace_algorithm_explanation.html
+└── README.md
+```
 
+Generated folders such as `build/`, `install/`, `log/`, `.deps/`, local recordings, and local agent notes are ignored by Git.
 
-Dependencies
+## Main Files
 
-This project was developed for ROS 2 on Linux.
+- `src/Ball_Tracking_Cpp/src/Camera.cpp`: camera acquisition, filtering, undistortion, sampling, and DBSCAN clustering.
+- `src/Ball_Tracking_Cpp/src/BallTracker.cpp`: circle fitting, cluster validation, 3D pose estimation, and trajectory fitting.
+- `src/Ball_Tracking_Cpp/src/Gui.cpp`: 2D/3D visualization, top view, RMSE view, and trace-ribbon analysis.
+- `src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/RegressionAccumulator.hpp`: linear and quadratic regressions.
+- `src/Ball_Tracking_Cpp/src/publisher_member_function.cpp`: ROS 2 node loop and GUI/tracker integration.
 
-Required dependencies:
+## Dependencies
 
-ROS 2 Humble
-CMake
-GCC / G++
-OpenCV
-Eigen3
-fmt
-TBB
-Raylib
-Raygui
-libusb
-dv-processing
-DVXplorer camera support
+- Linux
+- ROS 2
+- CMake
+- GCC/G++
+- OpenCV
+- Eigen3
+- fmt
+- TBB
+- Raylib
+- raygui
+- libusb
+- HDF5
+- `dv-processing`
+- DVXplorer camera support
+
+## Build
+
+From the workspace root:
+
+```bash
+source build.sh
+build
+```
+
+The helper script sets up the ROS environment and builds the C++ package with colcon.
+
+## Notes
+
+Depth estimation is sensitive to the apparent radius or width measured in pixels. A small pixel error can create a large depth error, especially when the ball is far from the camera. The trace view exists to inspect and improve this measurement when fast motion creates an elongated event trail.

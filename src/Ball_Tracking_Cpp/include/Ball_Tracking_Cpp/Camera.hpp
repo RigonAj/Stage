@@ -41,6 +41,7 @@ struct DvCluster {
     std::vector<bool> polarities;
     std::vector<int64_t> timestamps;
     int64_t maxTimestamp = 0;
+    int64_t minTimestamp = 100;
 
     std::size_t size() const { return points.size(); }
     bool empty() const { return points.empty(); }
@@ -52,6 +53,7 @@ struct BallPose3D {
     float RadiusPx = 0.0f;
     float depthMm = 0.0f;
     cv::Point3f positionMm{};
+    int64_t timestampUs = 0;
 };
 
 class DvCamera {
@@ -61,10 +63,15 @@ public:
     void NextBatch();
     void Filter();
     void Undistort();
+    void KeepRecentFiltered(double windowSeconds);
     void Echantillon(int maxevent);
     void Cluster(Box box,float alpha, int bandwidth, uint32_t minNb);
 
     const std::vector<DvCluster>& Clusters() const { return clusters_; }
+    const std::vector<cv::Point2f>& RawFilteredPoints() const { return rawFilteredPoints_; }
+    const std::vector<int64_t>& RawFilteredTimestamps() const { return rawFilteredTimestamps_; }
+    const std::vector<cv::Point2f>& UndistortedFilteredPoints() const { return undistortedFilteredPoints_; }
+    const std::vector<int64_t>& UndistortedFilteredTimestamps() const { return undistortedFilteredTimestamps_; }
 
     bool ClustersAvailable() const { return !clusters_.empty(); }
     bool isCameraRunning() const { return capture_ && capture_->isRunning(); }
@@ -93,7 +100,12 @@ private:
     dv::noise::BackgroundActivityNoiseFilter<dv::EventStore> filter_;
 
     dv::EventStore boxed_;
+    dv::EventStore recentFiltered_;
     std::vector<DvCluster> clusters_;
+    std::vector<cv::Point2f> rawFilteredPoints_;
+    std::vector<int64_t> rawFilteredTimestamps_;
+    std::vector<cv::Point2f> undistortedFilteredPoints_;
+    std::vector<int64_t> undistortedFilteredTimestamps_;
 };
 
 
