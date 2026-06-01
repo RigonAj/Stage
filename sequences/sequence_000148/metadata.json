@@ -1,0 +1,64 @@
+{
+  "project": "ball_event_dataset_v0",
+  "sequence_name": "sequence_000148",
+  "config_path": "/home/rigon/Documents/EventGen/ball_event_dataset_v0/benchmark/tmp/config_sequence_000148.yaml",
+  "num_frames": 169,
+  "planned_num_frames": 169,
+  "fps_real": 500.0,
+  "duration_requested_s": 0.338,
+  "duration_final_s": 0.338,
+  "trajectory_duration_s": 0.338,
+  "last_timestamp_s": 0.336,
+  "nominal_video_duration_s": 0.338,
+  "stopped_out_of_frame": false,
+  "stop_when_out_of_frame": {
+    "enabled": true,
+    "consecutive_invisible_frames": 1,
+    "require_first_visible_frame": true,
+    "include_invisible_frames": false
+  },
+  "time_convention": {
+    "frame_timestamp_s": "frame_id / fps",
+    "frame_id_range": "0..168",
+    "last_timestamp_s": "(num_frames - 1) / fps",
+    "nominal_video_duration_s": "num_frames / fps",
+    "note": "The last frame timestamp is one frame interval before the nominal video duration."
+  },
+  "trajectory": {
+    "mode": "manual",
+    "x0": -1.14116463,
+    "y0": 2.991882027,
+    "z0": 0.760623439,
+    "vx": 6.455956543,
+    "vy": 0.30575253,
+    "vz_final": 1.356309397,
+    "gravity": 9.81
+  },
+  "ball": {
+    "radius_m": 0.02
+  },
+  "camera_convention": {
+    "world_axes": {
+      "X_world": "left/right",
+      "Y_world": "depth in front of camera",
+      "Z_world": "height"
+    },
+    "camera_frame": "OpenCV",
+    "world_to_camera_cv": {
+      "ball_x_cam_m": "X_world - X_camera",
+      "ball_y_cam_m": "-(Z_world - Z_camera)",
+      "ball_z_cam_m": "Y_world - Y_camera"
+    },
+    "projection": {
+      "u_px": "fx * ball_x_cam_m / ball_z_cam_m + cx",
+      "v_px": "fy * ball_y_cam_m / ball_z_cam_m + cy",
+      "radius_px": "fx * ball_radius_m / ball_z_cam_m"
+    },
+    "depth_column": "ball_z_cam_m"
+  },
+  "visibility": {
+    "visible_frames": 169,
+    "invisible_frames": 0
+  },
+  "warnings": []
+}

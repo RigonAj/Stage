@@ -1,0 +1,4 @@
+$ python3 /home/rigon/Documents/EventGen/ball_event_dataset_v0/tools/make_video_from_frames.py --config /home/rigon/Documents/EventGen/ball_event_dataset_v0/benchmark/tmp/config_sequence_000148.yaml --sequence /home/rigon/Documents/EventGen/ball_event_dataset_v0/benchmark/datasets/benchmark_fast_throw_0500/sequences/sequence_000148
+[make_video] trying MP4 /home/rigon/Documents/EventGen/ball_event_dataset_v0/benchmark/datasets/benchmark_fast_throw_0500/sequences/sequence_000148/video/sequence_000148.mp4 with fourcc=mp4v at 500 FPS
+[make_video] MP4 inspect: {'opened': True, 'frame_count': 169, 'width': 640, 'height': 480, 'fps': 500.0}
+[make_video] wrote verified MP4: /home/rigon/Documents/EventGen/ball_event_dataset_v0/benchmark/datasets/benchmark_fast_throw_0500/sequences/sequence_000148/video/sequence_000148.mp4

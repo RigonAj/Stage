@@ -123,6 +123,7 @@ private:
     bool LookupGroundTruthWorld(float timeSeconds, Vector3 &worldPoint) const;
     void Draw2DScene();
     void DrawTraceScene();
+    void UpdateTraceAnalysis();
     void Draw3DScene();
     void DrawHudTexts();
     void UpdateTrajectoryQuality();
@@ -247,16 +248,16 @@ public:
         color_switch = false;
         record = false;
         lector = 0.0f;
-        timeslice = 500.0f;
-        trace_width_step_px = 8.23f;
-        trace_line_window_px = 21.92f;
-        trace_memory_ms = 530.51f;
+        timeslice = 484.32f;
+        trace_width_step_px = 8.0f;
+        trace_line_window_px = 65.69f;
+        trace_memory_ms = 40.0f;
         trace_histogram_bins = 16.0f;
-        trace_density_threshold = 9.23f;
-        trace_line_bin_width_px = 6.69f;
+        trace_density_threshold = 2.0f;
+        trace_line_bin_width_px = 4.0f;
         trace_line_order = 2.0f;
-        trace_pca_period_ms = 7.79f;
-        trace_follow_window_px = 120.0f;
+        trace_pca_period_ms = 36.10f;
+        trace_follow_window_px = 98.17f;
         trace_use_raw_input = false;
         trace_radius_gate_enabled = false;
         trace_edge_mode = 1;
@@ -264,6 +265,7 @@ public:
         temporal_slices = 5.0f;
         events_per_slice = 100.0f;
         slice_mode = 0;
+        circle_fitting_enabled = false;
         reader_source_sequences = true;
         reader_mode = true;
         playback_playing = false;
@@ -315,7 +317,7 @@ public:
             sliderAt(2, 0, "Max Events", maxevent, 1.0f, 10000.0f);
             sliderAt(3, 0, "Window ms", timeslice, 1.0f, 500.0f);
             sliderAt(0, 1, "Trace ms", trace_memory_ms, 40.0f, 3000.0f);
-            sliderAt(1, 1, "Bin width px", trace_line_bin_width_px, 4.0f, 48.0f);
+            sliderAt(1, 1, "Bin width px", trace_line_bin_width_px, 1.0f, 48.0f);
             sliderAt(2, 1, "Local window", trace_line_window_px, 8.0f, 240.0f);
             sliderAt(3, 1, "Width step px", trace_width_step_px, 8.0f, 90.0f);
             sliderAt(0, 2, "Hist bins", trace_histogram_bins, 16.0f, 512.0f);
@@ -392,6 +394,10 @@ public:
 
         DrawText("Color mode", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
         GuiToggle({px, py, 90.0f, h}, color_switch ? "ON" : "OFF", &color_switch);
+        px += 120.0f;
+
+        DrawText("Circle fit", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
+        GuiToggle({px, py, 90.0f, h}, circle_fitting_enabled ? "ON" : "OFF", &circle_fitting_enabled);
         px += 120.0f;
 
         DrawText("Record", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
@@ -621,7 +627,7 @@ public:
         return std::clamp(trace_line_window_px, 8.0f, 240.0f);
     }
     float TraceLineBinWidthPx() const {
-        return std::clamp(trace_line_bin_width_px, 4.0f, 48.0f);
+        return std::clamp(trace_line_bin_width_px, 1.0f, 48.0f);
     }
     int TraceLineOrder() const {
         return std::clamp(static_cast<int>(std::round(trace_line_order)), 1, 2);
@@ -645,6 +651,7 @@ public:
     }
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
+    bool CircleFittingEnabled() const { return circle_fitting_enabled; }
     int SliceMode() const { return std::clamp(slice_mode, 0, 2); }
     bool Show2D() const { return view_mode == 0; }
     bool Show3D() const { return view_mode == 1; }
@@ -688,16 +695,16 @@ private:
     float alpha = 50.0f;
     float sym_coef = 29.0f;
     float sym_coef2 = 157.0f;
-    float timeslice = 0.0f;
-    float trace_width_step_px = 28.0f;
-    float trace_line_window_px = 100.0f;
-    float trace_memory_ms = 700.0f;
-    float trace_histogram_bins = 48.0f;
-    float trace_density_threshold = 16.0f;
-    float trace_line_bin_width_px = 12.0f;
+    float timeslice = 484.32f;
+    float trace_width_step_px = 8.0f;
+    float trace_line_window_px = 65.69f;
+    float trace_memory_ms = 40.0f;
+    float trace_histogram_bins = 16.0f;
+    float trace_density_threshold = 2.0f;
+    float trace_line_bin_width_px = 4.0f;
     float trace_line_order = 2.0f;
-    float trace_pca_period_ms = 8.0f;
-    float trace_follow_window_px = 120.0f;
+    float trace_pca_period_ms = 36.10f;
+    float trace_follow_window_px = 98.17f;
     bool trace_use_raw_input = false;
     bool trace_radius_gate_enabled = true;
     int trace_edge_mode = 1;
@@ -706,6 +713,7 @@ private:
     float events_per_slice = 100.0f;
 
     bool color_switch = false;
+    bool circle_fitting_enabled = false;
     bool record = false;
     bool reader_source_sequences = true;
     bool show3d = false;

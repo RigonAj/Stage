@@ -1,0 +1,80 @@
+{
+  "camera_name": "camera_fixed_plus_y_opencv_cv",
+  "convention": {
+    "world_axes": {
+      "X_world": "left/right",
+      "Y_world": "depth in front of the camera",
+      "Z_world": "height"
+    },
+    "camera_axes_opencv": {
+      "x_cam": "right in image / world X offset",
+      "y_cam": "down in image / negative world Z offset",
+      "z_cam": "depth / world Y offset"
+    },
+    "world_to_camera_cv_equations": {
+      "ball_x_cam_m": "X_world - X_camera",
+      "ball_y_cam_m": "-(Z_world - Z_camera)",
+      "ball_z_cam_m": "Y_world - Y_camera"
+    },
+    "projection": {
+      "u_px": "fx * ball_x_cam_m / ball_z_cam_m + cx",
+      "v_px": "fy * ball_y_cam_m / ball_z_cam_m + cy",
+      "radius_px": "fx * ball_radius_m / ball_z_cam_m"
+    }
+  },
+  "position_world_m": [
+    0.0,
+    0.0,
+    0.8
+  ],
+  "look_direction_world": "+Y",
+  "up_direction_world": "+Z",
+  "R_world_to_camera_cv": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0
+    ]
+  ],
+  "t_world_to_camera_cv_m": [
+    0.0,
+    0.8,
+    0.0
+  ],
+  "T_world_to_camera_cv": [
+    [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      -1.0,
+      0.8
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ]
+}

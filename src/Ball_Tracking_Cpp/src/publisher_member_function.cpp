@@ -79,6 +79,7 @@ private:
     std::string active_reader_path_;
     bool active_reader_calibration_override_ = false;
     bool active_input_state_initialized_ = false;
+    bool active_circle_fitting_enabled_ = false;
 };
 int main(int argc, char *argv[]) {
     rclcpp::init(argc, argv);
@@ -200,9 +201,16 @@ void Pub::timer_callback() {
     const auto t_cluster_end = clock::now();
     const auto t_post_start = clock::now();
 
+    if (active_circle_fitting_enabled_ != ui.CircleFittingEnabled()) {
+        active_circle_fitting_enabled_ = ui.CircleFittingEnabled();
+        resetTracks();
+    }
+
     const double readerTimeSeconds = ui.PlaybackTimeSeconds();
     const double readerWindowSeconds = ui.PlaybackWindowSeconds();
     const bool canReusePausedReaderTracking =
+        ui.CircleFittingEnabled()
+        &&
         ui.UseReader()
         && !ui.PlaybackPlaying()
         && paused_reader_tracking_cache_.has_value()
@@ -214,7 +222,7 @@ void Pub::timer_callback() {
     if (canReusePausedReaderTracking) {
         tracking = *paused_reader_tracking_cache_;
     }
-    else {
+    else if (ui.CircleFittingEnabled()) {
         tracking = tracker.Update(
             trackerClusters,
             camera.calibration,
@@ -230,6 +238,11 @@ void Pub::timer_callback() {
             paused_reader_tracking_time_seconds_ = -1.0;
             paused_reader_tracking_window_seconds_ = -1.0;
         }
+    }
+    else {
+        paused_reader_tracking_cache_.reset();
+        paused_reader_tracking_time_seconds_ = -1.0;
+        paused_reader_tracking_window_seconds_ = -1.0;
     }
 
     if (tracking.hasCircle) {
@@ -263,6 +276,9 @@ void Pub::timer_callback() {
     if (tracking.pose.has_value()) {
         publishBallPose(*tracking.pose);
         draw2DOverlay(*tracking.pose);
+    }
+    else if (!ui.CircleFittingEnabled()) {
+        gui.AddHudText(8.0f, 42.0f, "Circle fitting: OFF", DARKGRAY, 22);
     }
     else {
         gui.AddHudText(8.0f, 42.0f, "Ball pose: no valid 3D estimate", MAROON, 22);

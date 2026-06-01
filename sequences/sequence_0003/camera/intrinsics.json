@@ -1,0 +1,10 @@
+{
+  "width": 640,
+  "height": 480,
+  "fx": 520.0,
+  "fy": 520.0,
+  "cx": 320.0,
+  "cy": 240.0,
+  "distortion_model": "none",
+  "distortion_coefficients": []
+}

@@ -1,0 +1,95 @@
+
+*** arguments:
+auto_timestamp_resolution:	False
+avi_frame_rate:	30
+batch_size:	8
+crop:	None
+cs_lambda_pixels:	None
+cs_tau_p_ms:	None
+cutoff_hz:	30.0
+ddd_output:	False
+disable_slomo:	False
+dvs1024:	False
+dvs128:	False
+dvs240:	False
+dvs346:	False
+dvs640:	False
+dvs_aedat2:	None
+dvs_aedat4:	None
+dvs_emulator_seed:	0
+dvs_exposure:	['duration', '0.002']
+dvs_h5:	events.h5
+dvs_params:	None
+dvs_text:	None
+dvs_vid:	dvs-video.avi
+dvs_vid_full_scale:	2
+hdr:	False
+input:	/home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/video/sequence_0003.mp4
+input_frame_rate:	500.0
+input_slowmotion_factor:	1.0
+label_signal_noise:	False
+leak_jitter_fraction:	0.1
+leak_rate_hz:	0.01
+neg_thres:	0.15
+no_preview:	True
+noise_rate_cov_decades:	0.1
+output_folder:	/home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/events_v2e
+output_height:	480
+output_in_place:	False
+output_width:	640
+overwrite:	True
+photoreceptor_noise:	False
+pos_thres:	0.15
+record_single_pixel_states:	None
+refractory_period:	0.0005
+save_dvs_model_state:	False
+scidvs:	False
+shot_noise_rate_hz:	0.01
+show_dvs_model_state:	None
+sigma_thres:	0.03
+skip_video_output:	False
+slomo_model:	/home/rigon/Documents/EventGen/ball_event_dataset_v0/third_party/v2e/input/SuperSloMo39.ckpt
+slomo_stats_plot:	False
+start_time:	None
+stop_time:	None
+synthetic_input:	None
+timestamp_resolution:	0.0002
+unique_output_folder:	True
+vid_orig:	video_orig.avi
+vid_slomo:	video_slomo.avi
+
+*** command line:
+ v2e.py -i /home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/video/sequence_0003.mp4 --overwrite --output_folder /home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/events_v2e --output_width 640 --output_height 480 --input_frame_rate 500 --timestamp_resolution 0.0002 --auto_timestamp_resolution=False --dvs_exposure duration 0.002 --pos_thres 0.15 --neg_thres 0.15 --sigma_thres 0.03 --cutoff_hz 30 --leak_rate_hz 0.01 --shot_noise_rate_hz 0.01 --dvs_h5 events.h5 --dvs_vid dvs-video.avi --no_preview2026-06-01 18:39:35,377 - __main__ - [1;34mINFO[1;0m - opening video input file /home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/video/sequence_0003.mp4
+2026-06-01 18:39:35,378 - __main__ - [1;34mINFO[1;0m - Input video frame rate 500.0Hz is overridden by command line argument --input_frame_rate=500.0
+2026-06-01 18:39:35,378 - __main__ - [1;34mINFO[1;0m - --auto_timestamp_resolution is False, srcFps=500.0Hz input_slowmotion_factor=1.0, real src FPS=500.0Hz, srcFrameIntervalS=2ms, timestamp_resolution=200us, so SuperSloMo will use slowdown_factor=10 and have slomoTimestampResolutionS=200us
+2026-06-01 18:39:35,378 - __main__ - [1;34mINFO[1;0m - Lowpass cutoff is f_3dB=30Hz with tau=5.31ms and with sample rate fs=5kHz (sample interval dt=200us),
+It has IIR mixing factor eps=0.038 which is OK because it is less than recommended maxeps= 0.3
+2026-06-01 18:39:35,379 - __main__ - [1;34mINFO[1;0m - 
+ events will have timestamp resolution 200us,
+2026-06-01 18:39:35,379 - __main__ - [1;34mINFO[1;0m - Source video /home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/video/sequence_0003.mp4 has total 234 frames with total duration 466ms. 
+Source video is 500fps with slowmotion_factor 1 (frame interval 2ms),
+Will convert 234 frames 0 to 233
+(From 0.0s to 0.466s, duration 0.466s)
+2026-06-01 18:39:35,379 - __main__ - [1;34mINFO[1;0m - v2e DVS video will have constant-duration frames 
+at 500fps (accumulation time 2ms), 
+DVS video will have 233.0 frames with duration 466ms and playback duration 7.77s
+
+2026-06-01 18:39:35,386 - __main__ - [1;34mINFO[1;0m - processing frames 0 to 233 from video input
+2026-06-01 18:39:35,386 - __main__ - [1;34mINFO[1;0m - Input video /home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/video/sequence_0003.mp4 has W=640 x H=480 frames each with 3 channels
+2026-06-01 18:39:35,386 - __main__ - [1;34mINFO[1;0m - *** Stage 1/3: Resizing 234 input frames to output size (with possible RGB to luma conversion)
+2026-06-01 18:39:35,402 - __main__ - [1;34mINFO[1;0m - 
+Converting input frames from RGB color to luma
+2026-06-01 18:39:35,650 - __main__ - [1;34mINFO[1;0m - *** Stage 2/3: SloMo upsampling from /tmp/tmp_t23_kmw
+2026-06-01 18:43:07,469 - __main__ - [1;34mINFO[1;0m - SloMo average upsampling factor=10.00; average DVS timestamp resolution=200us
+2026-06-01 18:43:07,469 - __main__ - [1;34mINFO[1;0m - Using auto_timestamp_resolution. checking if cutoff hz is ok given sample rate 5000.0
+2026-06-01 18:43:07,469 - __main__ - [1;34mINFO[1;0m - Lowpass cutoff is f_3dB=30Hz with tau=5.31ms and with sample rate fs=5kHz (sample interval dt=200us),
+It has IIR mixing factor eps=0.038 which is OK because it is less than recommended maxeps= 0.3
+2026-06-01 18:43:07,471 - __main__ - [1;34mINFO[1;0m - *** Stage 3/3: emulating DVS events from 2330 frames
+2026-06-01 18:44:31,629 - __main__ - [1;34mINFO[1;0m - generated total 28.02k events (11.45k on, 16.56k off)
+2026-06-01 18:44:31,629 - __main__ - [1;34mINFO[1;0m - Avg event rate for N=307200 px and total time =0.466 s
+	Total: 60.12kHz (24.58kHz on, 35.54kHz off)
+	Per pixel:  195.70mHz (80.01mHz on, 115.69mHz off)
+2026-06-01 18:44:31,633 - __main__ - [1;34mINFO[1;0m - generating desktop notification
+2026-06-01 18:44:31,646 - __main__ - [1;34mINFO[1;0m - showing /home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/events_v2e in desktop
+2026-06-01 18:44:31,647 - __main__ - [1;34mINFO[1;0m - done processing 468 frames in 296.25s (1.58fr/s)
+ **************** see output folder /home/rigon/Documents/EventGen/ball_event_dataset_v0/dataset/sequence_0003/events_v2e

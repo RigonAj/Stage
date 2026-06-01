@@ -618,6 +618,89 @@ std::vector<TracePoint> BuildTracePointsFromFloatSource(
     return points;
 }
 
+struct TracePointSourceResult {
+    std::vector<TracePoint> points;
+    std::string label;
+    Color color = MAROON;
+};
+
+TracePointSourceResult BuildTracePointSource(
+    const std::vector<cv::Point2f> &accumulatedPoints,
+    const std::vector<int64_t> &accumulatedTimestamps,
+    const std::vector<bool> &accumulatedPolarities,
+    const std::vector<cv::Point2f> *rawPoints,
+    const std::vector<int64_t> *rawTimestamps,
+    const std::vector<bool> *rawPolarities,
+    const std::vector<cv::Point2f> *floatPoints,
+    const std::vector<int64_t> *floatTimestamps,
+    const std::vector<bool> *floatPolarities,
+    const dv::EventStore &events,
+    bool useRawInput,
+    bool useRadiusGate,
+    bool motionWindowValid,
+    int polarityMode) {
+
+    TracePointSourceResult result;
+    result.label = useRawInput
+        ? "raw events in moving ball window"
+        : "undistorted events in moving ball window";
+    result.label += useRadiusGate ? " + radius gate" : " without radius gate";
+    result.label += std::string(" | pol=") + TracePolarityModeName(polarityMode);
+    result.color = motionWindowValid ? DARKGREEN : MAROON;
+
+    if (!accumulatedPoints.empty()
+        && accumulatedPoints.size() == accumulatedTimestamps.size()
+        && accumulatedPoints.size() == accumulatedPolarities.size()) {
+        result.points = BuildTracePointsFromFloatSource(
+            accumulatedPoints,
+            accumulatedTimestamps,
+            &accumulatedPolarities,
+            polarityMode);
+    }
+
+    if (result.points.empty()
+        && !useRadiusGate
+        && useRawInput
+        && rawPoints != nullptr
+        && rawTimestamps != nullptr
+        && !rawPoints->empty()
+        && rawPoints->size() == rawTimestamps->size()) {
+        result.points = BuildTracePointsFromFloatSource(
+            *rawPoints,
+            *rawTimestamps,
+            rawPolarities,
+            polarityMode);
+        result.label = std::string("raw current window fallback | pol=")
+            + TracePolarityModeName(polarityMode);
+        result.color = MAROON;
+    }
+
+    if (result.points.empty()
+        && !useRadiusGate
+        && floatPoints != nullptr
+        && floatTimestamps != nullptr
+        && !floatPoints->empty()
+        && floatPoints->size() == floatTimestamps->size()) {
+        result.points = BuildTracePointsFromFloatSource(
+            *floatPoints,
+            *floatTimestamps,
+            floatPolarities,
+            polarityMode);
+        result.label = std::string("undistorted current window fallback | pol=")
+            + TracePolarityModeName(polarityMode);
+        result.color = MAROON;
+    }
+
+    if (result.points.empty() && !useRadiusGate) {
+        result.points = BuildTracePointsFromEvents(events, polarityMode);
+        result.label = std::string("rounded current window fallback | pol=")
+            + TracePolarityModeName(polarityMode);
+        result.color = MAROON;
+    }
+
+    return result;
+}
+
 float Quantile(std::vector<float> values, float q) {
     if (values.empty()) {
         return 0.0f;
@@ -2431,7 +2514,7 @@ LocalTraceSection EstimateLocalFlowSection(
     const float eventLow = denseEdges.low;
     const float eventHigh = denseEdges.high;
     const float widthPx = eventHigh - eventLow;
-    if (!std::isfinite(widthPx) || widthPx < 2.0f) {
+    if (!std::isfinite(widthPx) || widthPx < 1.0f) {
         return section;
     }
 
@@ -2653,7 +2736,7 @@ std::vector<TraceWidthEstimate> EstimateTraceWidths(const TraceRibbonFit &fit, i
             }
         }
 
-        if (!std::isfinite(widthPx) || widthPx < 2.0f) {
+        if (!std::isfinite(widthPx) || widthPx < 1.0f) {
             continue;
         }
 
@@ -2947,7 +3030,7 @@ TraceRibbonFit FitTraceRibbon(
     }
 
     fit.widthPx = Quantile(localWidths, 0.50f);
-    if (fit.widthPx < 4.0f) {
+    if (fit.widthPx < 1.0f) {
         return fit;
     }
 
@@ -3025,6 +3108,115 @@ TraceRibbonFit FitTraceRibbon(
 
     fit.valid = true;
     return fit;
+}
+
+int64_t TraceTimeOriginUs(const std::vector<TracePoint> &tracePoints) {
+    int64_t originUs = 0;
+    if (!tracePoints.empty()) {
+        originUs = tracePoints.front().timestampUs;
+        for (const TracePoint &tracePoint : tracePoints) {
+            originUs = std::min(originUs, tracePoint.timestampUs);
+        }
+    }
+    return originUs;
+}
+
+struct Trace3DAnalysis {
+    bool valid = false;
+    Vector3 currentWorld{0.0f, 0.0f, 0.0f};
+    std::vector<Vector3> worldPoints;
+    std::vector<float> times;
+    std::vector<Vector3> groundTruthPoints;
+    std::vector<Vector3> groundTruthEstimatePoints;
+    std::vector<TraceWidthEstimate> widthEstimates;
+    std::vector<float> widthSamples;
+    int widthSampleCount = 0;
+    int rejectedWorldOutliers = 0;
+    std::string poseText = "Trace pose: unavailable";
+};
+
+template <typename GroundTruthLookup>
+Trace3DAnalysis AnalyzeTrace3D(
+    const TraceRibbonFit &fit,
+    const CalibrationData &calibration,
+    float ballRadiusMm,
+    float widthStepPx,
+    int64_t traceTimeOriginUs,
+    GroundTruthLookup lookupGroundTruth) {
+
+    Trace3DAnalysis analysis;
+    if (!fit.valid) {
+        return analysis;
+    }
+
+    analysis.widthSampleCount = std::clamp(
+        static_cast<int>(std::ceil(fit.lengthPx / std::max(widthStepPx, 1.0f))),
+        3,
+        80
+    );
+    analysis.widthEstimates = EstimateTraceWidths(fit, analysis.widthSampleCount);
+    analysis.widthSamples.reserve(analysis.widthEstimates.size());
+
+    for (const TraceWidthEstimate &estimate : analysis.widthEstimates) {
+        if (!estimate.valid || estimate.widthPx < 1.0f) {
+            continue;
+        }
+
+        analysis.widthSamples.push_back(estimate.widthPx);
+
+        if (!calibration.ready) {
+            continue;
+        }
+
+        const Vector2 widthVector{
+            estimate.upper.x - estimate.lower.x,
+            estimate.upper.y - estimate.lower.y
+        };
+        const Vector3 worldPoint = TraceImagePointToWorldMeters(
+            estimate.middle,
+            estimate.widthPx,
+            widthVector,
+            calibration,
+            ballRadiusMm
+        );
+
+        if (std::isfinite(worldPoint.x)
+            && std::isfinite(worldPoint.y)
+            && std::isfinite(worldPoint.z)
+            && (std::fabs(worldPoint.x) + std::fabs(worldPoint.y) + std::fabs(worldPoint.z)) > 1.0e-6f) {
+            analysis.worldPoints.push_back(worldPoint);
+            analysis.times.push_back(static_cast<float>(estimate.timeSeconds));
+        }
+    }
+
+    analysis.rejectedWorldOutliers = FilterTraceWorldOutliers(analysis.worldPoints, analysis.times);
+
+    if (analysis.worldPoints.size() == analysis.times.size()) {
+        for (std::size_t i = 0; i < analysis.worldPoints.size(); ++i) {
+            const float absoluteTimeSeconds =
+                static_cast<float>(traceTimeOriginUs) * 1.0e-6f + analysis.times[i];
+            Vector3 groundTruthPoint{};
+            if (lookupGroundTruth(absoluteTimeSeconds, groundTruthPoint)) {
+                analysis.groundTruthPoints.push_back(groundTruthPoint);
+                analysis.groundTruthEstimatePoints.push_back(analysis.worldPoints[i]);
+            }
+        }
+    }
+
+    if (analysis.worldPoints.size() >= 3 && !analysis.widthSamples.empty()) {
+        analysis.valid = true;
+        analysis.currentWorld = analysis.worldPoints[analysis.worldPoints.size() / 2];
+        const float medianWidth = Quantile(analysis.widthSamples, 0.50f);
+        analysis.poseText = std::format(
+            "Trace 3D position (m): X={:.3f}  Y={:.3f}  Z={:.3f} | W={:.1f}px",
+            analysis.currentWorld.x,
+            analysis.currentWorld.y,
+            analysis.currentWorld.z,
+            medianWidth
+        );
+    }
+
+    return analysis;
 }
 }
 
@@ -3251,6 +3443,10 @@ void Gui::Draw() {
     }
     UpdateTexture(cpuTexture, pixelBuffer.data());
 
+    if (!ui.ShowTraceView()) {
+        UpdateTraceAnalysis();
+    }
+
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
@@ -3280,6 +3476,61 @@ void Gui::Draw2DScene() {
     DrawRectangleLinesEx({offset.x, offset.y, 1280 * scale, 480 * scale}, 2, RED);
     DrawOverlays();
     DrawImageTrajectory2D();
+}
+
+void Gui::UpdateTraceAnalysis() {
+    const int polarityMode = ui.TracePolarityMode();
+    TracePointSourceResult source = BuildTracePointSource(
+        traceAccumulatedPoints,
+        traceAccumulatedTimestamps,
+        traceAccumulatedPolarities,
+        traceRawPoints,
+        traceRawTimestamps,
+        traceRawPolarities,
+        traceFloatPoints,
+        traceFloatTimestamps,
+        traceFloatPolarities,
+        View,
+        ui.TraceUseRawInput(),
+        ui.TraceUseRadiusGate(),
+        traceMotionWindowValid,
+        polarityMode
+    );
+
+    const TraceRibbonFit fit = FitTraceRibbon(
+        source.points,
+        ui.TraceLineBinWidthPx(),
+        ui.TraceLineWindowPx(),
+        ui.TraceLineOrder(),
+        ui.TracePcaPeriodMs(),
+        ui.TraceHistogramBins(),
+        ui.TraceDensityThresholdRatio(),
+        ui.TraceEdgeMode()
+    );
+
+    if (!fit.valid) {
+        ClearTrace3D();
+        return;
+    }
+
+    const Trace3DAnalysis analysis = AnalyzeTrace3D(
+        fit,
+        traceCalibration,
+        traceBallRadiusMm,
+        ui.TraceWidthStepPx(),
+        TraceTimeOriginUs(source.points),
+        [this](float timeSeconds, Vector3 &worldPoint) {
+            return this->LookupGroundTruthWorld(timeSeconds, worldPoint);
+        }
+    );
+
+    traceWorld3D = analysis.worldPoints;
+    traceTimes3D = analysis.times;
+    traceGroundTruthWorld3D = analysis.groundTruthPoints;
+    traceGroundTruthEstimateWorld3D = analysis.groundTruthEstimatePoints;
+    trace3DValid = analysis.valid;
+    traceCurrentWorld3D = analysis.currentWorld;
+    tracePoseText3D = analysis.poseText;
 }
 
 void Gui::DrawTraceScene() {
@@ -3314,63 +3565,25 @@ void Gui::DrawTraceScene() {
     const float densityThresholdRatio = ui.TraceDensityThresholdRatio();
     const int edgeMode = ui.TraceEdgeMode();
     const int polarityMode = ui.TracePolarityMode();
-    std::string traceInputLabel = ui.TraceUseRawInput()
-        ? "raw events in moving ball window"
-        : "undistorted events in moving ball window";
-    traceInputLabel += ui.TraceUseRadiusGate() ? " + radius gate" : " without radius gate";
-    traceInputLabel += std::string(" | pol=") + TracePolarityModeName(polarityMode);
-    Color traceInputColor = traceMotionWindowValid ? DARKGREEN : MAROON;
-    std::vector<TracePoint> tracePoints;
-
-    if (!traceAccumulatedPoints.empty()
-        && traceAccumulatedPoints.size() == traceAccumulatedTimestamps.size()
-        && traceAccumulatedPoints.size() == traceAccumulatedPolarities.size()) {
-        tracePoints = BuildTracePointsFromFloatSource(
-            traceAccumulatedPoints,
-            traceAccumulatedTimestamps,
-            &traceAccumulatedPolarities,
-            polarityMode);
-    }
-
-    if (tracePoints.empty()
-        && !ui.TraceUseRadiusGate()
-        && ui.TraceUseRawInput()
-        && traceRawPoints != nullptr
-        && traceRawTimestamps != nullptr
-        && !traceRawPoints->empty()
-        && traceRawPoints->size() == traceRawTimestamps->size()) {
-        tracePoints = BuildTracePointsFromFloatSource(
-            *traceRawPoints,
-            *traceRawTimestamps,
-            traceRawPolarities,
-            polarityMode);
-        traceInputLabel = std::string("raw current window fallback | pol=")
-            + TracePolarityModeName(polarityMode);
-        traceInputColor = MAROON;
-    }
-
-    if (tracePoints.empty()
-        && !ui.TraceUseRadiusGate()
-        && traceFloatPoints != nullptr
-        && traceFloatTimestamps != nullptr
-        && !traceFloatPoints->empty()
-        && traceFloatPoints->size() == traceFloatTimestamps->size()) {
-        tracePoints = BuildTracePointsFromFloatSource(
-            *traceFloatPoints,
-            *traceFloatTimestamps,
-            traceFloatPolarities,
-            polarityMode);
-        traceInputLabel = std::string("undistorted current window fallback | pol=")
-            + TracePolarityModeName(polarityMode);
-        traceInputColor = MAROON;
-    }
-
-    if (tracePoints.empty() && !ui.TraceUseRadiusGate()) {
-        tracePoints = BuildTracePointsFromEvents(View, polarityMode);
-        traceInputLabel = std::string("rounded current window fallback | pol=")
-            + TracePolarityModeName(polarityMode);
-        traceInputColor = MAROON;
-    }
+    TracePointSourceResult traceSource = BuildTracePointSource(
+        traceAccumulatedPoints,
+        traceAccumulatedTimestamps,
+        traceAccumulatedPolarities,
+        traceRawPoints,
+        traceRawTimestamps,
+        traceRawPolarities,
+        traceFloatPoints,
+        traceFloatTimestamps,
+        traceFloatPolarities,
+        View,
+        ui.TraceUseRawInput(),
+        ui.TraceUseRadiusGate(),
+        traceMotionWindowValid,
+        polarityMode
+    );
+    std::string traceInputLabel = std::move(traceSource.label);
+    Color traceInputColor = traceSource.color;
+    std::vector<TracePoint> tracePoints = std::move(traceSource.points);
     DrawText(
         TextFormat("events: %zu accumulated | %ld current", tracePoints.size(), nb_event),
         static_cast<int>(dest.x + dest.width + 24.0f),
@@ -3596,37 +3809,37 @@ void Gui::DrawTraceScene() {
         static_cast<int>(fit.sparseUpperFitPoints.size()
             + fit.sparseMiddleFitPoints.size()
             + fit.sparseLowerFitPoints.size());
-    int64_t traceTimeOriginUs = 0;
-    if (!tracePoints.empty()) {
-        traceTimeOriginUs = tracePoints.front().timestampUs;
-        for (const TracePoint &tracePoint : tracePoints) {
-            traceTimeOriginUs = std::min(traceTimeOriginUs, tracePoint.timestampUs);
-        }
-    }
 
     const Vector2 middleStart = project(fit.middleCurve.front());
     const Vector2 middleEnd = project(fit.middleCurve.back());
     DrawCircleV(middleStart, 4.0f, YELLOW);
     DrawCircleV(middleEnd, 4.0f, YELLOW);
 
-    traceWorld3D.clear();
-    traceTimes3D.clear();
-    traceGroundTruthWorld3D.clear();
-    traceGroundTruthEstimateWorld3D.clear();
-    trace3DValid = false;
-    tracePoseText3D = "Trace pose: unavailable";
-
-    const int widthSampleCount = std::clamp(
-        static_cast<int>(std::ceil(fit.lengthPx / ui.TraceWidthStepPx())),
-        3,
-        80
+    const Trace3DAnalysis analysis = AnalyzeTrace3D(
+        fit,
+        traceCalibration,
+        traceBallRadiusMm,
+        ui.TraceWidthStepPx(),
+        TraceTimeOriginUs(tracePoints),
+        [this](float timeSeconds, Vector3 &worldPoint) {
+            return this->LookupGroundTruthWorld(timeSeconds, worldPoint);
+        }
     );
-    const std::vector<TraceWidthEstimate> widthEstimates = EstimateTraceWidths(fit, widthSampleCount);
-    std::vector<float> widthSamples;
-    widthSamples.reserve(widthEstimates.size());
+    traceWorld3D = analysis.worldPoints;
+    traceTimes3D = analysis.times;
+    traceGroundTruthWorld3D = analysis.groundTruthPoints;
+    traceGroundTruthEstimateWorld3D = analysis.groundTruthEstimatePoints;
+    trace3DValid = analysis.valid;
+    traceCurrentWorld3D = analysis.currentWorld;
+    tracePoseText3D = analysis.poseText;
+
+    const std::vector<TraceWidthEstimate> &widthEstimates = analysis.widthEstimates;
+    const std::vector<float> &widthSamples = analysis.widthSamples;
+    const int widthSampleCount = analysis.widthSampleCount;
+    const int traceRejectedWorldOutliers = analysis.rejectedWorldOutliers;
 
     for (const TraceWidthEstimate &estimate : widthEstimates) {
-        if (!estimate.valid || estimate.widthPx <= 1.0f) {
+        if (!estimate.valid || estimate.widthPx < 1.0f) {
             continue;
         }
 
@@ -3643,58 +3856,6 @@ void Gui::DrawTraceScene() {
             estimate.middle.y + estimate.tangent.y * directionLength * 0.5f
         };
         DrawLineEx(project(directionStart), project(directionEnd), 1.5f, Fade(SKYBLUE, 0.85f));
-        widthSamples.push_back(estimate.widthPx);
-
-        if (!traceCalibration.ready) {
-            continue;
-        }
-
-        const Vector2 widthVector{
-            estimate.upper.x - estimate.lower.x,
-            estimate.upper.y - estimate.lower.y
-        };
-        const Vector3 worldPoint = TraceImagePointToWorldMeters(
-            estimate.middle,
-            estimate.widthPx,
-            widthVector,
-            traceCalibration,
-            traceBallRadiusMm
-        );
-
-        if (std::isfinite(worldPoint.x) && std::isfinite(worldPoint.y) && std::isfinite(worldPoint.z)
-            && (std::fabs(worldPoint.x) + std::fabs(worldPoint.y) + std::fabs(worldPoint.z)) > 1.0e-6f) {
-            const float localTimeSeconds = static_cast<float>(estimate.timeSeconds);
-            traceWorld3D.push_back(worldPoint);
-            traceTimes3D.push_back(localTimeSeconds);
-        }
-    }
-
-    const int traceRejectedWorldOutliers = FilterTraceWorldOutliers(traceWorld3D, traceTimes3D);
-    traceGroundTruthWorld3D.clear();
-    traceGroundTruthEstimateWorld3D.clear();
-    if (!groundTruthTimesSeconds.empty() && traceWorld3D.size() == traceTimes3D.size()) {
-        for (std::size_t i = 0; i < traceWorld3D.size(); ++i) {
-            const float absoluteTimeSeconds =
-                static_cast<float>(traceTimeOriginUs) * 1.0e-6f + traceTimes3D[i];
-            Vector3 groundTruthPoint{};
-            if (LookupGroundTruthWorld(absoluteTimeSeconds, groundTruthPoint)) {
-                traceGroundTruthWorld3D.push_back(groundTruthPoint);
-                traceGroundTruthEstimateWorld3D.push_back(traceWorld3D[i]);
-            }
-        }
-    }
-
-    if (traceWorld3D.size() >= 3 && !widthSamples.empty()) {
-        trace3DValid = true;
-        traceCurrentWorld3D = traceWorld3D[traceWorld3D.size() / 2];
-        const float medianWidth = Quantile(widthSamples, 0.50f);
-        tracePoseText3D = std::format(
-            "Trace 3D position (m): X={:.3f}  Y={:.3f}  Z={:.3f} | W={:.1f}px",
-            traceCurrentWorld3D.x,
-            traceCurrentWorld3D.y,
-            traceCurrentWorld3D.z,
-            medianWidth
-        );
     }
 
     DrawText(
@@ -3814,6 +3975,34 @@ void Gui::DrawTraceScene() {
 void Gui::Draw3DScene() {
     static bool wasControlling = false;
     const bool controlCamera = IsMouseButtonDown(MOUSE_RIGHT_BUTTON);
+    bool traceFitValid = false;
+    coef traceXFit{};
+    coef traceYFit{};
+    coef2 traceZFit{};
+    float traceFitTMin = 0.0f;
+    float traceFitTMax = 0.0f;
+
+    if (trace3DValid && traceTimes3D.size() == traceWorld3D.size() && traceWorld3D.size() >= 3) {
+        LinearRegression traceXReg;
+        LinearRegression traceYReg;
+        QuadraticRegression traceZReg;
+
+        traceFitTMin = traceTimes3D.front();
+        traceFitTMax = traceTimes3D.front();
+        for (std::size_t i = 0; i < traceWorld3D.size(); ++i) {
+            const float t = traceTimes3D[i];
+            traceFitTMin = std::min(traceFitTMin, t);
+            traceFitTMax = std::max(traceFitTMax, t);
+            traceXReg.add(t, traceWorld3D[i].x);
+            traceYReg.add(t, traceWorld3D[i].y);
+            traceZReg.add(t, traceWorld3D[i].z);
+        }
+
+        traceXFit = traceXReg.fit();
+        traceYFit = traceYReg.fit();
+        traceZFit = traceZReg.fit();
+        traceFitValid = traceFitTMax > traceFitTMin;
+    }
 
     if (controlCamera) {
         if (!wasControlling) {
@@ -3906,47 +4095,26 @@ void Gui::Draw3DScene() {
             }
         }
 
-        if (traceTimes3D.size() == traceWorld3D.size()) {
-            LinearRegression traceXReg;
-            LinearRegression traceYReg;
-            QuadraticRegression traceZReg;
+        if (traceFitValid) {
+            constexpr int kTraceSegments = 80;
+            for (int i = 0; i < kTraceSegments; ++i) {
+                const float alpha0 = static_cast<float>(i) / static_cast<float>(kTraceSegments);
+                const float alpha1 = static_cast<float>(i + 1) / static_cast<float>(kTraceSegments);
+                const float t0 = traceFitTMin + alpha0 * (traceFitTMax - traceFitTMin);
+                const float t1 = traceFitTMin + alpha1 * (traceFitTMax - traceFitTMin);
 
-            float tMin = traceTimes3D.front();
-            float tMax = traceTimes3D.front();
-            for (std::size_t i = 0; i < traceWorld3D.size(); ++i) {
-                const float t = traceTimes3D[i];
-                tMin = std::min(tMin, t);
-                tMax = std::max(tMax, t);
-                traceXReg.add(t, traceWorld3D[i].x);
-                traceYReg.add(t, traceWorld3D[i].y);
-                traceZReg.add(t, traceWorld3D[i].z);
-            }
+                const Vector3 world0{
+                    traceXFit.a * t0 + traceXFit.b,
+                    traceYFit.a * t0 + traceYFit.b,
+                    traceZFit.a * t0 * t0 + traceZFit.b * t0 + traceZFit.c
+                };
+                const Vector3 world1{
+                    traceXFit.a * t1 + traceXFit.b,
+                    traceYFit.a * t1 + traceYFit.b,
+                    traceZFit.a * t1 * t1 + traceZFit.b * t1 + traceZFit.c
+                };
 
-            const coef traceXFit = traceXReg.fit();
-            const coef traceYFit = traceYReg.fit();
-            const coef2 traceZFit = traceZReg.fit();
-
-            if (tMax > tMin) {
-                constexpr int kTraceSegments = 80;
-                for (int i = 0; i < kTraceSegments; ++i) {
-                    const float alpha0 = static_cast<float>(i) / static_cast<float>(kTraceSegments);
-                    const float alpha1 = static_cast<float>(i + 1) / static_cast<float>(kTraceSegments);
-                    const float t0 = tMin + alpha0 * (tMax - tMin);
-                    const float t1 = tMin + alpha1 * (tMax - tMin);
-
-                    const Vector3 world0{
-                        traceXFit.a * t0 + traceXFit.b,
-                        traceYFit.a * t0 + traceYFit.b,
-                        traceZFit.a * t0 * t0 + traceZFit.b * t0 + traceZFit.c
-                    };
-                    const Vector3 world1{
-                        traceXFit.a * t1 + traceXFit.b,
-                        traceYFit.a * t1 + traceYFit.b,
-                        traceZFit.a * t1 * t1 + traceZFit.b * t1 + traceZFit.c
-                    };
-
-                    DrawCylinderEx(WorldToScene(world0), WorldToScene(world1), 0.006f, 0.006f, 12, BLUE);
-                }
+                DrawCylinderEx(WorldToScene(world0), WorldToScene(world1), 0.006f, 0.006f, 12, BLUE);
             }
         }
         else {
@@ -3984,14 +4152,21 @@ void Gui::Draw3DScene() {
 
     if (trace3DValid) {
         DrawText(tracePoseText3D.c_str(), 8, 356, 18, BLUE);
-        DrawText("Trace 3D fit: blue x/y linear, z quadratic", 8, 378, 18, BLUE);
+        if (traceFitValid) {
+            DrawText(TextFormat("Trace x(t) = %.3f t + %.3f", traceXFit.a, traceXFit.b), 8, 378, 18, BLUE);
+            DrawText(TextFormat("Trace y(t) = %.3f t + %.3f", traceYFit.a, traceYFit.b), 8, 400, 18, BLUE);
+            DrawText(TextFormat("Trace z(t) = %.3f t^2 + %.3f t + %.3f", traceZFit.a, traceZFit.b, traceZFit.c), 8, 422, 18, BLUE);
+        }
+        else {
+            DrawText("Trace 3D fit: blue x/y linear, z quadratic", 8, 378, 18, BLUE);
+        }
         if (!traceGroundTruthWorld3D.empty()) {
             DrawText(
                 TextFormat("Trace GT red: %zu / %zu matched positions",
                     traceGroundTruthWorld3D.size(),
                     traceWorld3D.size()),
                 8,
-                400,
+                traceFitValid ? 444 : 400,
                 18,
                 RED
             );
