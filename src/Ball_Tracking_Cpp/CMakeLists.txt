@@ -75,8 +75,42 @@ target_compile_options(talker PRIVATE
   -march=native
 )
 
+add_executable(ball_tracker_h5_benchmark
+  src/ball_tracker_h5_benchmark.cpp
+  src/TraceBenchmark.cpp
+  src/EventWriter.cpp
+)
+
+ament_target_dependencies(ball_tracker_h5_benchmark
+  dv-processing
+  OpenCV
+)
+
+target_include_directories(ball_tracker_h5_benchmark PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/Ball_Tracking_Cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../.deps/prefix/include
+  ${OpenCV_INCLUDE_DIRS}
+  /usr/include/eigen3
+  ${HDF5_INCLUDE_DIRS}
+)
+
+target_link_libraries(ball_tracker_h5_benchmark
+  ${OpenCV_LIBS}
+  Eigen3::Eigen
+  ${HDF5_LIBRARIES}
+)
+
+target_compile_options(ball_tracker_h5_benchmark PRIVATE
+  -O3
+)
+
+set_target_properties(ball_tracker_h5_benchmark PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/..
+)
+
 install(TARGETS
   talker
+  ball_tracker_h5_benchmark
   DESTINATION lib/${PROJECT_NAME}
 )
 
