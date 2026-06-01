@@ -10,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -83,6 +84,12 @@ bool readMagicAttribute(H5::H5File &file, char *magic) {
     H5::Attribute attr = file.openAttribute("magic");
     attr.read(magicType, magic);
     return true;
+}
+
+bool isTimestampSorted(const std::vector<PackedEvent> &events) {
+    return std::is_sorted(events.begin(), events.end(), [](const PackedEvent &a, const PackedEvent &b) {
+        return a.timestamp < b.timestamp;
+    });
 }
 
 }
@@ -279,13 +286,60 @@ void EventReader::loadEventsFromH5File(const std::string &path) {
 
         H5::DataSet dataset = h5File.openDataSet("events");
         H5::DataSpace space = dataset.getSpace();
-        hsize_t dims[1] = {0};
-        space.getSimpleExtentDims(dims);
+        const int rank = space.getSimpleExtentNdims();
+        H5::DataType datasetType = dataset.getDataType();
 
-        all_events_.resize(static_cast<std::size_t>(dims[0]));
-        if (!all_events_.empty()) {
-            H5::CompType eventType = makePackedEventType();
-            dataset.read(all_events_.data(), eventType);
+        if (datasetType.getClass() == H5T_COMPOUND) {
+            hsize_t dims[1] = {0};
+            space.getSimpleExtentDims(dims);
+
+            all_events_.resize(static_cast<std::size_t>(dims[0]));
+            if (!all_events_.empty()) {
+                H5::CompType eventType = makePackedEventType();
+                dataset.read(all_events_.data(), eventType);
+            }
+        }
+        else if (datasetType.getClass() == H5T_INTEGER && rank == 2) {
+            hsize_t dims[2] = {0, 0};
+            space.getSimpleExtentDims(dims);
+            if (dims[1] < 4) {
+                throw std::runtime_error("integer events dataset must have at least 4 columns");
+            }
+
+            std::vector<uint32_t> rows(static_cast<std::size_t>(dims[0] * dims[1]));
+            if (!rows.empty()) {
+                dataset.read(rows.data(), H5::PredType::NATIVE_UINT32);
+            }
+
+            all_events_.reserve(static_cast<std::size_t>(dims[0]));
+            for (hsize_t row = 0; row < dims[0]; ++row) {
+                const std::size_t offset = static_cast<std::size_t>(row * dims[1]);
+                const uint32_t timestamp = rows[offset + 0];
+                const uint32_t x = rows[offset + 1];
+                const uint32_t y = rows[offset + 2];
+                const uint32_t polarity = rows[offset + 3];
+
+                if (x > static_cast<uint32_t>(std::numeric_limits<int16_t>::max())
+                    || y > static_cast<uint32_t>(std::numeric_limits<int16_t>::max())) {
+                    continue;
+                }
+
+                all_events_.push_back({
+                    static_cast<int16_t>(x),
+                    static_cast<int16_t>(y),
+                    static_cast<uint8_t>(polarity != 0U),
+                    static_cast<int64_t>(timestamp)
+                });
+            }
+        }
+        else {
+            throw std::runtime_error("unsupported H5 events dataset layout");
+        }
+
+        if (!all_events_.empty() && !isTimestampSorted(all_events_)) {
+            std::stable_sort(all_events_.begin(), all_events_.end(), [](const PackedEvent &a, const PackedEvent &b) {
+                return a.timestamp < b.timestamp;
+            });
         }
 
         count_ = static_cast<uint64_t>(all_events_.size());

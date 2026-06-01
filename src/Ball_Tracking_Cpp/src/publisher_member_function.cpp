@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -26,15 +27,18 @@ public:
           resolution(640, 480),
           box(0, 0, resolution.width, resolution.height),
           camera(),
+          default_camera_calibration_(camera.calibration),
           gui(camera.Filtered, ui),
 	          tracker() {
         gui.SetTracePoseCalibration(camera.calibration, BALL_RADIUS_MM);
         gui.SetTraceRawSource(
             &camera.RawFilteredPoints(),
-            &camera.RawFilteredTimestamps());
+            &camera.RawFilteredTimestamps(),
+            &camera.RawFilteredPolarities());
         gui.SetTraceFloatSource(
             &camera.UndistortedFilteredPoints(),
-            &camera.UndistortedFilteredTimestamps());
+            &camera.UndistortedFilteredTimestamps(),
+            &camera.UndistortedFilteredPolarities());
 
         timer_ = this->create_wall_timer(1ms, std::bind(&Pub::timer_callback, this));
         pose_publisher_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("ball_position_3d_mm", 10);
@@ -48,6 +52,7 @@ private:
     static constexpr float BALL_RADIUS_MM = 20.0f;
 
     void resetTracks();
+    void applyInputCalibration();
     void publishBallPose(const BallPose3D &pose) const;
     void draw2DOverlay(const BallPose3D &pose);
     void drawTrackerResult(const BallTrackerResult &result);
@@ -63,12 +68,17 @@ private:
     Box box;
 
     DvCamera camera;
+    CalibrationData default_camera_calibration_;
     Gui gui;
     BallTracker tracker;
 
     std::optional<BallTrackerResult> paused_reader_tracking_cache_;
     double paused_reader_tracking_time_seconds_ = -1.0;
     double paused_reader_tracking_window_seconds_ = -1.0;
+    std::string active_calibration_source_;
+    std::string active_reader_path_;
+    bool active_reader_calibration_override_ = false;
+    bool active_input_state_initialized_ = false;
 };
 int main(int argc, char *argv[]) {
     rclcpp::init(argc, argv);
@@ -76,6 +86,51 @@ int main(int argc, char *argv[]) {
     cv::destroyAllWindows();
     rclcpp::shutdown();
     return 0;
+}
+
+void Pub::applyInputCalibration() {
+    const CalibrationData *readerCalibration =
+        ui.UseReader() ? gui.ReaderCalibrationOverride() : nullptr;
+    const bool useReaderCalibration = readerCalibration != nullptr;
+    const CalibrationData &nextCalibration =
+        useReaderCalibration ? *readerCalibration : default_camera_calibration_;
+
+    const std::string nextSource = nextCalibration.sourcePath;
+    const std::string nextReaderPath = ui.UseReader() ? gui.ReaderEventPath() : "";
+    const bool changed =
+        !active_input_state_initialized_
+        || active_calibration_source_ != nextSource
+        || active_reader_path_ != nextReaderPath
+        || active_reader_calibration_override_ != useReaderCalibration;
+
+    camera.calibration = nextCalibration;
+    gui.SetTracePoseCalibration(camera.calibration, BALL_RADIUS_MM);
+
+    if (!changed) {
+        return;
+    }
+
+    if (active_input_state_initialized_) {
+        resetTracks();
+    }
+
+    active_calibration_source_ = nextSource;
+    active_reader_path_ = nextReaderPath;
+    active_reader_calibration_override_ = useReaderCalibration;
+    active_input_state_initialized_ = true;
+
+    if (useReaderCalibration) {
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Using sequence calibration for reader: %s",
+            nextSource.c_str());
+    }
+    else {
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Using camera calibration: %s",
+            nextSource.c_str());
+    }
 }
 
 void Pub::timer_callback() {
@@ -128,6 +183,7 @@ void Pub::timer_callback() {
         return;
     }
 
+    applyInputCalibration();
     camera.Undistort();
     gui.nb_event = camera.FilteredCount();
 
@@ -192,12 +248,14 @@ void Pub::timer_callback() {
     if (ui.TraceUseRawInput()) {
         gui.AppendTraceEvents(
             camera.RawFilteredPoints(),
-            camera.RawFilteredTimestamps());
+            camera.RawFilteredTimestamps(),
+            &camera.RawFilteredPolarities());
     }
     else {
         gui.AppendTraceEvents(
             camera.UndistortedFilteredPoints(),
-            camera.UndistortedFilteredTimestamps());
+            camera.UndistortedFilteredTimestamps(),
+            &camera.UndistortedFilteredPolarities());
     }
 
     drawTrackerResult(tracking);

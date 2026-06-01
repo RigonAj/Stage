@@ -70,9 +70,7 @@ target_link_libraries(talker
 )
 
 target_compile_options(talker PRIVATE
-  -Wall
-  -Wextra
-  -Wpedantic
+  -w
   -O3
   -march=native
 )

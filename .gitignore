@@ -54,6 +54,7 @@ tmp/
 
 # Event recordings and converted datasets
 recordings/
+sequences/
 *.bin
 *.h5
 *.hdf5

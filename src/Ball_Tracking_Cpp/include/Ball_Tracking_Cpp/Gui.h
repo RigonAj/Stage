@@ -89,10 +89,13 @@ private:
     float traceBallRadiusMm = 20.0f;
     const std::vector<cv::Point2f> *traceRawPoints = nullptr;
     const std::vector<int64_t> *traceRawTimestamps = nullptr;
+    const std::vector<bool> *traceRawPolarities = nullptr;
     const std::vector<cv::Point2f> *traceFloatPoints = nullptr;
     const std::vector<int64_t> *traceFloatTimestamps = nullptr;
+    const std::vector<bool> *traceFloatPolarities = nullptr;
     std::vector<cv::Point2f> traceAccumulatedPoints;
     std::vector<int64_t> traceAccumulatedTimestamps;
+    std::vector<bool> traceAccumulatedPolarities;
     int64_t traceLastAccumulatedTimestampUs = std::numeric_limits<int64_t>::min();
     bool traceMotionWindowValid = false;
     bool traceMotionParabolaValid = false;
@@ -105,9 +108,19 @@ private:
     Vector3 traceCurrentWorld3D{0.0f, 0.0f, 0.0f};
     std::vector<Vector3> traceWorld3D;
     std::vector<float> traceTimes3D;
+    std::vector<Vector3> traceGroundTruthWorld3D;
+    std::vector<Vector3> traceGroundTruthEstimateWorld3D;
     std::string tracePoseText3D = "Trace pose: unavailable";
+    std::vector<float> groundTruthTimesSeconds;
+    std::vector<Vector3> groundTruthWorld3D;
+    std::string groundTruthSourcePath;
+    CalibrationData readerCalibrationOverride{};
+    bool readerCalibrationOverrideReady = false;
 
     Vector3 WorldToScene(const Vector3 &world) const;
+    void LoadReaderCalibrationForReader(const std::string &eventPath);
+    void LoadGroundTruthForReader(const std::string &eventPath);
+    bool LookupGroundTruthWorld(float timeSeconds, Vector3 &worldPoint) const;
     void Draw2DScene();
     void DrawTraceScene();
     void Draw3DScene();
@@ -162,19 +175,24 @@ public:
     void SetTracePoseCalibration(const CalibrationData &calibration, float ballRadiusMm);
     void SetTraceFloatSource(
         const std::vector<cv::Point2f> *points,
-        const std::vector<int64_t> *timestamps) {
+        const std::vector<int64_t> *timestamps,
+        const std::vector<bool> *polarities) {
         traceFloatPoints = points;
         traceFloatTimestamps = timestamps;
+        traceFloatPolarities = polarities;
     }
     void SetTraceRawSource(
         const std::vector<cv::Point2f> *points,
-        const std::vector<int64_t> *timestamps) {
+        const std::vector<int64_t> *timestamps,
+        const std::vector<bool> *polarities) {
         traceRawPoints = points;
         traceRawTimestamps = timestamps;
+        traceRawPolarities = polarities;
     }
     void AppendTraceEvents(
         const std::vector<cv::Point2f> &points,
-        const std::vector<int64_t> &timestamps);
+        const std::vector<int64_t> &timestamps,
+        const std::vector<bool> *polarities);
     void SetTraceMotionWindow(
         const Circle &circle,
         const QuadFit3D &yFromXFit,
@@ -185,6 +203,8 @@ public:
     void ClearTraceMotionWindow();
     void ResetTraceAccumulation();
     void ClearTrace3D();
+    const CalibrationData *ReaderCalibrationOverride() const;
+    const std::string &ReaderEventPath() const { return path_reader_; }
 
     void WriteStore(const dv::EventStore &event) {
         if (event_reader_ != nullptr) {
@@ -227,22 +247,25 @@ public:
         color_switch = false;
         record = false;
         lector = 0.0f;
-        timeslice = 20.0f;
-        trace_width_step_px = 28.0f;
-        trace_line_window_px = 100.0f;
-        trace_memory_ms = 700.0f;
-        trace_histogram_bins = 48.0f;
-        trace_density_threshold = 16.0f;
-        trace_line_bin_width_px = 12.0f;
+        timeslice = 500.0f;
+        trace_width_step_px = 8.23f;
+        trace_line_window_px = 21.92f;
+        trace_memory_ms = 530.51f;
+        trace_histogram_bins = 16.0f;
+        trace_density_threshold = 9.23f;
+        trace_line_bin_width_px = 6.69f;
         trace_line_order = 2.0f;
-        trace_pca_period_ms = 8.0f;
+        trace_pca_period_ms = 7.79f;
         trace_follow_window_px = 120.0f;
         trace_use_raw_input = false;
-        trace_radius_gate_enabled = true;
+        trace_radius_gate_enabled = false;
+        trace_edge_mode = 1;
+        trace_polarity_mode = 2;
         temporal_slices = 5.0f;
         events_per_slice = 100.0f;
         slice_mode = 0;
-        reader_mode = false;
+        reader_source_sequences = true;
+        reader_mode = true;
         playback_playing = false;
         reader_duration_seconds = 0.0;
         reset_requested = false;
@@ -410,8 +433,27 @@ public:
         }
 
         GuiToggle({px, py, 90.0f, h}, "Option", &option);
-        if (!traceView) {
+        px += 130.0f;
+        if (traceView) {
+            DrawText("Edge", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
+            if (GuiButton({px, py, 110.0f, h}, trace_edge_mode == 0 ? "Density" : "Support")) {
+                trace_edge_mode = (trace_edge_mode + 1) % 2;
+            }
             px += 130.0f;
+
+            const char *polarityLabel = "All";
+            if (trace_polarity_mode == 1) {
+                polarityLabel = "Positive";
+            } else if (trace_polarity_mode == 2) {
+                polarityLabel = "Negative";
+            }
+            DrawText("Polarity", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
+            if (GuiButton({px, py, 120.0f, h}, polarityLabel)) {
+                trace_polarity_mode = (trace_polarity_mode + 1) % 3;
+            }
+            px += 140.0f;
+        }
+        if (!traceView) {
             GuiToggle({px, py, 90.0f, h}, "Positif only", &positive_only);
         }
 
@@ -423,15 +465,14 @@ public:
             const float inner_gap_x = 50.0f;
             const float inner_gap_y = 30.0f;
             const float option_width = textbox_width + 2.0f * inner_gap_x;
-            const float row_count = 6.0f;
+            const float row_count = 8.0f;
             const float dy = button_h + 20.0f;
             const float option_height = dy * row_count + 2.0f * inner_gap_y;
 
             DrawRectangle(x - inner_gap_x, y - inner_gap_y, option_width, option_height, RED);
 
             Rectangle save_rec = {x, y + dy, textbox_width, button_h};
-            Rectangle dropdown_rec = {x, y + 3.0f * dy, textbox_width, button_h};
-            Rectangle read_rec = {x, y + 5.0f * dy, textbox_width, button_h};
+            Rectangle read_rec = {x, y + 7.0f * dy, textbox_width, button_h};
             const Vector2 currentMousePosition = GetMousePosition();
 
             if (CheckCollisionPointRec(currentMousePosition, save_rec) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -446,10 +487,28 @@ public:
 
             DrawText("Save file:", static_cast<int>(x), static_cast<int>(y), 14, BLACK);
             save = GuiTextBox(save_rec, save_file, sizeof(save_file), save_f);
-            DrawText("Choose recording:", static_cast<int>(x), static_cast<int>(y + 2.0f * dy), 14, BLACK);
+            DrawText("Source:", static_cast<int>(x), static_cast<int>(y + 2.0f * dy), 14, BLACK);
+            if (GuiButton(
+                    {x, y + 3.0f * dy, textbox_width, button_h},
+                    reader_source_sequences ? "Sequences" : "Recordings")) {
+                reader_source_sequences = !reader_source_sequences;
+                recording_files.clear();
+                recording_dropdown_text = reader_source_sequences ? "No sequence events" : "No recordings";
+                recording_dropdown_index = 0;
+                recording_dropdown_edit_mode = false;
+                read_file[0] = '\0';
+                read_f = false;
+            }
+
+            DrawText(
+                reader_source_sequences ? "Choose sequence event:" : "Choose recording:",
+                static_cast<int>(x),
+                static_cast<int>(y + 4.0f * dy),
+                14,
+                BLACK);
             const bool wasDropdownOpen = recording_dropdown_edit_mode;
             if (GuiDropdownBox(
-                    dropdown_rec,
+                    {x, y + 5.0f * dy, textbox_width, button_h},
                     recording_dropdown_text.c_str(),
                     &recording_dropdown_index,
                     recording_dropdown_edit_mode)) {
@@ -471,7 +530,7 @@ public:
                 }
             }
 
-            DrawText("Read file:", static_cast<int>(x), static_cast<int>(y + 4.0f * dy), 14, BLACK);
+            DrawText("Read file:", static_cast<int>(x), static_cast<int>(y + 6.0f * dy), 14, BLACK);
             read = GuiTextBox(read_rec, read_file, sizeof(read_file), read_f);
         }
     }
@@ -490,6 +549,7 @@ public:
     float Lector() const { return lector; }
     float Time_Slice() const { return timeslice * 1.0e-3f; }
     bool UseReader() const { return reader_mode || lector > 0.01f; }
+    bool UseSequenceDirectory() const { return reader_source_sequences; }
     bool PlaybackPlaying() const { return playback_playing; }
     void EnableReaderMode() { reader_mode = true; }
     void PausePlayback() { playback_playing = false; }
@@ -505,7 +565,7 @@ public:
         recording_files = files;
         recording_dropdown_text.clear();
         if (recording_files.empty()) {
-            recording_dropdown_text = "No recordings";
+            recording_dropdown_text = reader_source_sequences ? "No sequence events" : "No recordings";
             recording_dropdown_index = 0;
             return;
         }
@@ -578,6 +638,8 @@ public:
     float TraceDensityThresholdRatio() const {
         return std::clamp(trace_density_threshold / 100.0f, 0.02f, 0.60f);
     }
+    int TraceEdgeMode() const { return std::clamp(trace_edge_mode, 0, 1); }
+    int TracePolarityMode() const { return std::clamp(trace_polarity_mode, 0, 2); }
     double TraceMemorySeconds() const {
         return static_cast<double>(std::clamp(trace_memory_ms, 40.0f, 3000.0f)) * 1.0e-3;
     }
@@ -638,11 +700,14 @@ private:
     float trace_follow_window_px = 120.0f;
     bool trace_use_raw_input = false;
     bool trace_radius_gate_enabled = true;
+    int trace_edge_mode = 1;
+    int trace_polarity_mode = 2;
     float temporal_slices = 5.0f;
     float events_per_slice = 100.0f;
 
     bool color_switch = false;
     bool record = false;
+    bool reader_source_sequences = true;
     bool show3d = false;
     bool reader_mode = false;
     bool playback_playing = false;

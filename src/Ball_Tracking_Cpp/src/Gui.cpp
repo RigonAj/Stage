@@ -5,10 +5,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <execution>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <limits>
+#include <sstream>
 #include <string_view>
 #include <utility>
 #include "RegressionAccumulator.hpp"
@@ -18,6 +22,8 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr std::string_view kRecordingDirectory = "recordings";
+constexpr std::string_view kSequenceDirectory = "sequences";
+constexpr std::string_view kSequenceEventsPath = "events_v2e/events.h5";
 
 bool EndsWithCaseInsensitive(std::string_view value, std::string_view suffix) {
     return value.size() >= suffix.size()
@@ -32,13 +38,16 @@ void EnsureRecordingDirectory() {
     fs::create_directories(kRecordingDirectory, ec);
 }
 
-std::vector<std::string> BuildRecordingFileList() {
-    EnsureRecordingDirectory();
-
-    std::vector<std::string> files;
+void EnsureSequenceDirectory() {
     std::error_code ec;
-    for (const fs::directory_entry &entry : fs::directory_iterator(kRecordingDirectory, ec)) {
-        if (ec || !entry.is_regular_file()) continue;
+    fs::create_directories(kSequenceDirectory, ec);
+}
+
+void AddFilesFromDirectory(const fs::path &directory, std::vector<std::string> &files) {
+    std::error_code ec;
+    for (const fs::directory_entry &entry : fs::directory_iterator(directory, ec)) {
+        std::error_code entryEc;
+        if (ec || !entry.is_regular_file(entryEc)) continue;
 
         const std::string filename = entry.path().filename().string();
         if (EndsWithCaseInsensitive(filename, ".h5")
@@ -47,7 +56,57 @@ std::vector<std::string> BuildRecordingFileList() {
             files.push_back(filename);
         }
     }
+}
 
+bool IsEventFileName(std::string_view filename) {
+    return EndsWithCaseInsensitive(filename, ".h5")
+        || EndsWithCaseInsensitive(filename, ".hdf5")
+        || EndsWithCaseInsensitive(filename, ".bin");
+}
+
+std::vector<std::string> BuildSequenceEventList() {
+    EnsureSequenceDirectory();
+    std::vector<fs::path> candidates;
+    std::error_code ec;
+
+    for (const fs::directory_entry &sequenceEntry : fs::directory_iterator(kSequenceDirectory, ec)) {
+        std::error_code sequenceEc;
+        if (ec || !sequenceEntry.is_directory(sequenceEc)) continue;
+
+        std::error_code walkEc;
+        for (const fs::directory_entry &entry : fs::recursive_directory_iterator(sequenceEntry.path(), walkEc)) {
+            std::error_code entryEc;
+            if (walkEc || !entry.is_regular_file(entryEc)) continue;
+
+            const std::string filename = entry.path().filename().string();
+            if (IsEventFileName(filename)) {
+                candidates.push_back(entry.path());
+            }
+        }
+    }
+
+    std::sort(candidates.begin(), candidates.end());
+    std::vector<std::string> files;
+    files.reserve(candidates.size());
+
+    for (const fs::path &eventsPath : candidates) {
+        std::error_code relativeEc;
+        fs::path relativePath = fs::relative(eventsPath, kSequenceDirectory, relativeEc);
+        files.push_back(relativeEc ? eventsPath.string() : relativePath.string());
+    }
+
+    return files;
+}
+
+std::vector<std::string> BuildReaderFileList(bool useSequenceDirectory) {
+    if (useSequenceDirectory) {
+        return BuildSequenceEventList();
+    }
+
+    EnsureRecordingDirectory();
+
+    std::vector<std::string> files;
+    AddFilesFromDirectory(fs::path(kRecordingDirectory), files);
     std::sort(files.begin(), files.end());
     return files;
 }
@@ -70,6 +129,259 @@ std::string MakeEventPath(std::string name, std::string_view fallbackBase) {
 
     EnsureRecordingDirectory();
     return (fs::path(kRecordingDirectory) / path).string();
+}
+
+std::string MakeReaderEventPath(std::string name, bool useSequenceDirectory) {
+    if (!useSequenceDirectory) {
+        return MakeEventPath(std::move(name), "events3");
+    }
+
+    EnsureSequenceDirectory();
+
+    if (name.empty()) {
+        const std::vector<std::string> files = BuildSequenceEventList();
+        if (!files.empty()) {
+            name = files.front();
+        }
+    }
+
+    if (name.empty()) {
+        return MakeEventPath("events3.h5", "events3");
+    }
+
+    fs::path path(name);
+    if (path.has_parent_path()) {
+        std::error_code ec;
+        if (fs::is_directory(path, ec)) {
+            return (path / std::string(kSequenceEventsPath)).string();
+        }
+        if (path.is_absolute()) {
+            return path.string();
+        }
+        return (fs::path(kSequenceDirectory) / path).string();
+    }
+
+    if (EndsWithCaseInsensitive(name, ".h5")
+        || EndsWithCaseInsensitive(name, ".hdf5")
+        || EndsWithCaseInsensitive(name, ".bin")) {
+        return (fs::path(kSequenceDirectory) / path).string();
+    }
+
+    return (fs::path(kSequenceDirectory) / path / std::string(kSequenceEventsPath)).string();
+}
+
+std::string DefaultReaderPath() {
+    const std::string sequencePath = MakeReaderEventPath({}, true);
+    if (sequencePath != MakeEventPath("events3.h5", "events3")) {
+        return sequencePath;
+    }
+
+    return MakeEventPath("events3.h5", "events3");
+}
+
+std::vector<std::string> SplitCsvLine(const std::string &line) {
+    std::vector<std::string> fields;
+    std::stringstream stream(line);
+    std::string field;
+    while (std::getline(stream, field, ',')) {
+        fields.push_back(field);
+    }
+    return fields;
+}
+
+int CsvColumnIndex(const std::vector<std::string> &header, std::string_view name) {
+    for (std::size_t i = 0; i < header.size(); ++i) {
+        if (header[i] == name) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+bool ParseDouble(std::string_view text, double &value) {
+    std::string owned(text);
+    char *end = nullptr;
+    value = std::strtod(owned.c_str(), &end);
+    return end != owned.c_str() && std::isfinite(value);
+}
+
+bool JsonNumber(std::string_view json, std::string_view key, double &value) {
+    const std::string needle = "\"" + std::string(key) + "\"";
+    const std::size_t keyPos = json.find(needle);
+    if (keyPos == std::string_view::npos) {
+        return false;
+    }
+
+    const std::size_t colonPos = json.find(':', keyPos + needle.size());
+    if (colonPos == std::string_view::npos) {
+        return false;
+    }
+
+    std::size_t valuePos = colonPos + 1;
+    while (valuePos < json.size() && std::isspace(static_cast<unsigned char>(json[valuePos]))) {
+        ++valuePos;
+    }
+
+    return ParseDouble(json.substr(valuePos), value);
+}
+
+std::string JsonString(std::string_view json, std::string_view key) {
+    const std::string needle = "\"" + std::string(key) + "\"";
+    const std::size_t keyPos = json.find(needle);
+    if (keyPos == std::string_view::npos) {
+        return {};
+    }
+
+    const std::size_t colonPos = json.find(':', keyPos + needle.size());
+    if (colonPos == std::string_view::npos) {
+        return {};
+    }
+
+    std::size_t quoteStart = json.find('"', colonPos + 1);
+    if (quoteStart == std::string_view::npos) {
+        return {};
+    }
+    ++quoteStart;
+
+    const std::size_t quoteEnd = json.find('"', quoteStart);
+    if (quoteEnd == std::string_view::npos || quoteEnd <= quoteStart) {
+        return {};
+    }
+
+    return std::string(json.substr(quoteStart, quoteEnd - quoteStart));
+}
+
+std::vector<double> JsonNumberArray(std::string_view json, std::string_view key) {
+    const std::string needle = "\"" + std::string(key) + "\"";
+    const std::size_t keyPos = json.find(needle);
+    if (keyPos == std::string_view::npos) {
+        return {};
+    }
+
+    const std::size_t bracketStart = json.find('[', keyPos + needle.size());
+    const std::size_t bracketEnd = json.find(']', bracketStart);
+    if (bracketStart == std::string_view::npos
+        || bracketEnd == std::string_view::npos
+        || bracketEnd <= bracketStart) {
+        return {};
+    }
+
+    std::vector<double> values;
+    std::stringstream stream(std::string(json.substr(bracketStart + 1, bracketEnd - bracketStart - 1)));
+    std::string field;
+    while (std::getline(stream, field, ',')) {
+        double value = 0.0;
+        if (ParseDouble(field, value)) {
+            values.push_back(value);
+        }
+    }
+    return values;
+}
+
+std::string ReadTextFile(const fs::path &path) {
+    std::ifstream file(path);
+    if (!file) {
+        return {};
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+fs::path FindSidecarPathForEventPath(const std::string &eventPath, const fs::path &relativeSidecar) {
+    if (eventPath.empty()) {
+        return {};
+    }
+
+    std::error_code ec;
+    fs::path directory = fs::absolute(fs::path(eventPath), ec).parent_path();
+    if (ec) {
+        directory = fs::path(eventPath).parent_path();
+    }
+
+    while (!directory.empty()) {
+        const fs::path candidate = directory / relativeSidecar;
+        std::error_code fileEc;
+        if (fs::is_regular_file(candidate, fileEc)) {
+            return candidate;
+        }
+
+        const fs::path parent = directory.parent_path();
+        if (parent == directory) {
+            break;
+        }
+        directory = parent;
+    }
+
+    return {};
+}
+
+fs::path IntrinsicsPathForEventPath(const std::string &eventPath) {
+    return FindSidecarPathForEventPath(eventPath, fs::path("camera") / "intrinsics.json");
+}
+
+fs::path GroundTruthPathForEventPath(const std::string &eventPath) {
+    return FindSidecarPathForEventPath(eventPath, fs::path("labels") / "ground_truth.csv");
+}
+
+CalibrationData LoadCalibrationFromIntrinsicsJson(const fs::path &intrinsicsPath) {
+    CalibrationData calibration;
+
+    const std::string json = ReadTextFile(intrinsicsPath);
+    if (json.empty()) {
+        return calibration;
+    }
+
+    double width = 0.0;
+    double height = 0.0;
+    double fx = 0.0;
+    double fy = 0.0;
+    double cx = 0.0;
+    double cy = 0.0;
+    if (!JsonNumber(json, "width", width)
+        || !JsonNumber(json, "height", height)
+        || !JsonNumber(json, "fx", fx)
+        || !JsonNumber(json, "fy", fy)
+        || !JsonNumber(json, "cx", cx)
+        || !JsonNumber(json, "cy", cy)
+        || width <= 0.0
+        || height <= 0.0
+        || fx <= 0.0
+        || fy <= 0.0) {
+        return calibration;
+    }
+
+    std::vector<double> distortion = JsonNumberArray(json, "distortion_coefficients");
+    if (distortion.empty()) {
+        distortion.assign(5, 0.0);
+    }
+
+    calibration.ready = true;
+    calibration.reprojectionError = 0.0;
+    calibration.sourcePath = intrinsicsPath.string();
+    calibration.cameraName = intrinsicsPath.parent_path().parent_path().filename().string();
+    calibration.imageSize = cv::Size(
+        static_cast<int>(std::lround(width)),
+        static_cast<int>(std::lround(height)));
+    calibration.cameraMatrix = (cv::Mat_<double>(3, 3) <<
+        fx, 0.0, cx,
+        0.0, fy, cy,
+        0.0, 0.0, 1.0);
+    calibration.distortionCoefficients = cv::Mat(1, static_cast<int>(distortion.size()), CV_64F);
+    for (std::size_t i = 0; i < distortion.size(); ++i) {
+        calibration.distortionCoefficients.at<double>(0, static_cast<int>(i)) = distortion[i];
+    }
+
+    std::string distortionModel = JsonString(json, "distortion_model");
+    std::transform(distortionModel.begin(), distortionModel.end(), distortionModel.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    calibration.useFisheyeModel =
+        distortionModel == "fisheye"
+        || distortionModel == "equidistant";
+
+    return calibration;
 }
 
 float FittedCameraPlaneSpeedXZ(const LineFit3D &fitX, const QuadFit3D &fitZ, float t) {
@@ -121,6 +433,7 @@ float EstimateUpperParallelOffset(const std::vector<Vector3> &points, const Line
 struct TracePoint {
     Vector2 point{0.0f, 0.0f};
     int64_t timestampUs = 0;
+    bool polarity = true;
 };
 
 struct TraceProjection {
@@ -216,6 +529,7 @@ struct TraceRibbonFit {
     float lineBinWidthPx = 0.0f;
     int histogramBinCount = 48;
     float densityThresholdRatio = 0.16f;
+    int edgeMode = 0;
     float pcaPeriodMs = 8.0f;
     int ransacRejectedSamples = 0;
     std::vector<TraceProjection> projections;
@@ -228,15 +542,44 @@ struct TraceRibbonFit {
     std::vector<TracePcaSlice> temporalPcaSlices;
 };
 
-std::vector<TracePoint> BuildTracePointsFromEvents(const dv::EventStore &events) {
+bool AcceptTracePolarity(bool polarity, int polarityMode) {
+    if (polarityMode == 1) {
+        return polarity;
+    }
+    if (polarityMode == 2) {
+        return !polarity;
+    }
+    return true;
+}
+
+const char *TracePolarityModeName(int polarityMode) {
+    if (polarityMode == 1) {
+        return "positive";
+    }
+    if (polarityMode == 2) {
+        return "negative";
+    }
+    return "all";
+}
+
+const char *TraceEdgeModeName(int edgeMode) {
+    return edgeMode == 1 ? "support" : "density";
+}
+
+std::vector<TracePoint> BuildTracePointsFromEvents(const dv::EventStore &events, int polarityMode) {
     std::vector<TracePoint> points;
     points.reserve(events.size());
 
     for (const auto &e : events) {
+        const bool polarity = e.polarity();
+        if (!AcceptTracePolarity(polarity, polarityMode)) {
+            continue;
+        }
+
         const float x = static_cast<float>(e.x());
         const float y = static_cast<float>(e.y());
         if (x >= 0.0f && x < 640.0f && y >= 0.0f && y < 480.0f) {
-            points.push_back({{x, y}, e.timestamp()});
+            points.push_back({{x, y}, e.timestamp(), polarity});
         }
     }
 
@@ -245,13 +588,21 @@ std::vector<TracePoint> BuildTracePointsFromEvents(const dv::EventStore &events)
 
 std::vector<TracePoint> BuildTracePointsFromFloatSource(
     const std::vector<cv::Point2f> &pointsSource,
-    const std::vector<int64_t> &timestamps) {
+    const std::vector<int64_t> &timestamps,
+    const std::vector<bool> *polarities,
+    int polarityMode) {
 
     std::vector<TracePoint> points;
     const std::size_t count = std::min(pointsSource.size(), timestamps.size());
+    const bool hasPolarities = polarities != nullptr && polarities->size() >= count;
     points.reserve(count);
 
     for (std::size_t i = 0; i < count; ++i) {
+        const bool polarity = hasPolarities ? (*polarities)[i] : true;
+        if (hasPolarities && !AcceptTracePolarity(polarity, polarityMode)) {
+            continue;
+        }
+
         const float x = pointsSource[i].x;
         const float y = pointsSource[i].y;
         if (std::isfinite(x)
@@ -260,7 +611,7 @@ std::vector<TracePoint> BuildTracePointsFromFloatSource(
             && x < 640.0f
             && y >= 0.0f
             && y < 480.0f) {
-            points.push_back({{x, y}, timestamps[i]});
+            points.push_back({{x, y}, timestamps[i], polarity});
         }
     }
 
@@ -501,6 +852,116 @@ DenseEdgeEstimate EstimateDenseEdges(
     return estimate;
 }
 
+DenseEdgeEstimate EstimateSupportedEdges(
+    const std::vector<float> &values,
+    std::size_t minSupportCount) {
+
+    DenseEdgeEstimate estimate;
+    std::vector<float> finiteValues;
+    finiteValues.reserve(values.size());
+    for (float value : values) {
+        if (std::isfinite(value)) {
+            finiteValues.push_back(value);
+        }
+    }
+
+    if (finiteValues.size() < std::max<std::size_t>(minSupportCount, 8)) {
+        return estimate;
+    }
+
+    std::sort(finiteValues.begin(), finiteValues.end());
+
+    const std::size_t localSupport = std::clamp<std::size_t>(
+        finiteValues.size() / 28,
+        3,
+        9
+    );
+    const float supportRadius = 1.75f;
+
+    auto supportedLow = [&]() -> float {
+        std::size_t right = 0;
+        for (std::size_t left = 0; left < finiteValues.size(); ++left) {
+            while (right < finiteValues.size()
+                && finiteValues[right] - finiteValues[left] <= supportRadius) {
+                ++right;
+            }
+            if (right - left >= localSupport) {
+                return finiteValues[left];
+            }
+        }
+        return finiteValues.front();
+    };
+
+    auto supportedHigh = [&]() -> float {
+        for (std::size_t reverseIndex = finiteValues.size(); reverseIndex > 0; --reverseIndex) {
+            const std::size_t right = reverseIndex - 1;
+            const auto begin = finiteValues.begin();
+            const auto end = begin + static_cast<std::ptrdiff_t>(right + 1);
+            const auto left = std::lower_bound(begin, end, finiteValues[right] - supportRadius);
+            if (static_cast<std::size_t>(std::distance(left, end)) >= localSupport) {
+                return finiteValues[right];
+            }
+        }
+        return finiteValues.back();
+    };
+
+    float low = supportedLow();
+    float high = supportedHigh();
+    if (!std::isfinite(low) || !std::isfinite(high) || high <= low) {
+        return estimate;
+    }
+
+    const float rawWidth = high - low;
+    if (rawWidth < 2.0f) {
+        return estimate;
+    }
+
+    const float pixelCenterToBorderPx = std::clamp(rawWidth * 0.035f, 0.45f, 0.95f);
+    low -= pixelCenterToBorderPx;
+    high += pixelCenterToBorderPx;
+
+    int supportCount = 0;
+    for (float value : finiteValues) {
+        if (value >= low && value <= high) {
+            ++supportCount;
+        }
+    }
+
+    if (supportCount < static_cast<int>(minSupportCount)) {
+        return estimate;
+    }
+
+    estimate.valid = true;
+    estimate.low = low;
+    estimate.high = high;
+    estimate.middle = 0.5f * (low + high);
+    estimate.width = high - low;
+    estimate.supportCount = supportCount;
+    return estimate;
+}
+
+DenseEdgeEstimate EstimateTraceEdges(
+    const std::vector<float> &values,
+    std::size_t minSupportCount,
+    int histogramBinCount,
+    float densityThresholdRatio,
+    int edgeMode) {
+
+    if (edgeMode == 1) {
+        DenseEdgeEstimate support = EstimateSupportedEdges(values, minSupportCount);
+        if (support.valid) {
+            return support;
+        }
+    }
+
+    return EstimateDenseEdges(
+        values,
+        minSupportCount,
+        histogramBinCount,
+        densityThresholdRatio
+    );
+}
+
 float MedianValue(std::vector<float> values) {
     return values.empty() ? 0.0f : Quantile(std::move(values), 0.50f);
 }
@@ -726,6 +1187,200 @@ void FilterTraceWidthSpikes(std::vector<TraceWidthEstimate> &estimates) {
     if (filtered.size() >= std::max<std::size_t>(5, count / 2)) {
         estimates = std::move(filtered);
     }
+}
+
+float Distance3D(const Vector3 &a, const Vector3 &b) {
+    const float dx = a.x - b.x;
+    const float dy = a.y - b.y;
+    const float dz = a.z - b.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+bool IsFinite3D(const Vector3 &point) {
+    return std::isfinite(point.x)
+        && std::isfinite(point.y)
+        && std::isfinite(point.z);
+}
+
+int FilterTraceWorldOutliers(std::vector<Vector3> &points, std::vector<float> &times) {
+    const std::size_t count = points.size();
+    if (count < 5 || times.size() != count) {
+        return 0;
+    }
+
+    std::vector<char> keep(count, 1);
+    auto keptCount = [&]() {
+        return static_cast<std::size_t>(std::count(keep.begin(), keep.end(), 1));
+    };
+
+    auto dropTemporalJumps = [&]() {
+        if (count < 3) {
+            return 0;
+        }
+
+        std::vector<float> stepDistances;
+        stepDistances.reserve(count - 1);
+        for (std::size_t i = 1; i < count; ++i) {
+            if (IsFinite3D(points[i - 1]) && IsFinite3D(points[i])) {
+                stepDistances.push_back(Distance3D(points[i - 1], points[i]));
+            }
+        }
+
+        if (stepDistances.empty()) {
+            return 0;
+        }
+
+        const float medianStep = std::max(1.0e-4f, MedianValue(stepDistances));
+        const float jumpLimit = std::max(0.16f, medianStep * 7.0f);
+        const float bridgeLimit = std::max(0.12f, medianStep * 3.5f);
+        int removed = 0;
+
+        auto markDrop = [&](std::size_t index) {
+            if (keep[index] && keptCount() > std::max<std::size_t>(4, count / 2)) {
+                keep[index] = 0;
+                ++removed;
+            }
+        };
+
+        if (Distance3D(points[0], points[1]) > jumpLimit
+            && Distance3D(points[1], points[2]) <= bridgeLimit) {
+            markDrop(0);
+        }
+
+        if (Distance3D(points[count - 1], points[count - 2]) > jumpLimit
+            && Distance3D(points[count - 2], points[count - 3]) <= bridgeLimit) {
+            markDrop(count - 1);
+        }
+
+        for (std::size_t i = 1; i + 1 < count; ++i) {
+            if (!keep[i]) {
+                continue;
+            }
+
+            const float prevDistance = Distance3D(points[i], points[i - 1]);
+            const float nextDistance = Distance3D(points[i], points[i + 1]);
+            const float bridgeDistance = Distance3D(points[i - 1], points[i + 1]);
+            if (prevDistance > jumpLimit
+                && nextDistance > jumpLimit
+                && bridgeDistance <= bridgeLimit) {
+                markDrop(i);
+            }
+        }
+
+        return removed;
+    };
+
+    auto dropFitResiduals = [&]() {
+        if (keptCount() < 5) {
+            return 0;
+        }
+
+        LinearRegression xReg;
+        LinearRegression yReg;
+        QuadraticRegression zReg;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (!keep[i] || !IsFinite3D(points[i]) || !std::isfinite(times[i])) {
+                continue;
+            }
+
+            xReg.add(times[i], points[i].x);
+            yReg.add(times[i], points[i].y);
+            zReg.add(times[i], points[i].z);
+        }
+
+        if (xReg.size() < 5 || yReg.size() < 5 || zReg.size() < 5) {
+            return 0;
+        }
+
+        const coef xFit = xReg.fit();
+        const coef yFit = yReg.fit();
+        const coef2 zFit = zReg.fit();
+
+        std::vector<float> residuals;
+        residuals.reserve(keptCount());
+        for (std::size_t i = 0; i < count; ++i) {
+            if (!keep[i]) {
+                continue;
+            }
+
+            const float t = times[i];
+            const Vector3 predicted{
+                xFit.a * t + xFit.b,
+                yFit.a * t + yFit.b,
+                zFit.a * t * t + zFit.b * t + zFit.c
+            };
+            residuals.push_back(Distance3D(points[i], predicted));
+        }
+
+        if (residuals.size() < 5) {
+            return 0;
+        }
+
+        const float medianResidual = MedianValue(residuals);
+        const float residualMad = MedianAbsoluteDeviation(residuals, medianResidual);
+        const float threshold = std::max(
+            0.10f,
+            medianResidual + std::max(0.015f, residualMad) * 6.0f
+        );
+
+        std::vector<std::size_t> rejected;
+        rejected.reserve(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            if (!keep[i]) {
+                continue;
+            }
+
+            const float t = times[i];
+            const Vector3 predicted{
+                xFit.a * t + xFit.b,
+                yFit.a * t + yFit.b,
+                zFit.a * t * t + zFit.b * t + zFit.c
+            };
+            if (Distance3D(points[i], predicted) > threshold) {
+                rejected.push_back(i);
+            }
+        }
+
+        if (rejected.empty()
+            || keptCount() - rejected.size() < std::max<std::size_t>(4, count / 2)) {
+            return 0;
+        }
+
+        for (std::size_t index : rejected) {
+            keep[index] = 0;
+        }
+        return static_cast<int>(rejected.size());
+    };
+
+    int removed = 0;
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        const int before = removed;
+        removed += dropTemporalJumps();
+        removed += dropFitResiduals();
+        if (removed == before) {
+            break;
+        }
+    }
+
+    if (removed == 0) {
+        return 0;
+    }
+
+    std::vector<Vector3> filteredPoints;
+    std::vector<float> filteredTimes;
+    filteredPoints.reserve(keptCount());
+    filteredTimes.reserve(keptCount());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!keep[i]) {
+            continue;
+        }
+        filteredPoints.push_back(points[i]);
+        filteredTimes.push_back(times[i]);
+    }
+
+    points = std::move(filteredPoints);
+    times = std::move(filteredTimes);
+    return removed;
 }
 
 Vector2 PointOnRibbon(const TraceRibbonFit &fit, float s, float h) {
@@ -1762,11 +2417,12 @@ LocalTraceSection EstimateLocalFlowSection(
         trimmedOffsets = std::move(normalOffsets);
     }
 
-    const DenseEdgeEstimate denseEdges = EstimateDenseEdges(
+    const DenseEdgeEstimate denseEdges = EstimateTraceEdges(
         trimmedOffsets,
         12,
         fit.histogramBinCount,
-        fit.densityThresholdRatio
+        fit.densityThresholdRatio,
+        fit.edgeMode
     );
     if (!denseEdges.valid) {
         return section;
@@ -1914,11 +2570,12 @@ std::vector<TraceWidthEstimate> EstimateTraceWidths(const TraceRibbonFit &fit, i
             continue;
         }
 
-        const DenseEdgeEstimate denseEdges = EstimateDenseEdges(
+        const DenseEdgeEstimate denseEdges = EstimateTraceEdges(
             normalOffsets,
             12,
             fit.histogramBinCount,
-            fit.densityThresholdRatio
+            fit.densityThresholdRatio,
+            fit.edgeMode
         );
         if (!denseEdges.valid) {
             continue;
@@ -2032,7 +2689,8 @@ TraceRibbonFit FitTraceRibbon(
     int localOrder,
     float pcaPeriodMs,
     int histogramBinCount,
-    float densityThresholdRatio) {
+    float densityThresholdRatio,
+    int edgeMode) {
 
     TraceRibbonFit fit;
 
@@ -2046,6 +2704,7 @@ TraceRibbonFit FitTraceRibbon(
     const float timedPcaPeriodMs = std::clamp(pcaPeriodMs, 2.0f, 80.0f);
     const int edgeHistogramBins = std::clamp(histogramBinCount, 16, 512);
     const float edgeDensityThresholdRatio = std::clamp(densityThresholdRatio, 0.02f, 0.60f);
+    const int selectedEdgeMode = std::clamp(edgeMode, 0, 1);
 
     if (points.size() < kMinRawEvents) {
         return fit;
@@ -2145,6 +2804,7 @@ TraceRibbonFit FitTraceRibbon(
     fit.normal = normal;
     fit.histogramBinCount = edgeHistogramBins;
     fit.densityThresholdRatio = edgeDensityThresholdRatio;
+    fit.edgeMode = selectedEdgeMode;
     fit.pcaPeriodMs = timedPcaPeriodMs;
     fit.temporalPcaSlices = std::move(temporalPcaSlices);
     fit.sMin = Quantile(sValues, 0.03f);
@@ -2217,11 +2877,12 @@ TraceRibbonFit FitTraceRibbon(
         }
 
         const float s = Quantile(sBin, 0.50f);
-        const DenseEdgeEstimate denseEdges = EstimateDenseEdges(
+        const DenseEdgeEstimate denseEdges = EstimateTraceEdges(
             hBin,
             minEventsPerBin,
             edgeHistogramBins,
-            edgeDensityThresholdRatio
+            edgeDensityThresholdRatio,
+            selectedEdgeMode
         );
         if (!denseEdges.valid) {
             continue;
@@ -2371,7 +3032,11 @@ Gui::Gui(const dv::EventStore &view, Ui &uii, int screenWidth, int screenHeight)
     : screenWidth(screenWidth), screenHeight(screenHeight), View(view), ui(uii)
      {
     EnsureRecordingDirectory();
-    ui.SetRecordingFiles(BuildRecordingFileList());
+    path_reader_ = DefaultReaderPath();
+    std::snprintf(ui.read_file, sizeof(ui.read_file), "%s", path_reader_.c_str());
+    LoadReaderCalibrationForReader(path_reader_);
+    LoadGroundTruthForReader(path_reader_);
+    ui.SetRecordingFiles(BuildReaderFileList(ui.UseSequenceDirectory()));
 
     InitWindow(screenWidth, screenHeight, "Event Viewer");
     SetTargetFPS((int)RENDER_FPS);
@@ -2410,6 +3075,166 @@ Vector3 Gui::WorldToScene(const Vector3 &world) const {
     return {world.x, world.z, world.y};
 }
 
+void Gui::LoadReaderCalibrationForReader(const std::string &eventPath) {
+    readerCalibrationOverride = {};
+    readerCalibrationOverrideReady = false;
+
+    const fs::path intrinsicsPath = IntrinsicsPathForEventPath(eventPath);
+    if (intrinsicsPath.empty()) {
+        return;
+    }
+
+    CalibrationData calibration = LoadCalibrationFromIntrinsicsJson(intrinsicsPath);
+    if (!calibration.ready) {
+        std::cerr << "Sequence calibration ignored: invalid intrinsics at "
+                  << intrinsicsPath.string() << "\n";
+        return;
+    }
+
+    readerCalibrationOverride = std::move(calibration);
+    readerCalibrationOverrideReady = true;
+    std::cerr << "Sequence calibration loaded: fx=" << readerCalibrationOverride.fx()
+              << " fy=" << readerCalibrationOverride.fy()
+              << " cx=" << readerCalibrationOverride.cx()
+              << " cy=" << readerCalibrationOverride.cy()
+              << " distortion=" << readerCalibrationOverride.distortionCoefficients.cols
+              << " coeffs from " << readerCalibrationOverride.sourcePath << "\n";
+}
+
+void Gui::LoadGroundTruthForReader(const std::string &eventPath) {
+    groundTruthTimesSeconds.clear();
+    groundTruthWorld3D.clear();
+    groundTruthSourcePath.clear();
+    traceGroundTruthWorld3D.clear();
+    traceGroundTruthEstimateWorld3D.clear();
+
+    const fs::path groundTruthPath = GroundTruthPathForEventPath(eventPath);
+    if (groundTruthPath.empty()) {
+        return;
+    }
+
+    std::ifstream file(groundTruthPath);
+    if (!file) {
+        return;
+    }
+
+    std::string line;
+    if (!std::getline(file, line)) {
+        return;
+    }
+
+    const std::vector<std::string> header = SplitCsvLine(line);
+    const int timeColumn = CsvColumnIndex(header, "timestamp_s");
+    const int xColumn = CsvColumnIndex(header, "ball_x_cam_m");
+    const int yColumn = CsvColumnIndex(header, "ball_y_cam_m");
+    const int zColumn = CsvColumnIndex(header, "ball_z_cam_m");
+    if (timeColumn < 0 || xColumn < 0 || yColumn < 0 || zColumn < 0) {
+        return;
+    }
+
+    const int requiredColumn = std::max({timeColumn, xColumn, yColumn, zColumn});
+    std::vector<std::pair<float, Vector3>> samples;
+
+    while (std::getline(file, line)) {
+        if (line.empty()) {
+            continue;
+        }
+
+        const std::vector<std::string> fields = SplitCsvLine(line);
+        if (static_cast<int>(fields.size()) <= requiredColumn) {
+            continue;
+        }
+
+        double timeSeconds = 0.0;
+        double xCam = 0.0;
+        double yCam = 0.0;
+        double zCam = 0.0;
+        if (!ParseDouble(fields[static_cast<std::size_t>(timeColumn)], timeSeconds)
+            || !ParseDouble(fields[static_cast<std::size_t>(xColumn)], xCam)
+            || !ParseDouble(fields[static_cast<std::size_t>(yColumn)], yCam)
+            || !ParseDouble(fields[static_cast<std::size_t>(zColumn)], zCam)) {
+            continue;
+        }
+
+        samples.push_back({
+            static_cast<float>(timeSeconds),
+            {
+                static_cast<float>(xCam),
+                static_cast<float>(zCam),
+                static_cast<float>(-yCam)
+            }
+        });
+    }
+
+    std::sort(samples.begin(), samples.end(), [](const auto &a, const auto &b) {
+        return a.first < b.first;
+    });
+
+    groundTruthTimesSeconds.reserve(samples.size());
+    groundTruthWorld3D.reserve(samples.size());
+    for (const auto &sample : samples) {
+        groundTruthTimesSeconds.push_back(sample.first);
+        groundTruthWorld3D.push_back(sample.second);
+    }
+
+    if (!groundTruthTimesSeconds.empty()) {
+        groundTruthSourcePath = groundTruthPath.string();
+        std::cerr << "Ground truth loaded: " << groundTruthTimesSeconds.size()
+                  << " poses from " << groundTruthSourcePath << "\n";
+    }
+}
+
+bool Gui::LookupGroundTruthWorld(float timeSeconds, Vector3 &worldPoint) const {
+    if (!std::isfinite(timeSeconds)
+        || groundTruthTimesSeconds.empty()
+        || groundTruthTimesSeconds.size() != groundTruthWorld3D.size()) {
+        return false;
+    }
+
+    constexpr float kEndpointToleranceSeconds = 0.01f;
+    const auto upper = std::lower_bound(
+        groundTruthTimesSeconds.begin(),
+        groundTruthTimesSeconds.end(),
+        timeSeconds);
+
+    if (upper == groundTruthTimesSeconds.begin()) {
+        if (std::fabs(timeSeconds - groundTruthTimesSeconds.front()) <= kEndpointToleranceSeconds) {
+            worldPoint = groundTruthWorld3D.front();
+            return true;
+        }
+        return false;
+    }
+
+    if (upper == groundTruthTimesSeconds.end()) {
+        if (std::fabs(timeSeconds - groundTruthTimesSeconds.back()) <= kEndpointToleranceSeconds) {
+            worldPoint = groundTruthWorld3D.back();
+            return true;
+        }
+        return false;
+    }
+
+    const std::size_t hi = static_cast<std::size_t>(
+        std::distance(groundTruthTimesSeconds.begin(), upper));
+    const std::size_t lo = hi - 1;
+    const float t0 = groundTruthTimesSeconds[lo];
+    const float t1 = groundTruthTimesSeconds[hi];
+    const float dt = t1 - t0;
+    if (dt <= 1.0e-9f) {
+        worldPoint = groundTruthWorld3D[lo];
+        return true;
+    }
+
+    const float alpha = std::clamp((timeSeconds - t0) / dt, 0.0f, 1.0f);
+    const Vector3 &p0 = groundTruthWorld3D[lo];
+    const Vector3 &p1 = groundTruthWorld3D[hi];
+    worldPoint = {
+        p0.x + (p1.x - p0.x) * alpha,
+        p0.y + (p1.y - p0.y) * alpha,
+        p0.z + (p1.z - p0.z) * alpha
+    };
+    return true;
+}
+
 void Gui::Draw() {
     std::fill(std::execution::par_unseq, pixelBuffer.begin(), pixelBuffer.end(), BLANK);
     if (!ui.ShowTraceView()) {
@@ -2443,7 +3268,7 @@ void Gui::Draw() {
 
     DrawHudTexts();
     DrawPerformance();
-    ui.SetRecordingFiles(BuildRecordingFileList());
+    ui.SetRecordingFiles(BuildReaderFileList(ui.UseSequenceDirectory()));
     ui.DrawPanel();
     DrawText(TextFormat("Nombre evenment    : %ld", nb_event), 8, 84, 20, ORANGE);
     EndDrawing();
@@ -2487,16 +3312,24 @@ void Gui::DrawTraceScene() {
     const float followWindowPx = ui.TraceFollowWindowPx();
     const int histogramBinCount = ui.TraceHistogramBins();
     const float densityThresholdRatio = ui.TraceDensityThresholdRatio();
+    const int edgeMode = ui.TraceEdgeMode();
+    const int polarityMode = ui.TracePolarityMode();
     std::string traceInputLabel = ui.TraceUseRawInput()
         ? "raw events in moving ball window"
         : "undistorted events in moving ball window";
     traceInputLabel += ui.TraceUseRadiusGate() ? " + radius gate" : " without radius gate";
+    traceInputLabel += std::string(" | pol=") + TracePolarityModeName(polarityMode);
     Color traceInputColor = traceMotionWindowValid ? DARKGREEN : MAROON;
     std::vector<TracePoint> tracePoints;
 
     if (!traceAccumulatedPoints.empty()
-        && traceAccumulatedPoints.size() == traceAccumulatedTimestamps.size()) {
-        tracePoints = BuildTracePointsFromFloatSource(traceAccumulatedPoints, traceAccumulatedTimestamps);
+        && traceAccumulatedPoints.size() == traceAccumulatedTimestamps.size()
+        && traceAccumulatedPoints.size() == traceAccumulatedPolarities.size()) {
+        tracePoints = BuildTracePointsFromFloatSource(
+            traceAccumulatedPoints,
+            traceAccumulatedTimestamps,
+            &traceAccumulatedPolarities,
+            polarityMode);
     }
 
     if (tracePoints.empty()
@@ -2506,8 +3339,13 @@ void Gui::DrawTraceScene() {
         && traceRawTimestamps != nullptr
         && !traceRawPoints->empty()
         && traceRawPoints->size() == traceRawTimestamps->size()) {
-        tracePoints = BuildTracePointsFromFloatSource(*traceRawPoints, *traceRawTimestamps);
-        traceInputLabel = "raw current window fallback";
+        tracePoints = BuildTracePointsFromFloatSource(
+            *traceRawPoints,
+            *traceRawTimestamps,
+            traceRawPolarities,
+            polarityMode);
+        traceInputLabel = std::string("raw current window fallback | pol=")
+            + TracePolarityModeName(polarityMode);
         traceInputColor = MAROON;
     }
 
@@ -2517,14 +3355,20 @@ void Gui::DrawTraceScene() {
         && traceFloatTimestamps != nullptr
         && !traceFloatPoints->empty()
         && traceFloatPoints->size() == traceFloatTimestamps->size()) {
-        tracePoints = BuildTracePointsFromFloatSource(*traceFloatPoints, *traceFloatTimestamps);
-        traceInputLabel = "undistorted current window fallback";
+        tracePoints = BuildTracePointsFromFloatSource(
+            *traceFloatPoints,
+            *traceFloatTimestamps,
+            traceFloatPolarities,
+            polarityMode);
+        traceInputLabel = std::string("undistorted current window fallback | pol=")
+            + TracePolarityModeName(polarityMode);
         traceInputColor = MAROON;
     }
 
     if (tracePoints.empty() && !ui.TraceUseRadiusGate()) {
-        tracePoints = BuildTracePointsFromEvents(View);
-        traceInputLabel = "rounded current window fallback";
+        tracePoints = BuildTracePointsFromEvents(View, polarityMode);
+        traceInputLabel = std::string("rounded current window fallback | pol=")
+            + TracePolarityModeName(polarityMode);
         traceInputColor = MAROON;
     }
     DrawText(
@@ -2673,7 +3517,8 @@ void Gui::DrawTraceScene() {
         lineOrder,
         pcaPeriodMs,
         histogramBinCount,
-        densityThresholdRatio
+        densityThresholdRatio,
+        edgeMode
     );
     if (!fit.valid) {
         ClearTrace3D();
@@ -2751,6 +3596,13 @@ void Gui::DrawTraceScene() {
         static_cast<int>(fit.sparseUpperFitPoints.size()
             + fit.sparseMiddleFitPoints.size()
             + fit.sparseLowerFitPoints.size());
+    int64_t traceTimeOriginUs = 0;
+    if (!tracePoints.empty()) {
+        traceTimeOriginUs = tracePoints.front().timestampUs;
+        for (const TracePoint &tracePoint : tracePoints) {
+            traceTimeOriginUs = std::min(traceTimeOriginUs, tracePoint.timestampUs);
+        }
+    }
 
     const Vector2 middleStart = project(fit.middleCurve.front());
     const Vector2 middleEnd = project(fit.middleCurve.back());
@@ -2759,6 +3611,8 @@ void Gui::DrawTraceScene() {
 
     traceWorld3D.clear();
     traceTimes3D.clear();
+    traceGroundTruthWorld3D.clear();
+    traceGroundTruthEstimateWorld3D.clear();
     trace3DValid = false;
     tracePoseText3D = "Trace pose: unavailable";
 
@@ -2809,8 +3663,24 @@ void Gui::DrawTraceScene() {
 
         if (std::isfinite(worldPoint.x) && std::isfinite(worldPoint.y) && std::isfinite(worldPoint.z)
             && (std::fabs(worldPoint.x) + std::fabs(worldPoint.y) + std::fabs(worldPoint.z)) > 1.0e-6f) {
+            const float localTimeSeconds = static_cast<float>(estimate.timeSeconds);
             traceWorld3D.push_back(worldPoint);
-            traceTimes3D.push_back(static_cast<float>(estimate.timeSeconds));
+            traceTimes3D.push_back(localTimeSeconds);
+        }
+    }
+
+    const int traceRejectedWorldOutliers = FilterTraceWorldOutliers(traceWorld3D, traceTimes3D);
+    traceGroundTruthWorld3D.clear();
+    traceGroundTruthEstimateWorld3D.clear();
+    if (!groundTruthTimesSeconds.empty() && traceWorld3D.size() == traceTimes3D.size()) {
+        for (std::size_t i = 0; i < traceWorld3D.size(); ++i) {
+            const float absoluteTimeSeconds =
+                static_cast<float>(traceTimeOriginUs) * 1.0e-6f + traceTimes3D[i];
+            Vector3 groundTruthPoint{};
+            if (LookupGroundTruthWorld(absoluteTimeSeconds, groundTruthPoint)) {
+                traceGroundTruthWorld3D.push_back(groundTruthPoint);
+                traceGroundTruthEstimateWorld3D.push_back(traceWorld3D[i]);
+            }
         }
     }
 
@@ -2852,18 +3722,24 @@ void Gui::DrawTraceScene() {
         DARKGRAY
     );
     DrawText(
-        TextFormat("width samples: %d/%d", static_cast<int>(widthEstimates.size()), widthSampleCount),
+        TextFormat(
+            "width samples: %d/%d | 3D outliers: %d",
+            static_cast<int>(widthEstimates.size()),
+            widthSampleCount,
+            traceRejectedWorldOutliers
+        ),
         static_cast<int>(dest.x + dest.width + 24.0f),
         static_cast<int>(dest.y + 106.0f),
         18,
-        DARKGRAY
+        traceRejectedWorldOutliers == 0 ? DARKGRAY : MAROON
     );
     DrawText(
         TextFormat(
-            "line: binw=%.1fpx bins=%d win=%.0f hist=%d dens=%.0f%%",
+            "line: binw=%.1fpx bins=%d win=%.0f edge=%s hist=%d dens=%.0f%%",
             fit.lineBinWidthPx,
             fit.lineBinCount,
             lineWindowPx,
+            TraceEdgeModeName(fit.edgeMode),
             fit.histogramBinCount,
             fit.densityThresholdRatio * 100.0f
         ),
@@ -3000,6 +3876,36 @@ void Gui::Draw3DScene() {
             DrawSphere(WorldToScene(worldPoint), 0.010f, Fade(SKYBLUE, 0.9f));
         }
 
+        if (!traceGroundTruthWorld3D.empty()) {
+            for (std::size_t i = 0; i < traceGroundTruthWorld3D.size(); ++i) {
+                const Vector3 truthScene = WorldToScene(traceGroundTruthWorld3D[i]);
+                DrawSphere(truthScene, 0.013f, RED);
+                DrawSphereWires(truthScene, 0.013f, 10, 10, MAROON);
+
+                if (i < traceGroundTruthEstimateWorld3D.size()) {
+                    DrawCylinderEx(
+                        WorldToScene(traceGroundTruthEstimateWorld3D[i]),
+                        truthScene,
+                        0.0025f,
+                        0.0025f,
+                        8,
+                        Fade(RED, 0.45f)
+                    );
+                }
+            }
+
+            for (std::size_t i = 1; i < traceGroundTruthWorld3D.size(); ++i) {
+                DrawCylinderEx(
+                    WorldToScene(traceGroundTruthWorld3D[i - 1]),
+                    WorldToScene(traceGroundTruthWorld3D[i]),
+                    0.004f,
+                    0.004f,
+                    10,
+                    RED
+                );
+            }
+        }
+
         if (traceTimes3D.size() == traceWorld3D.size()) {
             LinearRegression traceXReg;
             LinearRegression traceYReg;
@@ -3079,6 +3985,17 @@ void Gui::Draw3DScene() {
     if (trace3DValid) {
         DrawText(tracePoseText3D.c_str(), 8, 356, 18, BLUE);
         DrawText("Trace 3D fit: blue x/y linear, z quadratic", 8, 378, 18, BLUE);
+        if (!traceGroundTruthWorld3D.empty()) {
+            DrawText(
+                TextFormat("Trace GT red: %zu / %zu matched positions",
+                    traceGroundTruthWorld3D.size(),
+                    traceWorld3D.size()),
+                8,
+                400,
+                18,
+                RED
+            );
+        }
     }
 
 }
@@ -3156,13 +4073,15 @@ void Gui::Update() {
         last_render_time = now;
         if(ui.read == 1){
             ui.read = 0;
-            path_reader_ = MakeEventPath(std::string(ui.read_file), "events3");
+            path_reader_ = MakeReaderEventPath(std::string(ui.read_file), ui.UseSequenceDirectory());
             if (event_reader_ != nullptr) event_reader_->close();
             if(event_writer_ != nullptr){
                 event_writer_->close();
                 std::cerr << "Writer closed, " << event_writer_->count() << " events saved\n";
             }
             event_reader_ = std::make_unique<EventReader>(path_reader_);
+            LoadReaderCalibrationForReader(path_reader_);
+            LoadGroundTruthForReader(path_reader_);
             ui.SetReaderDuration(event_reader_->durationSeconds());
             ui.EnableReaderMode();
             ui.ClearFileTextFocus();
@@ -3188,7 +4107,10 @@ void Gui::ReadStore(dv::EventStore &event) {
 
     if (event_reader_ == nullptr) {
         try {
-            event_reader_ = std::make_unique<EventReader>(MakeEventPath("events3.h5", "events3"));
+            path_reader_ = MakeReaderEventPath(std::string(ui.read_file), ui.UseSequenceDirectory());
+            event_reader_ = std::make_unique<EventReader>(path_reader_);
+            LoadReaderCalibrationForReader(path_reader_);
+            LoadGroundTruthForReader(path_reader_);
             ui.SetReaderDuration(event_reader_->durationSeconds());
             std::cerr << "Reader ready with " << event_reader_->count() << " events\n";
         }
@@ -3362,6 +4284,10 @@ void Gui::SetTracePoseCalibration(const CalibrationData &calibration, float ball
     traceBallRadiusMm = ballRadiusMm;
 }
 
+const CalibrationData *Gui::ReaderCalibrationOverride() const {
+    return readerCalibrationOverrideReady ? &readerCalibrationOverride : nullptr;
+}
+
 void Gui::SetTraceMotionWindow(
     const Circle &circle,
     const QuadFit3D &yFromXFit,
@@ -3459,11 +4385,14 @@ bool Gui::TraceMotionWindowContains(const cv::Point2f &point) const {
 
 void Gui::AppendTraceEvents(
     const std::vector<cv::Point2f> &points,
-    const std::vector<int64_t> &timestamps) {
+    const std::vector<int64_t> &timestamps,
+    const std::vector<bool> *polarities) {
 
     if (points.empty() || points.size() != timestamps.size()) {
         return;
     }
+
+    const bool hasPolarities = polarities != nullptr && polarities->size() >= points.size();
 
     int64_t newestInBatch = std::numeric_limits<int64_t>::min();
     for (const int64_t timestamp : timestamps) {
@@ -3482,6 +4411,7 @@ void Gui::AppendTraceEvents(
     const int64_t previousLastTimestamp = traceLastAccumulatedTimestampUs;
     traceAccumulatedPoints.reserve(traceAccumulatedPoints.size() + points.size());
     traceAccumulatedTimestamps.reserve(traceAccumulatedTimestamps.size() + timestamps.size());
+    traceAccumulatedPolarities.reserve(traceAccumulatedPolarities.size() + points.size());
 
     for (std::size_t i = 0; i < points.size(); ++i) {
         const int64_t timestamp = timestamps[i];
@@ -3506,6 +4436,7 @@ void Gui::AppendTraceEvents(
 
         traceAccumulatedPoints.emplace_back(point);
         traceAccumulatedTimestamps.emplace_back(timestamp);
+        traceAccumulatedPolarities.emplace_back(hasPolarities ? (*polarities)[i] : true);
     }
 
     traceLastAccumulatedTimestampUs = std::max(traceLastAccumulatedTimestampUs, newestInBatch);
@@ -3527,23 +4458,27 @@ void Gui::AppendTraceEvents(
         if (write != read) {
             traceAccumulatedPoints[write] = traceAccumulatedPoints[read];
             traceAccumulatedTimestamps[write] = traceAccumulatedTimestamps[read];
+            traceAccumulatedPolarities[write] = traceAccumulatedPolarities[read];
         }
         ++write;
     }
 
     traceAccumulatedPoints.resize(write);
     traceAccumulatedTimestamps.resize(write);
+    traceAccumulatedPolarities.resize(write);
 
     if (traceAccumulatedPoints.size() > kMaxAccumulatedTraceEvents) {
         const std::size_t removeCount = traceAccumulatedPoints.size() - kMaxAccumulatedTraceEvents;
         traceAccumulatedPoints.erase(traceAccumulatedPoints.begin(), traceAccumulatedPoints.begin() + static_cast<std::ptrdiff_t>(removeCount));
         traceAccumulatedTimestamps.erase(traceAccumulatedTimestamps.begin(), traceAccumulatedTimestamps.begin() + static_cast<std::ptrdiff_t>(removeCount));
+        traceAccumulatedPolarities.erase(traceAccumulatedPolarities.begin(), traceAccumulatedPolarities.begin() + static_cast<std::ptrdiff_t>(removeCount));
     }
 }
 
 void Gui::ResetTraceAccumulation() {
     traceAccumulatedPoints.clear();
     traceAccumulatedTimestamps.clear();
+    traceAccumulatedPolarities.clear();
     traceLastAccumulatedTimestampUs = std::numeric_limits<int64_t>::min();
 }
 
@@ -3552,6 +4487,8 @@ void Gui::ClearTrace3D() {
     traceCurrentWorld3D = {0.0f, 0.0f, 0.0f};
     traceWorld3D.clear();
     traceTimes3D.clear();
+    traceGroundTruthWorld3D.clear();
+    traceGroundTruthEstimateWorld3D.clear();
     tracePoseText3D = "Trace pose: unavailable";
 }
 

@@ -70,8 +70,10 @@ public:
     const std::vector<DvCluster>& Clusters() const { return clusters_; }
     const std::vector<cv::Point2f>& RawFilteredPoints() const { return rawFilteredPoints_; }
     const std::vector<int64_t>& RawFilteredTimestamps() const { return rawFilteredTimestamps_; }
+    const std::vector<bool>& RawFilteredPolarities() const { return rawFilteredPolarities_; }
     const std::vector<cv::Point2f>& UndistortedFilteredPoints() const { return undistortedFilteredPoints_; }
     const std::vector<int64_t>& UndistortedFilteredTimestamps() const { return undistortedFilteredTimestamps_; }
+    const std::vector<bool>& UndistortedFilteredPolarities() const { return undistortedFilteredPolarities_; }
 
     bool ClustersAvailable() const { return !clusters_.empty(); }
     bool isCameraRunning() const { return capture_ && capture_->isRunning(); }
@@ -104,8 +106,10 @@ private:
     std::vector<DvCluster> clusters_;
     std::vector<cv::Point2f> rawFilteredPoints_;
     std::vector<int64_t> rawFilteredTimestamps_;
+    std::vector<bool> rawFilteredPolarities_;
     std::vector<cv::Point2f> undistortedFilteredPoints_;
     std::vector<int64_t> undistortedFilteredTimestamps_;
+    std::vector<bool> undistortedFilteredPolarities_;
 };
 
 

@@ -160,8 +160,10 @@ void DvCamera::Filter() {
 void DvCamera::Undistort() {
     rawFilteredPoints_.clear();
     rawFilteredTimestamps_.clear();
+    rawFilteredPolarities_.clear();
     undistortedFilteredPoints_.clear();
     undistortedFilteredTimestamps_.clear();
+    undistortedFilteredPolarities_.clear();
 
     if (Filtered.isEmpty()) {
         return;
@@ -176,6 +178,7 @@ void DvCamera::Undistort() {
     polarities.reserve(Filtered.size());
     rawFilteredPoints_.reserve(Filtered.size());
     rawFilteredTimestamps_.reserve(Filtered.size());
+    rawFilteredPolarities_.reserve(Filtered.size());
 
     for (const auto& e : Filtered) {
         distortedPoints.emplace_back(
@@ -190,6 +193,7 @@ void DvCamera::Undistort() {
             static_cast<float>(e.y())
         );
         rawFilteredTimestamps_.emplace_back(e.timestamp());
+        rawFilteredPolarities_.emplace_back(e.polarity());
     }
 
     if (distortedPoints.empty()) {
@@ -228,6 +232,7 @@ void DvCamera::Undistort() {
     dv::EventStore output;
     undistortedFilteredPoints_.reserve(undistortedPoints.size());
     undistortedFilteredTimestamps_.reserve(undistortedPoints.size());
+    undistortedFilteredPolarities_.reserve(undistortedPoints.size());
 
     for (size_t i = 0; i < undistortedPoints.size(); ++i) {
         const float xf = undistortedPoints[i].x;
@@ -242,6 +247,7 @@ void DvCamera::Undistort() {
 
             undistortedFilteredPoints_.emplace_back(xf, yf);
             undistortedFilteredTimestamps_.emplace_back(timestamps[i]);
+            undistortedFilteredPolarities_.emplace_back(polarities[i]);
 
             output.emplace_back(
                 timestamps[i],
