@@ -315,7 +315,7 @@ BallTrackerResult BallTracker::Update(
                     pose->timestampUs = poseTimestampUs;
 
                     track_ball_poses_.emplace_back(*pose);
-                    Update3DTrack(poseTimestampUs, *pose, result);
+                    Update3DTrack(poseTimestampUs, *pose, settings.weightedRegressionEnabled, result);
 
                     coef fit = FitLinear(track_ball_poses_);
                     (void)fit;
@@ -516,6 +516,7 @@ std::vector<cv::Point2f> BallTracker::OutlierFilter(
 void BallTracker::Update3DTrack(
     int64_t poseTimestampUs,
     const BallPose3D &pose,
+    bool weightedRegressionEnabled,
     BallTrackerResult &result) {
 
     const Vector3 worldPosition = ToMeters(pose.positionMm);
@@ -555,10 +556,32 @@ void BallTracker::Update3DTrack(
     if (x_reg_.size() >= 2) {
         x_fit_ = x_reg_.fit();
         y_fit_ = y_reg_.fit();
+
+        if (weightedRegressionEnabled) {
+            std::vector<float> xs;
+            std::vector<float> ys;
+            xs.reserve(world_track_.size());
+            ys.reserve(world_track_.size());
+            for (const Vector3 &point : world_track_) {
+                xs.push_back(point.x);
+                ys.push_back(point.y);
+            }
+            x_fit_ = WeightedLinearFit(track_time_seconds_, xs, x_fit_);
+            y_fit_ = WeightedLinearFit(track_time_seconds_, ys, y_fit_);
+        }
     }
 
     if (z_reg_.size() >= 3) {
         z_fit_ = z_reg_.fit();
+
+        if (weightedRegressionEnabled) {
+            std::vector<float> zs;
+            zs.reserve(world_track_.size());
+            for (const Vector3 &point : world_track_) {
+                zs.push_back(point.z);
+            }
+            z_fit_ = WeightedQuadraticFit(track_time_seconds_, zs, z_fit_);
+        }
     }
 
     result.updatedTrajectory = true;

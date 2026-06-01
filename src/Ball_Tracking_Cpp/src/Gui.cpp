@@ -4001,6 +4001,25 @@ void Gui::Draw3DScene() {
         traceXFit = traceXReg.fit();
         traceYFit = traceYReg.fit();
         traceZFit = traceZReg.fit();
+
+        if (ui.WeightedRegressionEnabled()) {
+            std::vector<float> xs;
+            std::vector<float> ys;
+            std::vector<float> zs;
+            xs.reserve(traceWorld3D.size());
+            ys.reserve(traceWorld3D.size());
+            zs.reserve(traceWorld3D.size());
+            for (const Vector3 &point : traceWorld3D) {
+                xs.push_back(point.x);
+                ys.push_back(point.y);
+                zs.push_back(point.z);
+            }
+
+            traceXFit = WeightedLinearFit(traceTimes3D, xs, traceXFit);
+            traceYFit = WeightedLinearFit(traceTimes3D, ys, traceYFit);
+            traceZFit = WeightedQuadraticFit(traceTimes3D, zs, traceZFit);
+        }
+
         traceFitValid = traceFitTMax > traceFitTMin;
     }
 
@@ -4153,9 +4172,17 @@ void Gui::Draw3DScene() {
     if (trace3DValid) {
         DrawText(tracePoseText3D.c_str(), 8, 356, 18, BLUE);
         if (traceFitValid) {
-            DrawText(TextFormat("Trace x(t) = %.3f t + %.3f", traceXFit.a, traceXFit.b), 8, 378, 18, BLUE);
-            DrawText(TextFormat("Trace y(t) = %.3f t + %.3f", traceYFit.a, traceYFit.b), 8, 400, 18, BLUE);
-            DrawText(TextFormat("Trace z(t) = %.3f t^2 + %.3f t + %.3f", traceZFit.a, traceZFit.b, traceZFit.c), 8, 422, 18, BLUE);
+            DrawText(
+                ui.WeightedRegressionEnabled()
+                    ? "Trace fit: weighted recent + robust"
+                    : "Trace fit: unweighted",
+                8,
+                378,
+                18,
+                BLUE);
+            DrawText(TextFormat("Trace x(t) = %.3f t + %.3f", traceXFit.a, traceXFit.b), 8, 400, 18, BLUE);
+            DrawText(TextFormat("Trace y(t) = %.3f t + %.3f", traceYFit.a, traceYFit.b), 8, 422, 18, BLUE);
+            DrawText(TextFormat("Trace z(t) = %.3f t^2 + %.3f t + %.3f", traceZFit.a, traceZFit.b, traceZFit.c), 8, 444, 18, BLUE);
         }
         else {
             DrawText("Trace 3D fit: blue x/y linear, z quadratic", 8, 378, 18, BLUE);
@@ -4166,7 +4193,7 @@ void Gui::Draw3DScene() {
                     traceGroundTruthWorld3D.size(),
                     traceWorld3D.size()),
                 8,
-                traceFitValid ? 444 : 400,
+                traceFitValid ? 466 : 400,
                 18,
                 RED
             );

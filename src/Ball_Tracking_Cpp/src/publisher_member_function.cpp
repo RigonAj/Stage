@@ -343,6 +343,7 @@ BallTrackerSettings Pub::trackerSettings() const {
     settings.symCoef2 = ui.Sym_coef2();
     settings.alpha = ui.Alpha();
     settings.radiusGateEnabled = ui.TraceUseRadiusGate();
+    settings.weightedRegressionEnabled = ui.WeightedRegressionEnabled();
     settings.sliceMode = static_cast<BallSliceMode>(ui.SliceMode());
     settings.temporalSliceCount = ui.TemporalSlices();
     settings.eventsPerSlice = ui.EventsPerSlice();

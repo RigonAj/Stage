@@ -260,6 +260,7 @@ public:
         trace_follow_window_px = 98.17f;
         trace_use_raw_input = false;
         trace_radius_gate_enabled = false;
+        weighted_regression_enabled = false;
         trace_edge_mode = 1;
         trace_polarity_mode = 2;
         temporal_slices = 5.0f;
@@ -399,6 +400,10 @@ public:
         DrawText("Circle fit", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
         GuiToggle({px, py, 90.0f, h}, circle_fitting_enabled ? "ON" : "OFF", &circle_fitting_enabled);
         px += 120.0f;
+
+        DrawText("Weighted reg", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
+        GuiToggle({px, py, 110.0f, h}, weighted_regression_enabled ? "ON" : "OFF", &weighted_regression_enabled);
+        px += 140.0f;
 
         DrawText("Record", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
         GuiToggle({px, py, 90.0f, h}, record ? "REC" : "---", &record);
@@ -652,6 +657,7 @@ public:
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
     bool CircleFittingEnabled() const { return circle_fitting_enabled; }
+    bool WeightedRegressionEnabled() const { return weighted_regression_enabled; }
     int SliceMode() const { return std::clamp(slice_mode, 0, 2); }
     bool Show2D() const { return view_mode == 0; }
     bool Show3D() const { return view_mode == 1; }
@@ -707,6 +713,7 @@ private:
     float trace_follow_window_px = 98.17f;
     bool trace_use_raw_input = false;
     bool trace_radius_gate_enabled = true;
+    bool weighted_regression_enabled = false;
     int trace_edge_mode = 1;
     int trace_polarity_mode = 2;
     float temporal_slices = 5.0f;

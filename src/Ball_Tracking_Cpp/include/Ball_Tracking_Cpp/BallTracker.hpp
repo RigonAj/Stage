@@ -25,6 +25,7 @@ struct BallTrackerSettings {
     float symCoef2 = 157.0f;
     float alpha = 50.0f;
     bool radiusGateEnabled = true;
+    bool weightedRegressionEnabled = false;
     BallSliceMode sliceMode = BallSliceMode::RecentEvents;
     int temporalSliceCount = 5;
     int eventsPerSlice = 100;
@@ -111,6 +112,7 @@ private:
     void Update3DTrack(
         int64_t poseTimestampUs,
         const BallPose3D &pose,
+        bool weightedRegressionEnabled,
         BallTrackerResult &result);
 
 private:

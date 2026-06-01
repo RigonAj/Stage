@@ -417,6 +417,33 @@
       font-weight: 700;
     }
 
+    .support-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 18px 0;
+    }
+
+    .support-graph {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    .support-graph .caption {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #f5f5f2;
+      font-weight: 700;
+    }
+
+    .support-graph svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
     footer {
       padding: 28px 0 40px;
       color: var(--muted);
@@ -434,7 +461,8 @@
       .param-grid,
       .code-map,
       .metric-grid,
-      .split-note {
+      .split-note,
+      .support-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -447,9 +475,9 @@
         <h1>Détection des bords de trace événementielle</h1>
         <p class="lead">
           Cette page explique l’algorithme actuel de détection de la trace dans la vue
-          <code>Trace</code> : comment les événements sont projetés, comment les bords sont
-          détectés par densité, comment les lignes haut/milieu/bas sont construites, puis
-          comment la largeur est mesurée perpendiculairement à la ligne du milieu.
+          <code>Trace</code> : accumulation des événements, projection dans le repère de trace,
+          détection des bords par support ou par densité, construction des lignes haut/milieu/bas,
+          mesure de largeur 3D, puis régression pondérée optionnelle de la trajectoire.
         </p>
         <div class="legend">
           <span><i class="swatch" style="background: var(--green)"></i>bord haut</span>
@@ -508,6 +536,7 @@
       <a href="#bords">Détection des bords</a>
       <a href="#lignes">Lignes haut/milieu/bas</a>
       <a href="#largeur">Largeur</a>
+      <a href="#weighted">Régression pondérée</a>
       <a href="#params">Paramètres</a>
       <a href="#diagnostic">Diagnostic</a>
       <a href="#pseudo">Pseudo-code</a>
@@ -630,12 +659,24 @@
             <p>Transforme les points raw ou undistorted en points de trace avec timestamp.</p>
           </div>
           <div class="code-card">
+            <strong>UpdateTraceAnalysis()</strong>
+            <p>Exécute l’analyse Trace même quand la vue affichée n’est pas <code>Trace</code>, pour garder la pose 3D bleue à jour.</p>
+          </div>
+          <div class="code-card">
             <strong>FitTraceRibbon()</strong>
             <p>Calcule la direction globale, découpe la trace, détecte les bords locaux et construit les courbes haut/milieu/bas.</p>
           </div>
           <div class="code-card">
+            <strong>EstimateTraceEdges()</strong>
+            <p>Point d’entrée de détection des bords. Essaie le mode <code>Support</code>, puis retombe sur le mode <code>Density</code> si besoin.</p>
+          </div>
+          <div class="code-card">
+            <strong>EstimateSupportedEdges()</strong>
+            <p>Détecte les bords extrêmes qui ont un support local suffisant, robuste contre quelques points isolés.</p>
+          </div>
+          <div class="code-card">
             <strong>EstimateDenseEdges()</strong>
-            <p>Détecte les deux bords dans une coupe 1D par histogramme de densité et composant principal.</p>
+            <p>Détecte les deux bords dans une coupe 1D par histogramme lissé et composant dense principal.</p>
           </div>
           <div class="code-card">
             <strong>FilterCoherentRibbonSamples()</strong>
@@ -652,6 +693,10 @@
           <div class="code-card">
             <strong>TraceImagePointToWorldMeters()</strong>
             <p>Convertit le point image + largeur en pixels en position 3D estimée avec le modèle de caméra.</p>
+          </div>
+          <div class="code-card">
+            <strong>WeightedLinearFit() / WeightedQuadraticFit()</strong>
+            <p>Régression optionnelle : les points récents pèsent plus, les points loin de la courbe pèsent moins.</p>
           </div>
         </div>
 
@@ -673,7 +718,7 @@
           </div>
           <div class="metric">
             <span>histogramme h</span>
-            <strong>48</strong>
+            <strong>16</strong>
             <span>bins par défaut, réglables dans l’interface</span>
           </div>
         </div>
@@ -927,17 +972,237 @@ h = dot(delta, normale)</code></pre>
             dehors, beaucoup d’événements dans la trace.
           </p>
           <p>
-            L’algorithme actuel ne prend plus un percentile pour dire “bord haut” et “bord bas”.
-            Il construit un histogramme de densité, le lisse légèrement, puis garde le composant
-            dense principal. Le slider <code>Hist bins</code> règle directement le nombre de cases
-            de cet histogramme local, et <code>Density %</code> règle le seuil relatif au pic de densité.
+            L’algorithme actuel ne prend pas simplement un percentile pour dire “bord haut” et
+            “bord bas”. La fonction <code>EstimateTraceEdges()</code> choisit une méthode locale selon
+            le bouton <code>Edge</code> :
+          </p>
+          <ul>
+            <li><strong>Support</strong> cherche les extrêmes qui ont assez de voisins dans un rayon local.</li>
+            <li><strong>Density</strong> construit un histogramme lissé et garde le composant dense principal.</li>
+          </ul>
+          <p>
+            En mode <code>Support</code>, le code essaie d’abord <code>EstimateSupportedEdges()</code>.
+            Si la coupe n’a pas assez de support fiable, il retombe sur <code>EstimateDenseEdges()</code>.
+            C’est important : le mode Support est bon pour garder toute la largeur visible, mais le
+            mode Density sauve les cas où les extrêmes sont trop irréguliers.
+          </p>
+
+          <h3>Mode Support : trouver les extrêmes soutenus</h3>
+          <p>
+            Les valeurs <code>h</code> finies sont triées. Le code cherche ensuite le premier point bas
+            et le dernier point haut qui ont plusieurs voisins proches dans un rayon fixe. Un point
+            isolé très loin ne suffit donc pas à créer un bord.
+          </p>
+          <p>
+            Exemple concret : imaginons une coupe locale où la vraie trace occupe environ
+            <code>h = -6 px</code> à <code>h = +6 px</code>. Quelques événements isolés apparaissent
+            à <code>-12 px</code> et <code>+13 px</code>. Un simple minimum/maximum choisirait ces
+            deux outliers comme bords. Le mode Support les ignore parce qu’ils n’ont pas assez de
+            voisins proches.
+          </p>
+          <pre><code>values = sort(finite h)
+localSupport = clamp(count / 28, 3, 9)
+supportRadius = 1.75 px
+
+exemple :
+  count = 36 valeurs
+  localSupport = clamp(36 / 28, 3, 9) = 3
+  supportRadius = 1.75 px
+
+low = premier h qui a au moins 3 valeurs dans [h, h + 1.75]
+high = dernier h qui a au moins 3 valeurs dans [h - 1.75, h]
+
+low  -= petite correction centre-pixel -> bord
+high += petite correction centre-pixel -> bord</code></pre>
+          <p>
+            Le balayage bas part du plus petit <code>h</code>. Pour chaque candidat, il compte combien
+            de valeurs triées tombent dans une fenêtre de <code>1.75 px</code> vers la droite. Le premier
+            candidat qui atteint <code>localSupport</code> devient <code>low</code>. Le balayage haut fait
+            la même chose depuis la droite, avec une fenêtre de <code>1.75 px</code> vers la gauche.
+          </p>
+          <p class="ok">
+            Le mode Support répond à la question : “où commencent et finissent les points vraiment
+            soutenus par le paquet d’événements ?”. C’est souvent le meilleur choix pour une trace
+            nette avec des bords pleins.
+          </p>
+
+          <div class="support-grid">
+            <div class="support-graph">
+              <div class="caption">Étape 1 : coupe brute sur l’axe h</div>
+              <svg viewBox="0 0 520 250" role="img" aria-label="Coupe brute avec outliers">
+                <rect width="520" height="250" fill="#ffffff"/>
+                <line x1="52" y1="168" x2="472" y2="168" stroke="#333" stroke-width="2"/>
+                <text x="472" y="196" font-size="13" fill="#575757" text-anchor="end">h en pixels</text>
+                <g font-size="12" fill="#575757" text-anchor="middle">
+                  <text x="70" y="190">-14</text>
+                  <text x="190" y="190">-6</text>
+                  <text x="260" y="190">0</text>
+                  <text x="330" y="190">+6</text>
+                  <text x="450" y="190">+14</text>
+                </g>
+                <rect x="176" y="68" width="168" height="78" rx="8" fill="#eaf2ff" stroke="#9dbce8"/>
+                <text x="260" y="58" font-size="14" fill="#1174d8" text-anchor="middle" font-weight="700">paquet soutenu</text>
+                <g fill="#1174d8" opacity="0.9">
+                  <circle cx="182" cy="128" r="5"/>
+                  <circle cx="194" cy="113" r="5"/>
+                  <circle cx="206" cy="135" r="5"/>
+                  <circle cx="221" cy="101" r="5"/>
+                  <circle cx="236" cy="126" r="5"/>
+                  <circle cx="251" cy="91" r="5"/>
+                  <circle cx="266" cy="132" r="5"/>
+                  <circle cx="281" cy="107" r="5"/>
+                  <circle cx="296" cy="122" r="5"/>
+                  <circle cx="312" cy="96" r="5"/>
+                  <circle cx="327" cy="136" r="5"/>
+                  <circle cx="340" cy="116" r="5"/>
+                </g>
+                <g fill="#d92828">
+                  <circle cx="92" cy="128" r="5"/>
+                  <circle cx="438" cy="104" r="5"/>
+                </g>
+                <text x="92" y="96" font-size="13" fill="#d92828" text-anchor="middle">outlier</text>
+                <text x="438" y="76" font-size="13" fill="#d92828" text-anchor="middle">outlier</text>
+                <path d="M190 168 L190 158 M330 168 L330 158" stroke="#1174d8" stroke-width="3"/>
+                <text x="260" y="222" font-size="13" fill="#575757" text-anchor="middle">les points rouges sont extrêmes, mais non soutenus</text>
+              </svg>
+            </div>
+
+            <div class="support-graph">
+              <div class="caption">Étape 2 : balayage bas avec fenêtre de support</div>
+              <svg viewBox="0 0 520 250" role="img" aria-label="Balayage bas du support">
+                <rect width="520" height="250" fill="#ffffff"/>
+                <line x1="52" y1="168" x2="472" y2="168" stroke="#333" stroke-width="2"/>
+                <text x="70" y="190" font-size="12" fill="#575757" text-anchor="middle">-14</text>
+                <text x="190" y="190" font-size="12" fill="#575757" text-anchor="middle">-6</text>
+                <text x="260" y="190" font-size="12" fill="#575757" text-anchor="middle">0</text>
+                <text x="330" y="190" font-size="12" fill="#575757" text-anchor="middle">+6</text>
+                <g fill="#1174d8" opacity="0.85">
+                  <circle cx="182" cy="126" r="5"/>
+                  <circle cx="194" cy="112" r="5"/>
+                  <circle cx="206" cy="136" r="5"/>
+                  <circle cx="221" cy="102" r="5"/>
+                  <circle cx="236" cy="127" r="5"/>
+                  <circle cx="251" cy="92" r="5"/>
+                  <circle cx="266" cy="133" r="5"/>
+                  <circle cx="281" cy="108" r="5"/>
+                  <circle cx="296" cy="123" r="5"/>
+                  <circle cx="312" cy="97" r="5"/>
+                  <circle cx="327" cy="137" r="5"/>
+                  <circle cx="340" cy="117" r="5"/>
+                </g>
+                <circle cx="92" cy="128" r="5" fill="#d92828"/>
+                <rect x="92" y="74" width="26" height="78" rx="6" fill="none" stroke="#d92828" stroke-width="3" stroke-dasharray="6 5"/>
+                <text x="126" y="92" font-size="13" fill="#d92828">1 point : rejet</text>
+                <rect x="182" y="72" width="26" height="82" rx="6" fill="none" stroke="#00b84a" stroke-width="3"/>
+                <text x="212" y="66" font-size="13" fill="#00a03d" font-weight="700">3 points : low accepté</text>
+                <line x1="182" y1="50" x2="182" y2="173" stroke="#00b84a" stroke-width="3"/>
+                <text x="182" y="220" font-size="13" fill="#00a03d" text-anchor="middle" font-weight="700">low soutenu</text>
+              </svg>
+            </div>
+
+            <div class="support-graph">
+              <div class="caption">Étape 3 : balayage haut depuis la droite</div>
+              <svg viewBox="0 0 520 250" role="img" aria-label="Balayage haut du support">
+                <rect width="520" height="250" fill="#ffffff"/>
+                <line x1="52" y1="168" x2="472" y2="168" stroke="#333" stroke-width="2"/>
+                <g font-size="12" fill="#575757" text-anchor="middle">
+                  <text x="190" y="190">-6</text>
+                  <text x="260" y="190">0</text>
+                  <text x="330" y="190">+6</text>
+                  <text x="450" y="190">+14</text>
+                </g>
+                <g fill="#1174d8" opacity="0.85">
+                  <circle cx="182" cy="126" r="5"/>
+                  <circle cx="194" cy="112" r="5"/>
+                  <circle cx="206" cy="136" r="5"/>
+                  <circle cx="221" cy="102" r="5"/>
+                  <circle cx="236" cy="127" r="5"/>
+                  <circle cx="251" cy="92" r="5"/>
+                  <circle cx="266" cy="133" r="5"/>
+                  <circle cx="281" cy="108" r="5"/>
+                  <circle cx="296" cy="123" r="5"/>
+                  <circle cx="312" cy="97" r="5"/>
+                  <circle cx="327" cy="137" r="5"/>
+                  <circle cx="340" cy="117" r="5"/>
+                </g>
+                <circle cx="438" cy="104" r="5" fill="#d92828"/>
+                <rect x="412" y="74" width="26" height="78" rx="6" fill="none" stroke="#d92828" stroke-width="3" stroke-dasharray="6 5"/>
+                <text x="316" y="78" font-size="13" fill="#d92828">1 point : rejet</text>
+                <rect x="314" y="72" width="26" height="82" rx="6" fill="none" stroke="#e300d8" stroke-width="3"/>
+                <text x="196" y="66" font-size="13" fill="#c000bd" font-weight="700">3 points : high accepté</text>
+                <line x1="340" y1="50" x2="340" y2="173" stroke="#e300d8" stroke-width="3"/>
+                <text x="340" y="220" font-size="13" fill="#c000bd" text-anchor="middle" font-weight="700">high soutenu</text>
+              </svg>
+            </div>
+
+            <div class="support-graph">
+              <div class="caption">Étape 4 : correction, largeur et validation</div>
+              <svg viewBox="0 0 520 250" role="img" aria-label="Correction et validation finale du support">
+                <rect width="520" height="250" fill="#ffffff"/>
+                <line x1="52" y1="168" x2="472" y2="168" stroke="#333" stroke-width="2"/>
+                <rect x="170" y="66" width="184" height="88" rx="8" fill="#edf9f0" stroke="#8bcf9e"/>
+                <line x1="170" y1="48" x2="170" y2="174" stroke="#00b84a" stroke-width="3"/>
+                <line x1="354" y1="48" x2="354" y2="174" stroke="#e300d8" stroke-width="3"/>
+                <line x1="262" y1="48" x2="262" y2="174" stroke="#d8b600" stroke-width="3"/>
+                <g fill="#1174d8" opacity="0.85">
+                  <circle cx="182" cy="126" r="5"/>
+                  <circle cx="194" cy="112" r="5"/>
+                  <circle cx="206" cy="136" r="5"/>
+                  <circle cx="221" cy="102" r="5"/>
+                  <circle cx="236" cy="127" r="5"/>
+                  <circle cx="251" cy="92" r="5"/>
+                  <circle cx="266" cy="133" r="5"/>
+                  <circle cx="281" cy="108" r="5"/>
+                  <circle cx="296" cy="123" r="5"/>
+                  <circle cx="312" cy="97" r="5"/>
+                  <circle cx="327" cy="137" r="5"/>
+                  <circle cx="340" cy="117" r="5"/>
+                </g>
+                <g fill="#d92828">
+                  <circle cx="92" cy="128" r="5"/>
+                  <circle cx="438" cy="104" r="5"/>
+                </g>
+                <path d="M182 188 L170 188" stroke="#00b84a" stroke-width="3" marker-end="url(#supportLeftArrow)"/>
+                <path d="M340 188 L354 188" stroke="#e300d8" stroke-width="3" marker-end="url(#supportRightArrow)"/>
+                <defs>
+                  <marker id="supportLeftArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M0 0 L10 5 L0 10 z" fill="#00b84a"/>
+                  </marker>
+                  <marker id="supportRightArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M0 0 L10 5 L0 10 z" fill="#e300d8"/>
+                  </marker>
+                </defs>
+                <text x="262" y="36" font-size="14" fill="#171717" text-anchor="middle" font-weight="700">supportCount = 12, accepté</text>
+                <text x="170" y="212" font-size="13" fill="#00a03d" text-anchor="middle">low corrigé</text>
+                <text x="262" y="212" font-size="13" fill="#a38900" text-anchor="middle">middle</text>
+                <text x="354" y="212" font-size="13" fill="#c000bd" text-anchor="middle">high corrigé</text>
+                <text x="262" y="232" font-size="13" fill="#575757" text-anchor="middle">width = high - low, utilisé ensuite pour la profondeur</text>
+              </svg>
+            </div>
+          </div>
+
+          <p class="note">
+            La petite correction appliquée à <code>low</code> et <code>high</code> compense le fait que
+            les événements mesurés sont des centres de pixels. Le code agrandit légèrement la largeur
+            avec une correction bornée, proportionnelle à la largeur brute.
+          </p>
+
+          <h3>Mode Density : trouver le paquet dense principal</h3>
+          <p>
+            Le mode Density répond à une question différente : “où est le composant dense le plus
+            massif dans cette coupe ?”. Le slider <code>Hist bins</code> règle le nombre de cases de
+            l’histogramme local, et <code>Density %</code> règle le seuil relatif au pic de densité.
           </p>
           <pre><code>histogramme(h, HistBins)
-lissage 5 taps
-seuil = max(plancher_bruit, DensityThreshold * pic)
-composant = plus grande masse au-dessus du seuil
-low  = front montant du composant dense
-high = front descendant du composant dense
+lissage 5 taps : [1, 2, 3, 2, 1] / 9
+pic = max(histogramme_lissé)
+seuil = max(plancher_points_isolés, DensityThreshold * pic)
+
+composants = zones consécutives au-dessus du seuil
+composant = composant avec la plus grande masse
+
+low  = passage du seuil côté gauche
+high = passage du seuil côté droit
 middle = (low + high) / 2</code></pre>
           <p class="ok">
             Les points isolés ne devraient pas déplacer le bord, parce qu’ils ne forment pas le
@@ -947,6 +1212,17 @@ middle = (low + high) / 2</code></pre>
             Si une tranche contient trop peu d’événements, ou si la densité est coupée en plusieurs
             paquets comparables, la mesure peut être rejetée.
           </p>
+
+          <h3>Validation de la coupe</h3>
+          <p>
+            Une coupe est acceptée seulement si elle a assez de support. En mode Density, les points
+            compris entre <code>low</code> et <code>high</code> doivent être assez nombreux et représenter
+            une fraction significative des points finis de la coupe.
+          </p>
+          <pre><code>denseValues = h entre low et high
+reject si denseValues &lt; minSupportCount
+reject si denseValues &lt; finiteCount / 4
+reject si high &lt;= low</code></pre>
         </div>
 
         <div>
@@ -1137,9 +1413,127 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
       </div>
     </section>
 
+    <section id="weighted">
+      <div class="wrap grid-2">
+        <div>
+          <h2>6. Régression pondérée de trajectoire</h2>
+          <p>
+            Le bouton <code>Weighted reg</code> active une variante de régression pour la trajectoire
+            3D. Elle est utilisée pour la trajectoire classique issue du circle fitting, et aussi
+            pour la trajectoire bleue issue de la trace. Le but est de garder une courbe réactive :
+            les mesures récentes comptent plus que les anciennes, et les points loin de la courbe
+            actuelle comptent moins.
+          </p>
+
+          <h3>Modèle ajusté</h3>
+          <p>
+            Le modèle géométrique ne change pas. Seuls les poids des observations changent.
+          </p>
+          <div class="formula">
+            <div>x(t) = a t + b</div>
+            <div>y(t) = a t + b</div>
+            <div>z(t) = a t² + b t + c</div>
+          </div>
+          <p>
+            En mode non pondéré, chaque point a le même poids. En mode pondéré, chaque point reçoit
+            un poids total :
+          </p>
+          <div class="formula">
+            <div>poids_total = poids_récence × poids_robuste</div>
+          </div>
+
+          <h3>Poids de récence</h3>
+          <p>
+            Le poids de récence dépend de la position temporelle du point dans l’historique courant.
+            Le point le plus récent a un poids proche de <code>1</code>. Les points anciens décroissent
+            exponentiellement.
+          </p>
+          <pre><code>age = clamp((newestTime - t) / timeRange, 0, 1)
+poids_récence = exp(-3 * age)</code></pre>
+          <p class="ok">
+            Cette formule garde les derniers points dominants sans supprimer totalement l’historique.
+            Un vieux point peut encore stabiliser la courbe s’il est cohérent.
+          </p>
+
+          <h3>Poids robuste contre les outliers</h3>
+          <p>
+            Le code fait d’abord une régression normale. Ensuite il mesure le résidu de chaque point
+            par rapport à cette première courbe. Le résidu est comparé à une échelle robuste basée
+            sur la médiane des résidus.
+          </p>
+          <pre><code>résidu = abs(y_mesuré - y_prédit)
+scale = max(1e-6, median(residus) * 1.4826)
+poids_robuste = 1 / (1 + (résidu / scale)²)</code></pre>
+          <p class="note">
+            Un point proche de la courbe garde presque tout son poids. Un point très loin de la
+            courbe voit son poids diminuer fortement, au lieu de tirer toute la trajectoire.
+          </p>
+
+          <h3>Où c’est appliqué</h3>
+          <p>
+            Dans le tracker classique, la pondération est appliquée dans <code>Update3DTrack()</code>
+            après l’ajout d’une nouvelle pose 3D. Dans la vue 3D, la trajectoire bleue Trace est
+            recalculée avec le même principe avant d’être dessinée et avant d’afficher ses équations.
+          </p>
+          <pre><code>fit_initial = régression normale
+poids = récence(t) * robustesse(résidu)
+fit_final = régression pondérée</code></pre>
+        </div>
+
+        <div>
+          <div class="diagram" aria-label="Régression pondérée">
+            <svg viewBox="0 0 560 460" role="img">
+              <rect width="560" height="460" fill="#ffffff"/>
+              <line x1="72" y1="376" x2="508" y2="376" stroke="#333" stroke-width="2"/>
+              <line x1="72" y1="376" x2="72" y2="62" stroke="#333" stroke-width="2"/>
+              <text x="508" y="405" font-size="14" fill="#575757" text-anchor="end">temps</text>
+              <text x="28" y="72" font-size="14" fill="#575757" transform="rotate(-90 28 72)">position</text>
+
+              <path d="M88 330 C166 290 246 226 330 176 C397 136 452 117 494 105" fill="none" stroke="#d0d0c8" stroke-width="4" stroke-dasharray="8 7"/>
+              <path d="M88 326 C165 295 247 240 334 188 C407 144 457 111 494 82" fill="none" stroke="#1174d8" stroke-width="5" stroke-linecap="round"/>
+
+              <g fill="#1174d8" opacity="0.85">
+                <circle cx="96" cy="325" r="4"/>
+                <circle cx="145" cy="295" r="5"/>
+                <circle cx="192" cy="265" r="6"/>
+                <circle cx="245" cy="238" r="7"/>
+                <circle cx="300" cy="202" r="8"/>
+                <circle cx="356" cy="168" r="10"/>
+                <circle cx="415" cy="131" r="12"/>
+                <circle cx="478" cy="91" r="15"/>
+              </g>
+
+              <g fill="#d92828" opacity="0.85">
+                <circle cx="238" cy="124" r="4"/>
+                <circle cx="382" cy="260" r="5"/>
+              </g>
+
+              <line x1="238" y1="124" x2="244" y2="238" stroke="#d92828" stroke-width="2" stroke-dasharray="6 6"/>
+              <line x1="382" y1="260" x2="372" y2="157" stroke="#d92828" stroke-width="2" stroke-dasharray="6 6"/>
+              <text x="116" y="73" font-size="18" font-weight="700" fill="#171717">Pondération des mesures</text>
+              <text x="116" y="100" font-size="14" fill="#575757">taille du point = poids temporel, rouge = point loin de la courbe</text>
+              <text x="350" y="188" font-size="14" fill="#1174d8" font-weight="700">fit pondéré</text>
+              <text x="254" y="119" font-size="13" fill="#d92828">poids robuste faible</text>
+              <text x="394" y="282" font-size="13" fill="#d92828">poids robuste faible</text>
+
+              <g transform="translate(88 398)">
+                <rect x="0" y="0" width="388" height="40" rx="7" fill="#f5f5f2" stroke="#d7d7d0"/>
+                <text x="16" y="25" font-size="13" fill="#575757">les points récents sont plus gros, les outliers restent visibles mais influencent moins</text>
+              </g>
+            </svg>
+          </div>
+
+          <div class="warn" style="margin-top: 14px">
+            La pondération ne remplace pas la détection de bords. Elle stabilise seulement la
+            trajectoire finale quand quelques poses 3D sont anciennes ou aberrantes.
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="params">
       <div class="wrap">
-        <h2>6. Paramètres et effets</h2>
+        <h2>7. Paramètres et effets</h2>
         <p>
           Les paramètres de la vue <code>Trace</code> n’agissent pas tous au même niveau. Certains
           changent la densité disponible, d’autres changent le découpage, d’autres changent le
@@ -1194,9 +1588,15 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
             </tr>
             <tr>
               <td><code>Density %</code></td>
-              <td>Seuil de densité relatif au pic de l’histogramme. Défaut : <code>16%</code>.</td>
+              <td>Seuil de densité relatif au pic de l’histogramme. Défaut : <code>2%</code>.</td>
               <td>Rejette davantage les zones faibles/bruitées ; le ruban peut devenir plus étroit ou perdre des tranches.</td>
               <td>Accepte plus de densité faible ; utile si la trace est pauvre, mais plus sensible aux paquets parasites.</td>
+            </tr>
+            <tr>
+              <td><code>Edge</code></td>
+              <td>Choisit la méthode locale de bord : <code>Support</code> ou <code>Density</code>.</td>
+              <td><code>Support</code> garde les extrêmes soutenus, souvent meilleur pour une trace pleine.</td>
+              <td><code>Density</code> se concentre sur le paquet dense principal, souvent meilleur si les extrêmes sont bruités.</td>
             </tr>
             <tr>
               <td><code>Local window</code></td>
@@ -1227,6 +1627,12 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
               <td>Accumule seulement les clusters validés par le filtre rayon/RMS.</td>
               <td><code>ON</code> garde une trace plus propre.</td>
               <td><code>OFF</code> accumule les événements filtrés sans cette validation, utile pour comparer.</td>
+            </tr>
+            <tr>
+              <td><code>Weighted reg</code></td>
+              <td>Active la régression pondérée par récence et par distance à la courbe.</td>
+              <td>Trajectoire plus réactive, moins influencée par les poses anciennes ou aberrantes.</td>
+              <td>Trajectoire strictement moyenne, utile comme référence de test.</td>
             </tr>
             <tr>
               <td><code>Fit input</code></td>
@@ -1261,8 +1667,8 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
           </label>
           <label>
             <code>Bin width px</code> :
-            <input id="binSlider" type="range" min="4" max="48" step="1" value="12">
-            <span class="readout"><span id="binValue">12</span> px</span>
+            <input id="binSlider" type="range" min="1" max="48" step="1" value="4">
+            <span class="readout"><span id="binValue">4</span> px</span>
           </label>
           <label>
             <code>Hist bins</code> :
@@ -1271,8 +1677,8 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
           </label>
           <label>
             <code>Density %</code> :
-            <input id="densitySlider" type="range" min="2" max="60" step="1" value="16">
-            <span class="readout"><span id="densityValue">16</span> % du pic</span>
+            <input id="densitySlider" type="range" min="2" max="60" step="1" value="2">
+            <span class="readout"><span id="densityValue">2</span> % du pic</span>
           </label>
           <p class="mini">
             Support moyen estimé : <strong><span id="eventsPerBin">2357</span></strong>
@@ -1294,7 +1700,7 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
 
     <section id="diagnostic">
       <div class="wrap">
-        <h2>7. Diagnostic visuel</h2>
+        <h2>8. Diagnostic visuel</h2>
         <p>
           Cette table sert à relier ce que l’on voit dans l’interface avec la partie de l’algorithme
           qui est probablement en cause.
@@ -1347,7 +1753,7 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
     <section id="pseudo">
       <div class="wrap grid-2">
         <div>
-          <h2>8. Pseudo-code complet</h2>
+          <h2>9. Pseudo-code complet</h2>
           <p>
             Voilà la version compacte de l’algorithme, proche de la structure du code. Les noms
             ne sont pas exactement tous les noms C++, mais l’ordre logique est le même.
@@ -1380,7 +1786,9 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
   highSamples = []
 
   for bin in bins:
-    edges = EstimateDenseEdges(bin.h, HistBins, DensityThreshold)
+    edges = EstimateTraceEdges(bin.h, EdgeMode, HistBins, DensityThreshold)
+    // si EdgeMode = Support : extrêmes soutenus, puis fallback densité
+    // si EdgeMode = Density : composant dense principal
     if edges.valid:
       lowSamples.push(bin.s, edges.low)
       middleSamples.push(bin.s, edges.middle)
@@ -1405,6 +1813,20 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
 
   removeWidthSpikes(widths)
   return topCurve, middleCurve, bottomCurve, widths</code></pre>
+
+          <h3>Pseudo-code de la régression pondérée</h3>
+          <pre><code>function weightedFit(times, values, model):
+  initial = unweightedFit(times, values, model)
+  residuals = abs(values - predict(initial, times))
+  scale = max(1e-6, median(residuals) * 1.4826)
+
+  for each sample i:
+    age = clamp((newestTime - times[i]) / timeRange, 0, 1)
+    recentWeight = exp(-3 * age)
+    robustWeight = 1 / (1 + (residuals[i] / scale)^2)
+    weight[i] = recentWeight * robustWeight
+
+  return weightedLeastSquares(times, values, weight, model)</code></pre>
         </div>
 
         <div>
@@ -1440,7 +1862,7 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
 
     <section id="reglage">
       <div class="wrap">
-        <h2>9. Conseils de réglage</h2>
+        <h2>10. Conseils de réglage</h2>
         <div class="param-grid">
           <div class="tuning">
             <strong>Si les bords ont des pics isolés</strong>
@@ -1475,13 +1897,15 @@ largeur = distance entre les deux bords sur cette normale</code></pre>
   -> combinaison des directions temporelles avec le PCA global
   -> coordonnées s/h
   -> tranches sur s
-  -> histogramme de densité sur h avec Hist bins
-  -> seuil de composant dense avec Density %
+  -> mode Edge Support ou Density
+  -> Support : extrêmes qui ont assez de voisins locaux
+  -> Density : histogramme sur h avec Hist bins et Density %
   -> low / middle / high locaux
   -> rejet des points incohérents
   -> fit local des 3 lignes
   -> largeur mesurée sur la normale du milieu
-  -> profondeur 3D depuis la largeur en pixels</code></pre>
+  -> profondeur 3D depuis la largeur en pixels
+  -> option Weighted reg pour la trajectoire finale</code></pre>
       </div>
     </section>
   </main>
