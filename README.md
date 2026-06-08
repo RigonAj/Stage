@@ -124,12 +124,34 @@ Generated folders such as `build/`, `install/`, `log/`, `.deps/`, local recordin
 - `dv-processing`
 - DVXplorer camera support
 
+## Ubuntu 24.04 Dependency Setup
+
+Check what is missing first:
+
+```bash
+scripts/install_dependencies_ubuntu24.sh --check
+```
+
+Install missing dependencies after the check:
+
+```bash
+scripts/install_dependencies_ubuntu24.sh --install
+```
+
+Or source the environment helper and use the aliases:
+
+```bash
+source env.sh
+deps-check
+deps-install
+```
+
 ## Build
 
 From the workspace root:
 
 ```bash
-source build.sh
+source env.sh
 build
 ```
 

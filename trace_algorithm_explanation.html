@@ -476,7 +476,7 @@
         <p class="lead">
           Cette page explique l’algorithme actuel de détection de la trace dans la vue
           <code>Trace</code> : accumulation des événements, projection dans le repère de trace,
-          détection des bords par support ou par densité, construction des lignes haut/milieu/bas,
+          détection des bords par support local, construction des lignes haut/milieu/bas,
           mesure de largeur 3D, puis régression pondérée optionnelle de la trajectoire.
         </p>
         <div class="legend">
@@ -521,7 +521,7 @@
             <circle cx="600" cy="277" r="2"/>
           </g>
           <text x="72" y="50" font-size="20" font-weight="700" fill="#171717">Ruban détecté</text>
-          <text x="72" y="76" font-size="14" fill="#575757">les bords sont des fronts de densité, pas des percentiles</text>
+          <text x="72" y="76" font-size="14" fill="#575757">les bords sont des extrêmes soutenus, pas des minimums/maximums isolés</text>
         </svg>
       </div>
     </div>
@@ -584,7 +584,7 @@
               <g transform="translate(790,64)">
                 <rect x="-82" y="-34" width="164" height="68" rx="7" fill="#edf9f0" stroke="#8bcf9e"/>
                 <text y="-7" font-weight="700">Bords locaux</text>
-                <text y="15" fill="#575757">densité sur h</text>
+                <text y="15" fill="#575757">support sur h</text>
               </g>
               <g transform="translate(985,64)">
                 <rect x="-84" y="-34" width="168" height="68" rx="7" fill="#fbecfb" stroke="#e59ee1"/>
@@ -667,16 +667,12 @@
             <p>Calcule la direction globale, découpe la trace, détecte les bords locaux et construit les courbes haut/milieu/bas.</p>
           </div>
           <div class="code-card">
-            <strong>EstimateTraceEdges()</strong>
-            <p>Point d’entrée de détection des bords. Essaie le mode <code>Support</code>, puis retombe sur le mode <code>Density</code> si besoin.</p>
+            <strong>TraceSupportEdgeSettings</strong>
+            <p>Regroupe les paramètres du détecteur support : diviseur, support min/max, rayon local et correction de bord.</p>
           </div>
           <div class="code-card">
             <strong>EstimateSupportedEdges()</strong>
-            <p>Détecte les bords extrêmes qui ont un support local suffisant, robuste contre quelques points isolés.</p>
-          </div>
-          <div class="code-card">
-            <strong>EstimateDenseEdges()</strong>
-            <p>Détecte les deux bords dans une coupe 1D par histogramme lissé et composant dense principal.</p>
+            <p>Détecte les deux bords extrêmes qui ont assez de voisins proches sur l’axe normal <code>h</code>.</p>
           </div>
           <div class="code-card">
             <strong>FilterCoherentRibbonSamples()</strong>
@@ -717,9 +713,9 @@
             <span>tranches minimales pour fitter les lignes</span>
           </div>
           <div class="metric">
-            <span>histogramme h</span>
-            <strong>16</strong>
-            <span>bins par défaut, réglables dans l’interface</span>
+            <span>support local</span>
+            <strong>3-9</strong>
+            <span>voisins requis par défaut selon le nombre d’événements</span>
           </div>
         </div>
 
@@ -973,18 +969,13 @@ h = dot(delta, normale)</code></pre>
           </p>
           <p>
             L’algorithme actuel ne prend pas simplement un percentile pour dire “bord haut” et
-            “bord bas”. La fonction <code>EstimateTraceEdges()</code> choisit une méthode locale selon
-            le bouton <code>Edge</code> :
+            “bord bas”. La fonction active est <code>EstimateSupportedEdges()</code> : elle cherche
+            les extrêmes qui ont assez de voisins dans un rayon local sur l’axe <code>h</code>.
           </p>
-          <ul>
-            <li><strong>Support</strong> cherche les extrêmes qui ont assez de voisins dans un rayon local.</li>
-            <li><strong>Density</strong> construit un histogramme lissé et garde le composant dense principal.</li>
-          </ul>
           <p>
-            En mode <code>Support</code>, le code essaie d’abord <code>EstimateSupportedEdges()</code>.
-            Si la coupe n’a pas assez de support fiable, il retombe sur <code>EstimateDenseEdges()</code>.
-            C’est important : le mode Support est bon pour garder toute la largeur visible, mais le
-            mode Density sauve les cas où les extrêmes sont trop irréguliers.
+            L’ancien algorithme <code>Density</code> par histogramme a été retiré. Il n’y a donc plus
+            de bouton <code>Edge</code>, plus de <code>Hist bins</code>, et plus de <code>Density %</code>.
+            Le réglage se fait maintenant avec les paramètres propres au support.
           </p>
 
           <h3>Mode Support : trouver les extrêmes soutenus</h3>
@@ -1001,19 +992,23 @@ h = dot(delta, normale)</code></pre>
             voisins proches.
           </p>
           <pre><code>values = sort(finite h)
-localSupport = clamp(count / 28, 3, 9)
-supportRadius = 1.75 px
+localSupport = clamp(count / Support div, Support min, Support max)
+supportRadius = Support radius px
 
 exemple :
   count = 36 valeurs
+  Support div = 28
+  Support min = 3
+  Support max = 9
   localSupport = clamp(36 / 28, 3, 9) = 3
   supportRadius = 1.75 px
 
 low = premier h qui a au moins 3 valeurs dans [h, h + 1.75]
 high = dernier h qui a au moins 3 valeurs dans [h - 1.75, h]
 
-low  -= petite correction centre-pixel -> bord
-high += petite correction centre-pixel -> bord</code></pre>
+correction = clamp(rawWidth * Border %, 0, 1.5 px)
+low  -= correction
+high += correction</code></pre>
           <p>
             Le balayage bas part du plus petit <code>h</code>. Pour chaque candidat, il compte combien
             de valeurs triées tombent dans une fenêtre de <code>1.75 px</code> vers la droite. Le premier
@@ -1187,90 +1182,54 @@ high += petite correction centre-pixel -> bord</code></pre>
             avec une correction bornée, proportionnelle à la largeur brute.
           </p>
 
-          <h3>Mode Density : trouver le paquet dense principal</h3>
-          <p>
-            Le mode Density répond à une question différente : “où est le composant dense le plus
-            massif dans cette coupe ?”. Le slider <code>Hist bins</code> règle le nombre de cases de
-            l’histogramme local, et <code>Density %</code> règle le seuil relatif au pic de densité.
-          </p>
-          <pre><code>histogramme(h, HistBins)
-lissage 5 taps : [1, 2, 3, 2, 1] / 9
-pic = max(histogramme_lissé)
-seuil = max(plancher_points_isolés, DensityThreshold * pic)
-
-composants = zones consécutives au-dessus du seuil
-composant = composant avec la plus grande masse
-
-low  = passage du seuil côté gauche
-high = passage du seuil côté droit
-middle = (low + high) / 2</code></pre>
-          <p class="ok">
-            Les points isolés ne devraient pas déplacer le bord, parce qu’ils ne forment pas le
-            composant dense principal.
-          </p>
-          <p class="warn">
-            Si une tranche contient trop peu d’événements, ou si la densité est coupée en plusieurs
-            paquets comparables, la mesure peut être rejetée.
-          </p>
-
           <h3>Validation de la coupe</h3>
           <p>
-            Une coupe est acceptée seulement si elle a assez de support. En mode Density, les points
-            compris entre <code>low</code> et <code>high</code> doivent être assez nombreux et représenter
-            une fraction significative des points finis de la coupe.
+            Une coupe est acceptée seulement si elle a assez d’événements finis, si <code>high</code>
+            reste strictement au-dessus de <code>low</code>, et si le nombre d’événements compris dans
+            la largeur finale atteint le support minimal demandé.
           </p>
-          <pre><code>denseValues = h entre low et high
-reject si denseValues &lt; minSupportCount
-reject si denseValues &lt; finiteCount / 4
+          <pre><code>supportCount = nombre de h entre low et high
+reject si finiteValues &lt; max(minSupportCount, 8)
+reject si rawWidth &lt; 2 px
+reject si supportCount &lt; minSupportCount
 reject si high &lt;= low</code></pre>
         </div>
 
         <div>
-          <div class="diagram" aria-label="Histogramme de densité">
+          <div class="diagram" aria-label="Paramètres du support">
             <svg viewBox="0 0 560 430" role="img">
               <rect width="560" height="430" fill="#ffffff"/>
-              <line x1="70" y1="346" x2="510" y2="346" stroke="#333" stroke-width="2"/>
-              <line x1="70" y1="346" x2="70" y2="62" stroke="#333" stroke-width="2"/>
-              <text x="510" y="374" font-size="14" fill="#575757" text-anchor="end">offset h</text>
-              <text x="20" y="70" font-size="14" fill="#575757" transform="rotate(-90 20 70)">densité</text>
+              <text x="48" y="54" font-size="20" fill="#171717" font-weight="700">Réglages du support</text>
+              <text x="48" y="82" font-size="14" fill="#575757">les sliders contrôlent le nombre de voisins exigés et la correction extérieure</text>
 
-              <g fill="#d92828" opacity="0.35">
-                <rect x="94" y="333" width="7" height="13"/>
-                <rect x="124" y="330" width="7" height="16"/>
-                <rect x="165" y="321" width="7" height="25"/>
-                <rect x="190" y="286" width="7" height="60"/>
-                <rect x="215" y="215" width="7" height="131"/>
-                <rect x="240" y="151" width="7" height="195"/>
-                <rect x="265" y="112" width="7" height="234"/>
-                <rect x="290" y="96" width="7" height="250"/>
-                <rect x="315" y="107" width="7" height="239"/>
-                <rect x="340" y="146" width="7" height="200"/>
-                <rect x="365" y="218" width="7" height="128"/>
-                <rect x="390" y="288" width="7" height="58"/>
-                <rect x="420" y="328" width="7" height="18"/>
-                <rect x="470" y="336" width="7" height="10"/>
+              <rect x="54" y="122" width="452" height="56" rx="7" fill="#f5f5f2" stroke="#d7d7d0"/>
+              <text x="72" y="146" font-size="14" fill="#575757">localSupport</text>
+              <text x="72" y="168" font-size="18" fill="#171717" font-family="monospace">clamp(count / div, min, max)</text>
+
+              <g font-size="14" fill="#171717">
+                <rect x="54" y="210" width="214" height="62" rx="7" fill="#eaf2ff" stroke="#9dbce8"/>
+                <text x="70" y="236" font-weight="700">Support div</text>
+                <text x="70" y="258" fill="#575757">grand = moins strict</text>
+
+                <rect x="292" y="210" width="214" height="62" rx="7" fill="#edf9f0" stroke="#8bcf9e"/>
+                <text x="308" y="236" font-weight="700">Support min/max</text>
+                <text x="308" y="258" fill="#575757">borne le nombre requis</text>
+
+                <rect x="54" y="294" width="214" height="62" rx="7" fill="#fff7e8" stroke="#efc777"/>
+                <text x="70" y="320" font-weight="700">Support radius px</text>
+                <text x="70" y="342" fill="#575757">rayon des voisins sur h</text>
+
+                <rect x="292" y="294" width="214" height="62" rx="7" fill="#fbecfb" stroke="#e59ee1"/>
+                <text x="308" y="320" font-weight="700">Border %</text>
+                <text x="308" y="342" fill="#575757">agrandit low/high vers dehors</text>
               </g>
-
-              <path d="M88 336 L120 335 L155 330 L184 300 L210 220 L238 148 L267 105 L293 90 L322 106 L350 156 L378 238 L404 302 L435 335 L486 339" fill="none" stroke="#1174d8" stroke-width="4" stroke-linecap="round"/>
-              <line x1="70" y1="280" x2="510" y2="280" stroke="#f28c00" stroke-width="2" stroke-dasharray="7 6"/>
-              <text x="455" y="271" font-size="14" fill="#d37600">seuil densité</text>
-
-              <line x1="194" y1="346" x2="194" y2="82" stroke="#00b84a" stroke-width="3"/>
-              <line x1="391" y1="346" x2="391" y2="82" stroke="#e300d8" stroke-width="3"/>
-              <line x1="292" y1="346" x2="292" y2="82" stroke="#d8b600" stroke-width="3"/>
-
-              <text x="194" y="390" font-size="15" fill="#00a03d" text-anchor="middle" font-weight="700">low</text>
-              <text x="292" y="390" font-size="15" fill="#a38900" text-anchor="middle" font-weight="700">middle</text>
-              <text x="391" y="390" font-size="15" fill="#c000bd" text-anchor="middle" font-weight="700">high</text>
-
-              <path d="M471 336 C486 331 500 335 510 338" fill="none" stroke="#d92828" stroke-width="3"/>
-              <text x="430" y="316" font-size="13" fill="#d92828">bruit isolé</text>
             </svg>
           </div>
 
           <div class="note" style="margin-top: 14px">
             La largeur locale vaut <code>high - low</code>. La position du milieu local vaut
-            <code>(low + high) / 2</code>.
+            <code>(low + high) / 2</code>. Cette largeur est ensuite utilisée comme diamètre apparent
+            pour reconstruire la profondeur.
           </div>
         </div>
       </div>
@@ -1536,7 +1495,7 @@ fit_final = régression pondérée</code></pre>
         <h2>7. Paramètres et effets</h2>
         <p>
           Les paramètres de la vue <code>Trace</code> n’agissent pas tous au même niveau. Certains
-          changent la densité disponible, d’autres changent le découpage, d’autres changent le
+          changent la quantité d’événements disponible, d’autres changent le découpage, d’autres changent le
           lissage.
         </p>
 
@@ -1557,12 +1516,6 @@ fit_final = régression pondérée</code></pre>
               <td>Plus réactif, mais moins robuste si peu d’événements.</td>
             </tr>
             <tr>
-              <td><code>Max Events</code></td>
-              <td>Nombre maximal d’événements affichés/traités.</td>
-              <td>Moins de risque de couper la trace.</td>
-              <td>Plus rapide, mais peut tronquer la trace.</td>
-            </tr>
-            <tr>
               <td><code>Trace ms</code></td>
               <td>Durée de mémoire de la trace temps réel accumulée.</td>
               <td>Plus d’ancienne trace dans le fit, mais plus de calcul.</td>
@@ -1581,22 +1534,34 @@ fit_final = régression pondérée</code></pre>
               <td>Tranches plus fines, plus précises mais moins d’événements par tranche.</td>
             </tr>
             <tr>
-              <td><code>Hist bins</code></td>
-              <td>Nombre de cases dans l’histogramme 1D utilisé pour trouver les bords dans chaque tranche.</td>
-              <td>Bords potentiellement plus précis si la tranche est dense, mais plus sensible aux trous et aux points isolés.</td>
-              <td>Histogramme plus robuste et plus lisse, mais bord plus quantifié et moins fin.</td>
+              <td><code>Support div</code></td>
+              <td>Divise le nombre d’événements de la coupe pour calculer le support demandé.</td>
+              <td>Demande moins de voisins, accepte plus facilement les extrêmes, mais laisse passer plus d’outliers.</td>
+              <td>Demande plus de voisins, rejette mieux les points isolés, mais peut rentrer les bords vers le centre.</td>
             </tr>
             <tr>
-              <td><code>Density %</code></td>
-              <td>Seuil de densité relatif au pic de l’histogramme. Défaut : <code>2%</code>.</td>
-              <td>Rejette davantage les zones faibles/bruitées ; le ruban peut devenir plus étroit ou perdre des tranches.</td>
-              <td>Accepte plus de densité faible ; utile si la trace est pauvre, mais plus sensible aux paquets parasites.</td>
+              <td><code>Support min</code></td>
+              <td>Minimum de voisins exigés localement, même pour une coupe pauvre.</td>
+              <td>Rejette plus fort les outliers, mais peut supprimer des coupes peu denses.</td>
+              <td>Accepte les coupes pauvres, mais les extrêmes deviennent plus fragiles.</td>
             </tr>
             <tr>
-              <td><code>Edge</code></td>
-              <td>Choisit la méthode locale de bord : <code>Support</code> ou <code>Density</code>.</td>
-              <td><code>Support</code> garde les extrêmes soutenus, souvent meilleur pour une trace pleine.</td>
-              <td><code>Density</code> se concentre sur le paquet dense principal, souvent meilleur si les extrêmes sont bruités.</td>
+              <td><code>Support max</code></td>
+              <td>Maximum de voisins exigés localement dans les coupes très denses.</td>
+              <td>Rend les bords plus stricts sur les grosses coupes.</td>
+              <td>Évite qu’une coupe dense demande trop de voisins et perde un vrai bord fin.</td>
+            </tr>
+            <tr>
+              <td><code>Support radius px</code></td>
+              <td>Rayon de voisinage sur l’axe normal <code>h</code>.</td>
+              <td>Connecte des points plus espacés, plus tolérant au bruit d’échantillonnage.</td>
+              <td>Exige un paquet compact, plus strict contre les parasites mais plus fragile si le bord est troué.</td>
+            </tr>
+            <tr>
+              <td><code>Border %</code></td>
+              <td>Correction extérieure appliquée après les bords soutenus.</td>
+              <td>Mesure plus large, plus proche du bord apparent ; trop haut sous-estime la profondeur.</td>
+              <td>Mesure plus proche des centres d’événements ; trop bas surestime la profondeur.</td>
             </tr>
             <tr>
               <td><code>Local window</code></td>
@@ -1629,6 +1594,11 @@ fit_final = régression pondérée</code></pre>
               <td><code>OFF</code> accumule les événements filtrés sans cette validation, utile pour comparer.</td>
             </tr>
             <tr>
+              <td><code>Polarity</code></td>
+              <td>Filtre les événements par polarité avant le fit de trace.</td>
+              <td colspan="2"><code>Negative</code> est le meilleur réglage actuel sur <code>events_filtered.h5</code>. <code>All</code> sert au diagnostic si une séquence change de convention.</td>
+            </tr>
+            <tr>
               <td><code>Weighted reg</code></td>
               <td>Active la régression pondérée par récence et par distance à la courbe.</td>
               <td>Trajectoire plus réactive, moins influencée par les poses anciennes ou aberrantes.</td>
@@ -1641,6 +1611,24 @@ fit_final = régression pondérée</code></pre>
             </tr>
           </tbody>
         </table>
+
+        <h3>Valeurs par défaut actuelles</h3>
+        <pre><code>Window ms = 484.32
+Trace ms = 40.00
+Bin width px = 4.00
+Local window = 65.69
+Width step px = 8.00
+PCA ms = 36.10
+Follow window px = 98.17
+Support div = 28.00
+Support min = 3
+Support max = 9
+Support radius px = 1.75
+Border % = 3.50
+Fit input = Undist
+Radius gate = OFF
+Line order = Quad
+Polarity = Negative</code></pre>
 
         <div class="controls" aria-label="Simulation simple de sensibilité profondeur">
           <label>
@@ -1671,28 +1659,40 @@ fit_final = régression pondérée</code></pre>
             <span class="readout"><span id="binValue">4</span> px</span>
           </label>
           <label>
-            <code>Hist bins</code> :
-            <input id="histSlider" type="range" min="16" max="512" step="1" value="48">
-            <span class="readout"><span id="histValue">48</span> bins h</span>
+            <code>Support div</code> :
+            <input id="supportDivSlider" type="range" min="8" max="60" step="1" value="28">
+            <span class="readout"><span id="supportDivValue">28</span></span>
           </label>
           <label>
-            <code>Density %</code> :
-            <input id="densitySlider" type="range" min="2" max="60" step="1" value="2">
-            <span class="readout"><span id="densityValue">2</span> % du pic</span>
+            <code>Support min / max</code> :
+            <input id="supportMinSlider" type="range" min="1" max="20" step="1" value="3">
+            <input id="supportMaxSlider" type="range" min="2" max="30" step="1" value="9">
+            <span class="readout"><span id="supportMinValue">3</span> / <span id="supportMaxValue">9</span> voisins</span>
+          </label>
+          <label>
+            <code>Support radius px</code> :
+            <input id="supportRadiusSlider" type="range" min="0.5" max="4" step="0.05" value="1.75">
+            <span class="readout"><span id="supportRadiusValue">1.75</span> px</span>
+          </label>
+          <label>
+            <code>Border %</code> :
+            <input id="borderSlider" type="range" min="0" max="10" step="0.1" value="3.5">
+            <span class="readout"><span id="borderValue">3.5</span> %</span>
           </label>
           <p class="mini">
-            Support moyen estimé : <strong><span id="eventsPerBin">2357</span></strong>
+            Support moyen estimé : <strong><span id="eventsPerBin">795</span></strong>
             événements par tranche, pour une trace exemple de 330 px. Le minimum interne demandé par tranche vaut environ
-            <strong><span id="minEventsPerBin">235</span></strong> événements.
+            <strong><span id="minEventsPerBin">79</span></strong> événements avant détection de bord.
           </p>
           <p class="mini">
-            Exemple de résolution locale : si une coupe couvre 32 px en <code>h</code>,
-            chaque case d’histogramme vaut environ <strong><span id="hBinWidth">0.67</span> px</strong>.
-            Le seuil relatif vaut <strong><span id="densityRatio">0.16</span> × pic</strong>.
+            Avec ces réglages, <code>EstimateSupportedEdges()</code> demande
+            <strong><span id="localSupportValue">9</span></strong> voisins dans un rayon de
+            <strong><span id="supportRadiusReadout">1.75</span> px</strong> sur l’axe <code>h</code>.
           </p>
           <p class="mini">
-            Règle pratique : si le support par tranche devient faible, l’histogramme de densité
-            sur <code>h</code> devient irrégulier, donc les bords peuvent bouger de plusieurs pixels.
+            Pour une largeur brute exemple de 21 px, <code>Border %</code> ajoute environ
+            <strong><span id="borderCorrectionValue">0.74</span> px</strong> de chaque côté, donc
+            <strong><span id="borderWidthGainValue">1.47</span> px</strong> au diamètre apparent.
           </p>
         </div>
       </div>
@@ -1717,8 +1717,8 @@ fit_final = régression pondérée</code></pre>
           <tbody>
             <tr>
               <td>La ligne verte ou magenta fait une pointe isolée.</td>
-              <td>Une tranche locale a détecté un composant dense parasite, ou le fit local a trop peu de voisins.</td>
-              <td>Augmenter <code>Local window</code>, augmenter un peu <code>Bin width px</code>, ou raccourcir <code>Trace ms</code> si la queue est bruitée.</td>
+              <td>Une tranche locale valide un extrême avec trop peu de support réel, ou le fit local a trop peu de voisins.</td>
+              <td>Augmenter <code>Support min</code>, baisser <code>Support div</code>, augmenter <code>Local window</code>, ou augmenter un peu <code>Bin width px</code>.</td>
             </tr>
             <tr>
               <td>Les deux bords sont bons mais la ligne jaune n’est pas au centre.</td>
@@ -1737,13 +1737,13 @@ fit_final = régression pondérée</code></pre>
             </tr>
             <tr>
               <td>La fin de trace part n’importe où.</td>
-              <td>Il n’y a plus assez de support dense ; le fit extrapole ou suit du bruit.</td>
+              <td>Il n’y a plus assez de support local ; le fit extrapole ou suit du bruit.</td>
               <td>Le code coupe déjà la plage <code>sMin/sMax</code> sur les bins valides. Réduire <code>Trace ms</code> peut aider.</td>
             </tr>
             <tr>
               <td>Les bords sont trop à l’intérieur de la trace.</td>
-              <td>Le seuil de densité coupe la zone dense trop haut, ou le lissage de courbe ramène le bord vers le centre.</td>
-              <td>Utiliser plus d’événements par tranche : augmenter <code>Bin width px</code>, augmenter <code>Trace ms</code>, ou input plus propre.</td>
+              <td>Le support demandé est trop strict, le rayon de support est trop petit, ou la correction extérieure est trop faible.</td>
+              <td>Augmenter <code>Support div</code>, augmenter légèrement <code>Support radius px</code>, ou augmenter <code>Border %</code>.</td>
             </tr>
           </tbody>
         </table>
@@ -1786,9 +1786,8 @@ fit_final = régression pondérée</code></pre>
   highSamples = []
 
   for bin in bins:
-    edges = EstimateTraceEdges(bin.h, EdgeMode, HistBins, DensityThreshold)
-    // si EdgeMode = Support : extrêmes soutenus, puis fallback densité
-    // si EdgeMode = Density : composant dense principal
+    edges = EstimateSupportedEdges(bin.h, SupportSettings)
+    // extrêmes qui ont assez de voisins locaux sur h
     if edges.valid:
       lowSamples.push(bin.s, edges.low)
       middleSamples.push(bin.s, edges.middle)
@@ -1847,8 +1846,8 @@ fit_final = régression pondérée</code></pre>
             densité est asymétrique, le percentile peut être décalé.
           </p>
           <p>
-            Le nouvel algo répond plutôt à : “où commence et finit le paquet dense principal ?”.
-            C’est plus proche du phénomène physique visible sur la trace.
+            Le code actuel répond plutôt à : “où commence et finit le paquet vraiment soutenu
+            par des voisins locaux ?”. C’est plus robuste contre un point isolé sur les côtés.
           </p>
           <h3>Limite principale</h3>
           <p>
@@ -1866,7 +1865,7 @@ fit_final = régression pondérée</code></pre>
         <div class="param-grid">
           <div class="tuning">
             <strong>Si les bords ont des pics isolés</strong>
-            <p>Augmenter légèrement <code>Local window</code> ou augmenter <code>Bin width px</code>. Cela donne plus de support aux voisins.</p>
+            <p>Augmenter <code>Support min</code>, baisser <code>Support div</code>, ou augmenter légèrement <code>Local window</code>.</p>
           </div>
           <div class="tuning">
             <strong>Si les bords sont trop lissés</strong>
@@ -1874,7 +1873,7 @@ fit_final = régression pondérée</code></pre>
           </div>
           <div class="tuning">
             <strong>Si les bords ne collent pas au bord réel</strong>
-            <p>Vérifier la densité d’événements par tranche. Un <code>Bin width px</code> trop petit, trop de <code>Hist bins</code>, ou une fenêtre trop courte rendent le front de densité moins net.</p>
+            <p>Vérifier <code>Support radius px</code> et <code>Border %</code>. Si les bords sont trop dedans, augmenter légèrement l’un des deux.</p>
           </div>
           <div class="tuning">
             <strong>Si la profondeur saute</strong>
@@ -1897,9 +1896,10 @@ fit_final = régression pondérée</code></pre>
   -> combinaison des directions temporelles avec le PCA global
   -> coordonnées s/h
   -> tranches sur s
-  -> mode Edge Support ou Density
   -> Support : extrêmes qui ont assez de voisins locaux
-  -> Density : histogramme sur h avec Hist bins et Density %
+  -> localSupport = clamp(count / Support div, Support min, Support max)
+  -> Support radius px valide les voisins proches sur h
+  -> Border % agrandit low/high vers le bord apparent
   -> low / middle / high locaux
   -> rejet des points incohérents
   -> fit local des 3 lignes
@@ -1924,16 +1924,24 @@ fit_final = régression pondérée</code></pre>
     const cmPerPixel = document.getElementById("cmPerPixel");
     const eventSlider = document.getElementById("eventSlider");
     const binSlider = document.getElementById("binSlider");
-    const histSlider = document.getElementById("histSlider");
-    const densitySlider = document.getElementById("densitySlider");
+    const supportDivSlider = document.getElementById("supportDivSlider");
+    const supportMinSlider = document.getElementById("supportMinSlider");
+    const supportMaxSlider = document.getElementById("supportMaxSlider");
+    const supportRadiusSlider = document.getElementById("supportRadiusSlider");
+    const borderSlider = document.getElementById("borderSlider");
     const eventValue = document.getElementById("eventValue");
     const binValue = document.getElementById("binValue");
-    const histValue = document.getElementById("histValue");
-    const densityValue = document.getElementById("densityValue");
+    const supportDivValue = document.getElementById("supportDivValue");
+    const supportMinValue = document.getElementById("supportMinValue");
+    const supportMaxValue = document.getElementById("supportMaxValue");
+    const supportRadiusValue = document.getElementById("supportRadiusValue");
+    const borderValue = document.getElementById("borderValue");
     const eventsPerBin = document.getElementById("eventsPerBin");
     const minEventsPerBin = document.getElementById("minEventsPerBin");
-    const hBinWidth = document.getElementById("hBinWidth");
-    const densityRatio = document.getElementById("densityRatio");
+    const localSupportValue = document.getElementById("localSupportValue");
+    const supportRadiusReadout = document.getElementById("supportRadiusReadout");
+    const borderCorrectionValue = document.getElementById("borderCorrectionValue");
+    const borderWidthGainValue = document.getElementById("borderWidthGainValue");
 
     function updateSensitivity() {
       const width = Number(widthSlider.value);
@@ -1946,30 +1954,46 @@ fit_final = régression pondérée</code></pre>
     function updateBinSupport() {
       const events = Number(eventSlider.value);
       const binWidth = Number(binSlider.value);
-      const histBins = Number(histSlider.value);
-      const densityPercent = Number(densitySlider.value);
+      const supportDiv = Number(supportDivSlider.value);
+      const supportMin = Number(supportMinSlider.value);
+      const supportMax = Math.max(Number(supportMaxSlider.value), supportMin);
+      const supportRadius = Number(supportRadiusSlider.value);
+      const borderPercent = Number(borderSlider.value);
       const exampleTraceLengthPx = 330.0;
       const bins = Math.max(8, Math.ceil(exampleTraceLengthPx / binWidth));
       const average = events / bins;
       const minimum = Math.max(10, Math.floor(events / (bins * 10)));
-      const exampleHRangePx = 32.0;
+      const localSupport = Math.min(
+        supportMax,
+        Math.max(supportMin, Math.floor(average / supportDiv))
+      );
+      const rawWidthPx = 21.0;
+      const borderCorrection = Math.min(1.5, Math.max(0.0, rawWidthPx * borderPercent / 100.0));
 
       eventValue.textContent = Math.round(events).toLocaleString("fr-FR");
       binValue.textContent = binWidth.toFixed(0);
-      histValue.textContent = histBins.toFixed(0);
-      densityValue.textContent = densityPercent.toFixed(0);
+      supportDivValue.textContent = supportDiv.toFixed(0);
+      supportMinValue.textContent = supportMin.toFixed(0);
+      supportMaxValue.textContent = supportMax.toFixed(0);
+      supportRadiusValue.textContent = supportRadius.toFixed(2);
+      borderValue.textContent = borderPercent.toFixed(1);
       eventsPerBin.textContent = Math.round(average).toLocaleString("fr-FR");
       minEventsPerBin.textContent = minimum.toLocaleString("fr-FR");
-      hBinWidth.textContent = (exampleHRangePx / histBins).toFixed(2);
-      densityRatio.textContent = (densityPercent / 100.0).toFixed(2);
+      localSupportValue.textContent = localSupport.toLocaleString("fr-FR");
+      supportRadiusReadout.textContent = supportRadius.toFixed(2);
+      borderCorrectionValue.textContent = borderCorrection.toFixed(2);
+      borderWidthGainValue.textContent = (2.0 * borderCorrection).toFixed(2);
     }
 
     widthSlider.addEventListener("input", updateSensitivity);
     depthSlider.addEventListener("input", updateSensitivity);
     eventSlider.addEventListener("input", updateBinSupport);
     binSlider.addEventListener("input", updateBinSupport);
-    histSlider.addEventListener("input", updateBinSupport);
-    densitySlider.addEventListener("input", updateBinSupport);
+    supportDivSlider.addEventListener("input", updateBinSupport);
+    supportMinSlider.addEventListener("input", updateBinSupport);
+    supportMaxSlider.addEventListener("input", updateBinSupport);
+    supportRadiusSlider.addEventListener("input", updateBinSupport);
+    borderSlider.addEventListener("input", updateBinSupport);
     updateSensitivity();
     updateBinSupport();
   </script>

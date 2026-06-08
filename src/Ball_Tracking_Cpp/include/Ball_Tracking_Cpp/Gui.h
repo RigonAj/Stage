@@ -252,16 +252,18 @@ public:
         trace_width_step_px = 8.0f;
         trace_line_window_px = 65.69f;
         trace_memory_ms = 40.0f;
-        trace_histogram_bins = 16.0f;
-        trace_density_threshold = 2.0f;
         trace_line_bin_width_px = 4.0f;
         trace_line_order = 2.0f;
         trace_pca_period_ms = 36.10f;
         trace_follow_window_px = 98.17f;
+        trace_support_divisor = 28.0f;
+        trace_support_min = 3.0f;
+        trace_support_max = 9.0f;
+        trace_support_radius_px = 1.75f;
+        trace_border_percent = 3.5f;
         trace_use_raw_input = false;
         trace_radius_gate_enabled = false;
         weighted_regression_enabled = false;
-        trace_edge_mode = 1;
         trace_polarity_mode = 2;
         temporal_slices = 5.0f;
         events_per_slice = 100.0f;
@@ -313,18 +315,19 @@ public:
         };
 
         if (traceView) {
-            sliderAt(0, 0, "Bandwidth", bandwidth, 1.0f, 300.0f);
-            sliderAt(1, 0, "Min events/cluster", minNb, 1.0f, 1000.0f);
-            sliderAt(2, 0, "Max Events", maxevent, 1.0f, 10000.0f);
-            sliderAt(3, 0, "Window ms", timeslice, 1.0f, 500.0f);
-            sliderAt(0, 1, "Trace ms", trace_memory_ms, 40.0f, 3000.0f);
-            sliderAt(1, 1, "Bin width px", trace_line_bin_width_px, 1.0f, 48.0f);
-            sliderAt(2, 1, "Local window", trace_line_window_px, 8.0f, 240.0f);
-            sliderAt(3, 1, "Width step px", trace_width_step_px, 8.0f, 90.0f);
-            sliderAt(0, 2, "Hist bins", trace_histogram_bins, 16.0f, 512.0f);
-            sliderAt(1, 2, "Density %", trace_density_threshold, 2.0f, 60.0f);
-            sliderAt(2, 2, "PCA ms", trace_pca_period_ms, 2.0f, 80.0f);
-            sliderAt(3, 2, "Follow window px", trace_follow_window_px, 20.0f, 260.0f);
+            sliderAt(0, 0, "Window ms", timeslice, 1.0f, 500.0f);
+            sliderAt(1, 0, "Trace ms", trace_memory_ms, 40.0f, 3000.0f);
+            sliderAt(2, 0, "Bin width px", trace_line_bin_width_px, 1.0f, 48.0f);
+            sliderAt(3, 0, "Local window", trace_line_window_px, 8.0f, 240.0f);
+            sliderAt(0, 1, "Width step px", trace_width_step_px, 8.0f, 90.0f);
+            sliderAt(1, 1, "PCA ms", trace_pca_period_ms, 2.0f, 80.0f);
+            sliderAt(2, 1, "Follow window px", trace_follow_window_px, 20.0f, 260.0f);
+            sliderAt(3, 1, "Support div", trace_support_divisor, 8.0f, 60.0f);
+            sliderAt(0, 2, "Support min", trace_support_min, 1.0f, 20.0f);
+            sliderAt(1, 2, "Support max", trace_support_max, 2.0f, 30.0f);
+            sliderAt(2, 2, "Support radius px", trace_support_radius_px, 0.5f, 4.0f);
+            sliderAt(3, 2, "Border %", trace_border_percent, 0.0f, 10.0f);
+            trace_support_max = std::max(trace_support_max, trace_support_min);
         }
         else {
             sliderAt(0, 0, "Bandwidth", bandwidth, 1.0f, 300.0f);
@@ -446,12 +449,6 @@ public:
         GuiToggle({px, py, 90.0f, h}, "Option", &option);
         px += 130.0f;
         if (traceView) {
-            DrawText("Edge", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
-            if (GuiButton({px, py, 110.0f, h}, trace_edge_mode == 0 ? "Density" : "Support")) {
-                trace_edge_mode = (trace_edge_mode + 1) % 2;
-            }
-            px += 130.0f;
-
             const char *polarityLabel = "All";
             if (trace_polarity_mode == 1) {
                 polarityLabel = "Positive";
@@ -643,13 +640,24 @@ public:
     float TraceFollowWindowPx() const {
         return std::clamp(trace_follow_window_px, 20.0f, 260.0f);
     }
-    int TraceHistogramBins() const {
-        return std::clamp(static_cast<int>(std::round(trace_histogram_bins)), 16, 512);
+    float TraceSupportDivisor() const {
+        return std::clamp(trace_support_divisor, 8.0f, 60.0f);
     }
-    float TraceDensityThresholdRatio() const {
-        return std::clamp(trace_density_threshold / 100.0f, 0.02f, 0.60f);
+    int TraceSupportMinCount() const {
+        return std::clamp(static_cast<int>(std::round(trace_support_min)), 1, 20);
     }
-    int TraceEdgeMode() const { return std::clamp(trace_edge_mode, 0, 1); }
+    int TraceSupportMaxCount() const {
+        return std::max(
+            TraceSupportMinCount(),
+            std::clamp(static_cast<int>(std::round(trace_support_max)), 2, 30));
+    }
+    float TraceSupportRadiusPx() const {
+        return std::clamp(trace_support_radius_px, 0.5f, 4.0f);
+    }
+    float TraceBorderRatio() const {
+        return std::clamp(trace_border_percent / 100.0f, 0.0f, 0.10f);
+    }
+    float TraceBorderPercent() const { return TraceBorderRatio() * 100.0f; }
     int TracePolarityMode() const { return std::clamp(trace_polarity_mode, 0, 2); }
     double TraceMemorySeconds() const {
         return static_cast<double>(std::clamp(trace_memory_ms, 40.0f, 3000.0f)) * 1.0e-3;
@@ -705,16 +713,18 @@ private:
     float trace_width_step_px = 8.0f;
     float trace_line_window_px = 65.69f;
     float trace_memory_ms = 40.0f;
-    float trace_histogram_bins = 16.0f;
-    float trace_density_threshold = 2.0f;
     float trace_line_bin_width_px = 4.0f;
     float trace_line_order = 2.0f;
     float trace_pca_period_ms = 36.10f;
     float trace_follow_window_px = 98.17f;
+    float trace_support_divisor = 28.0f;
+    float trace_support_min = 3.0f;
+    float trace_support_max = 9.0f;
+    float trace_support_radius_px = 1.75f;
+    float trace_border_percent = 3.5f;
     bool trace_use_raw_input = false;
-    bool trace_radius_gate_enabled = true;
+    bool trace_radius_gate_enabled = false;
     bool weighted_regression_enabled = false;
-    int trace_edge_mode = 1;
     int trace_polarity_mode = 2;
     float temporal_slices = 5.0f;
     float events_per_slice = 100.0f;

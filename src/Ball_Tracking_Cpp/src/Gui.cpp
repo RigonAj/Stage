@@ -512,6 +512,14 @@ struct TracePcaSlice {
     int eventCount = 0;
 };
 
+struct TraceSupportEdgeSettings {
+    float supportDivisor = 28.0f;
+    std::size_t minLocalSupport = 3;
+    std::size_t maxLocalSupport = 9;
+    float supportRadiusPx = 1.75f;
+    float borderRatio = 0.035f;
+};
+
 struct TraceRibbonFit {
     bool valid = false;
     Vector2 center{0.0f, 0.0f};
@@ -527,9 +535,7 @@ struct TraceRibbonFit {
     std::size_t inlierCount = 0;
     int lineBinCount = 0;
     float lineBinWidthPx = 0.0f;
-    int histogramBinCount = 48;
-    float densityThresholdRatio = 0.16f;
-    int edgeMode = 0;
+    TraceSupportEdgeSettings supportEdge{};
     float pcaPeriodMs = 8.0f;
     int ransacRejectedSamples = 0;
     std::vector<TraceProjection> projections;
@@ -560,10 +566,6 @@ const char *TracePolarityModeName(int polarityMode) {
         return "negative";
     }
     return "all";
-}
-
-const char *TraceEdgeModeName(int edgeMode) {
-    return edgeMode == 1 ? "support" : "density";
 }
 
 std::vector<TracePoint> BuildTracePointsFromEvents(const dv::EventStore &events, int polarityMode) {
@@ -721,7 +723,7 @@ float Quantile(std::vector<float> values, float q) {
     return values[index];
 }
 
-struct DenseEdgeEstimate {
+struct TraceEdgeEstimate {
     bool valid = false;
     float low = 0.0f;
     float middle = 0.0f;
@@ -730,216 +732,12 @@ struct DenseEdgeEstimate {
     int supportCount = 0;
 };
 
-DenseEdgeEstimate EstimateDenseEdges(
+TraceEdgeEstimate EstimateSupportedEdges(
     const std::vector<float> &values,
     std::size_t minSupportCount,
-    int histogramBinCount,
-    float densityThresholdRatio) {
+    const TraceSupportEdgeSettings &settings) {
 
-    DenseEdgeEstimate estimate;
-    if (values.size() < std::max<std::size_t>(minSupportCount, 8)) {
-        return estimate;
-    }
-
-    float rangeLow = std::numeric_limits<float>::max();
-    float rangeHigh = std::numeric_limits<float>::lowest();
-    std::size_t finiteCount = 0;
-    for (float value : values) {
-        if (!std::isfinite(value)) {
-            continue;
-        }
-
-        rangeLow = std::min(rangeLow, value);
-        rangeHigh = std::max(rangeHigh, value);
-        ++finiteCount;
-    }
-
-    if (finiteCount < std::max<std::size_t>(minSupportCount, 8)) {
-        return estimate;
-    }
-
-    const float range = rangeHigh - rangeLow;
-    if (!std::isfinite(range) || range < 2.0f) {
-        return estimate;
-    }
-
-    const int binCount = std::clamp(histogramBinCount, 16, 512);
-    const float binWidth = range / static_cast<float>(binCount);
-    if (!std::isfinite(binWidth) || binWidth <= 1.0e-6f) {
-        return estimate;
-    }
-
-    std::vector<float> histogram(static_cast<std::size_t>(binCount), 0.0f);
-    for (float value : values) {
-        if (!std::isfinite(value) || value < rangeLow || value > rangeHigh) {
-            continue;
-        }
-
-        int bin = static_cast<int>((value - rangeLow) / binWidth);
-        bin = std::clamp(bin, 0, binCount - 1);
-        histogram[static_cast<std::size_t>(bin)] += 1.0f;
-    }
-
-    std::vector<float> smooth(histogram.size(), 0.0f);
-    for (int i = 0; i < binCount; ++i) {
-        const float c0 = histogram[static_cast<std::size_t>(std::clamp(i - 2, 0, binCount - 1))];
-        const float c1 = histogram[static_cast<std::size_t>(std::clamp(i - 1, 0, binCount - 1))];
-        const float c2 = histogram[static_cast<std::size_t>(i)];
-        const float c3 = histogram[static_cast<std::size_t>(std::clamp(i + 1, 0, binCount - 1))];
-        const float c4 = histogram[static_cast<std::size_t>(std::clamp(i + 2, 0, binCount - 1))];
-        smooth[static_cast<std::size_t>(i)] = (c0 + 2.0f * c1 + 3.0f * c2 + 2.0f * c3 + c4) / 9.0f;
-    }
-
-    float peakValue = smooth.front();
-    for (int i = 1; i < binCount; ++i) {
-        if (smooth[static_cast<std::size_t>(i)] > peakValue) {
-            peakValue = smooth[static_cast<std::size_t>(i)];
-        }
-    }
-
-    if (peakValue < 1.0f) {
-        return estimate;
-    }
-
-    const float isolatedPointFloor = finiteCount >= 40 ? 1.75f : 1.0f;
-    const float thresholdRatio = std::clamp(densityThresholdRatio, 0.02f, 0.60f);
-    const float threshold = std::max(isolatedPointFloor, peakValue * thresholdRatio);
-
-    struct DensityComponent {
-        int left = -1;
-        int right = -1;
-        float mass = 0.0f;
-        float peak = 0.0f;
-    };
-
-    DensityComponent bestComponent;
-    int scan = 0;
-    while (scan < binCount) {
-        if (smooth[static_cast<std::size_t>(scan)] < threshold) {
-            ++scan;
-            continue;
-        }
-
-        DensityComponent component;
-        component.left = scan;
-        while (scan < binCount && smooth[static_cast<std::size_t>(scan)] >= threshold) {
-            const float density = smooth[static_cast<std::size_t>(scan)];
-            component.mass += density;
-            component.peak = std::max(component.peak, density);
-            component.right = scan;
-            ++scan;
-        }
-
-        const bool betterComponent =
-            component.mass > bestComponent.mass
-            || (component.mass == bestComponent.mass && component.peak > bestComponent.peak);
-        if (betterComponent) {
-            bestComponent = component;
-        }
-    }
-
-    int left = bestComponent.left;
-    int right = bestComponent.right;
-
-    if (left < 0 || right < 0 || right <= left) {
-        return estimate;
-    }
-
-    auto thresholdCrossing = [&](int outsideBin, int insideBin) {
-        const float outside = smooth[static_cast<std::size_t>(outsideBin)];
-        const float inside = smooth[static_cast<std::size_t>(insideBin)];
-        const float denom = inside - outside;
-        float alpha = 0.5f;
-        if (std::fabs(denom) > 1.0e-6f) {
-            alpha = std::clamp((threshold - outside) / denom, 0.0f, 1.0f);
-        }
-
-        const float outsideCenter = rangeLow + (static_cast<float>(outsideBin) + 0.5f) * binWidth;
-        const float insideCenter = rangeLow + (static_cast<float>(insideBin) + 0.5f) * binWidth;
-        return outsideCenter + alpha * (insideCenter - outsideCenter);
-    };
-
-    auto strongestRise = [&](int from, int to) {
-        int best = std::clamp(from, 0, binCount - 2);
-        float bestRise = std::numeric_limits<float>::lowest();
-        for (int i = std::max(0, from); i <= std::min(to, binCount - 2); ++i) {
-            const float rise = smooth[static_cast<std::size_t>(i + 1)] - smooth[static_cast<std::size_t>(i)];
-            if (rise > bestRise) {
-                bestRise = rise;
-                best = i;
-            }
-        }
-        return best;
-    };
-
-    auto strongestFall = [&](int from, int to) {
-        int best = std::clamp(from, 0, binCount - 2);
-        float bestFall = std::numeric_limits<float>::lowest();
-        for (int i = std::max(0, from); i <= std::min(to, binCount - 2); ++i) {
-            const float fall = smooth[static_cast<std::size_t>(i)] - smooth[static_cast<std::size_t>(i + 1)];
-            if (fall > bestFall) {
-                bestFall = fall;
-                best = i;
-            }
-        }
-        return best;
-    };
-
-    float low = rangeLow + static_cast<float>(left) * binWidth;
-    if (left > 0) {
-        low = thresholdCrossing(left - 1, left);
-    }
-
-    float high = rangeLow + static_cast<float>(right + 1) * binWidth;
-    if (right + 1 < binCount) {
-        high = thresholdCrossing(right + 1, right);
-    }
-
-    const int riseBin = strongestRise(left - 6, left + 6);
-    const int fallBin = strongestFall(right - 6, right + 6);
-    const float gradientLow = rangeLow + (static_cast<float>(riseBin) + 1.0f) * binWidth;
-    const float gradientHigh = rangeLow + (static_cast<float>(fallBin) + 1.0f) * binWidth;
-
-    if (std::isfinite(gradientLow) && std::fabs(gradientLow - low) <= binWidth * 3.0f) {
-        low = gradientLow;
-    }
-
-    if (std::isfinite(gradientHigh) && std::fabs(gradientHigh - high) <= binWidth * 3.0f) {
-        high = gradientHigh;
-    }
-
-    std::vector<float> denseValues;
-    denseValues.reserve(values.size());
-    for (float value : values) {
-        if (std::isfinite(value) && value >= low && value <= high) {
-            denseValues.push_back(value);
-        }
-    }
-
-    if (denseValues.size() < minSupportCount
-        || denseValues.size() < finiteCount / 4) {
-        return estimate;
-    }
-
-    estimate.valid = true;
-    estimate.low = low;
-    estimate.high = high;
-    estimate.middle = 0.5f * (low + high);
-    estimate.width = high - low;
-    estimate.supportCount = static_cast<int>(denseValues.size());
-
-    if (!std::isfinite(estimate.width) || estimate.width < 2.0f) {
-        estimate.valid = false;
-    }
-
-    return estimate;
-}
-
-DenseEdgeEstimate EstimateSupportedEdges(
-    const std::vector<float> &values,
-    std::size_t minSupportCount) {
-
-    DenseEdgeEstimate estimate;
+    TraceEdgeEstimate estimate;
     std::vector<float> finiteValues;
     finiteValues.reserve(values.size());
     for (float value : values) {
@@ -954,12 +752,22 @@ DenseEdgeEstimate EstimateSupportedEdges(
 
     std::sort(finiteValues.begin(), finiteValues.end());
 
-    const std::size_t localSupport = std::clamp<std::size_t>(
-        finiteValues.size() / 28,
-        3,
-        9
+    const std::size_t feasibleSupport = std::max<std::size_t>(1, finiteValues.size());
+    const std::size_t minLocalSupport = std::min(
+        std::max<std::size_t>(settings.minLocalSupport, 1),
+        feasibleSupport
     );
-    const float supportRadius = 1.75f;
+    const std::size_t maxLocalSupport = std::min(
+        std::max(settings.maxLocalSupport, minLocalSupport),
+        feasibleSupport
+    );
+    const float supportDivisor = std::max(settings.supportDivisor, 1.0f);
+    const std::size_t localSupport = std::clamp<std::size_t>(
+        static_cast<std::size_t>(std::floor(static_cast<float>(finiteValues.size()) / supportDivisor)),
+        minLocalSupport,
+        maxLocalSupport
+    );
+    const float supportRadius = std::max(settings.supportRadiusPx, 0.25f);
 
     auto supportedLow = [&]() -> float {
         std::size_t right = 0;
@@ -999,7 +807,7 @@ DenseEdgeEstimate EstimateSupportedEdges(
         return estimate;
     }
 
-    const float pixelCenterToBorderPx = std::clamp(rawWidth * 0.035f, 0.45f, 0.95f);
+    const float pixelCenterToBorderPx = std::clamp(rawWidth * settings.borderRatio, 0.0f, 1.5f);
     low -= pixelCenterToBorderPx;
     high += pixelCenterToBorderPx;
 
@@ -1023,26 +831,14 @@ DenseEdgeEstimate EstimateSupportedEdges(
     return estimate;
 }
 
-DenseEdgeEstimate EstimateTraceEdges(
-    const std::vector<float> &values,
-    std::size_t minSupportCount,
-    int histogramBinCount,
-    float densityThresholdRatio,
-    int edgeMode) {
-
-    if (edgeMode == 1) {
-        DenseEdgeEstimate support = EstimateSupportedEdges(values, minSupportCount);
-        if (support.valid) {
-            return support;
-        }
-    }
-
-    return EstimateDenseEdges(
-        values,
-        minSupportCount,
-        histogramBinCount,
-        densityThresholdRatio
-    );
+TraceSupportEdgeSettings MakeTraceSupportEdgeSettings(const Ui &ui) {
+    TraceSupportEdgeSettings settings;
+    settings.supportDivisor = ui.TraceSupportDivisor();
+    settings.minLocalSupport = static_cast<std::size_t>(ui.TraceSupportMinCount());
+    settings.maxLocalSupport = static_cast<std::size_t>(ui.TraceSupportMaxCount());
+    settings.supportRadiusPx = ui.TraceSupportRadiusPx();
+    settings.borderRatio = ui.TraceBorderRatio();
+    return settings;
 }
 
 float MedianValue(std::vector<float> values) {
@@ -2500,19 +2296,17 @@ LocalTraceSection EstimateLocalFlowSection(
         trimmedOffsets = std::move(normalOffsets);
     }
 
-    const DenseEdgeEstimate denseEdges = EstimateTraceEdges(
+    const TraceEdgeEstimate edgeEstimate = EstimateSupportedEdges(
         trimmedOffsets,
         12,
-        fit.histogramBinCount,
-        fit.densityThresholdRatio,
-        fit.edgeMode
+        fit.supportEdge
     );
-    if (!denseEdges.valid) {
+    if (!edgeEstimate.valid) {
         return section;
     }
 
-    const float eventLow = denseEdges.low;
-    const float eventHigh = denseEdges.high;
+    const float eventLow = edgeEstimate.low;
+    const float eventHigh = edgeEstimate.high;
     const float widthPx = eventHigh - eventLow;
     if (!std::isfinite(widthPx) || widthPx < 1.0f) {
         return section;
@@ -2555,7 +2349,7 @@ LocalTraceSection EstimateLocalFlowSection(
     section.widthPx = widthPx;
     section.s = std::clamp(ribbonMiddle.x, fit.sMin, fit.sMax);
     section.timeSeconds = sampleTime;
-    section.localEventCount = denseEdges.supportCount;
+    section.localEventCount = edgeEstimate.supportCount;
     return section;
 }
 
@@ -2653,19 +2447,17 @@ std::vector<TraceWidthEstimate> EstimateTraceWidths(const TraceRibbonFit &fit, i
             continue;
         }
 
-        const DenseEdgeEstimate denseEdges = EstimateTraceEdges(
+        const TraceEdgeEstimate edgeEstimate = EstimateSupportedEdges(
             normalOffsets,
             12,
-            fit.histogramBinCount,
-            fit.densityThresholdRatio,
-            fit.edgeMode
+            fit.supportEdge
         );
-        if (!denseEdges.valid) {
+        if (!edgeEstimate.valid) {
             continue;
         }
 
-        const float eventLow = denseEdges.low;
-        const float eventHigh = denseEdges.high;
+        const float eventLow = edgeEstimate.low;
+        const float eventHigh = edgeEstimate.high;
         const float eventWidth = eventHigh - eventLow;
 
         if (!std::isfinite(eventWidth) || eventWidth < 2.0f) {
@@ -2745,7 +2537,7 @@ std::vector<TraceWidthEstimate> EstimateTraceWidths(const TraceRibbonFit &fit, i
         estimate.middle = sectionMiddle;
         estimate.widthPx = widthPx;
         estimate.timeSeconds = sampleTime;
-        estimate.localEventCount = localSection.valid ? localSection.localEventCount : denseEdges.supportCount;
+        estimate.localEventCount = localSection.valid ? localSection.localEventCount : edgeEstimate.supportCount;
         estimate.tangent = geometricTangent;
 
         if (endA.y < endB.y) {
@@ -2771,9 +2563,7 @@ TraceRibbonFit FitTraceRibbon(
     float localWindowPx,
     int localOrder,
     float pcaPeriodMs,
-    int histogramBinCount,
-    float densityThresholdRatio,
-    int edgeMode) {
+    const TraceSupportEdgeSettings &supportEdge) {
 
     TraceRibbonFit fit;
 
@@ -2785,9 +2575,16 @@ TraceRibbonFit FitTraceRibbon(
     const float localWindow = std::clamp(localWindowPx, 8.0f, 240.0f);
     const int fitOrder = std::clamp(localOrder, 1, 2);
     const float timedPcaPeriodMs = std::clamp(pcaPeriodMs, 2.0f, 80.0f);
-    const int edgeHistogramBins = std::clamp(histogramBinCount, 16, 512);
-    const float edgeDensityThresholdRatio = std::clamp(densityThresholdRatio, 0.02f, 0.60f);
-    const int selectedEdgeMode = std::clamp(edgeMode, 0, 1);
+    TraceSupportEdgeSettings edgeSettings = supportEdge;
+    edgeSettings.supportDivisor = std::clamp(edgeSettings.supportDivisor, 8.0f, 60.0f);
+    edgeSettings.minLocalSupport = std::clamp<std::size_t>(edgeSettings.minLocalSupport, 1, 20);
+    edgeSettings.maxLocalSupport = std::clamp<std::size_t>(
+        std::max(edgeSettings.maxLocalSupport, edgeSettings.minLocalSupport),
+        edgeSettings.minLocalSupport,
+        30
+    );
+    edgeSettings.supportRadiusPx = std::clamp(edgeSettings.supportRadiusPx, 0.5f, 4.0f);
+    edgeSettings.borderRatio = std::clamp(edgeSettings.borderRatio, 0.0f, 0.10f);
 
     if (points.size() < kMinRawEvents) {
         return fit;
@@ -2885,9 +2682,7 @@ TraceRibbonFit FitTraceRibbon(
     fit.center = center;
     fit.direction = direction;
     fit.normal = normal;
-    fit.histogramBinCount = edgeHistogramBins;
-    fit.densityThresholdRatio = edgeDensityThresholdRatio;
-    fit.edgeMode = selectedEdgeMode;
+    fit.supportEdge = edgeSettings;
     fit.pcaPeriodMs = timedPcaPeriodMs;
     fit.temporalPcaSlices = std::move(temporalPcaSlices);
     fit.sMin = Quantile(sValues, 0.03f);
@@ -2960,20 +2755,18 @@ TraceRibbonFit FitTraceRibbon(
         }
 
         const float s = Quantile(sBin, 0.50f);
-        const DenseEdgeEstimate denseEdges = EstimateTraceEdges(
+        const TraceEdgeEstimate edgeEstimate = EstimateSupportedEdges(
             hBin,
             minEventsPerBin,
-            edgeHistogramBins,
-            edgeDensityThresholdRatio,
-            selectedEdgeMode
+            edgeSettings
         );
-        if (!denseEdges.valid) {
+        if (!edgeEstimate.valid) {
             continue;
         }
 
-        const float hLow = denseEdges.low;
-        const float hMiddle = denseEdges.middle;
-        const float hHigh = denseEdges.high;
+        const float hLow = edgeEstimate.low;
+        const float hMiddle = edgeEstimate.middle;
+        const float hHigh = edgeEstimate.high;
         const float localWidth = hHigh - hLow;
 
         if (!std::isfinite(localWidth) || localWidth < 2.0f) {
@@ -3503,9 +3296,7 @@ void Gui::UpdateTraceAnalysis() {
         ui.TraceLineWindowPx(),
         ui.TraceLineOrder(),
         ui.TracePcaPeriodMs(),
-        ui.TraceHistogramBins(),
-        ui.TraceDensityThresholdRatio(),
-        ui.TraceEdgeMode()
+        MakeTraceSupportEdgeSettings(ui)
     );
 
     if (!fit.valid) {
@@ -3561,9 +3352,7 @@ void Gui::DrawTraceScene() {
     const int lineOrder = ui.TraceLineOrder();
     const float pcaPeriodMs = ui.TracePcaPeriodMs();
     const float followWindowPx = ui.TraceFollowWindowPx();
-    const int histogramBinCount = ui.TraceHistogramBins();
-    const float densityThresholdRatio = ui.TraceDensityThresholdRatio();
-    const int edgeMode = ui.TraceEdgeMode();
+    const TraceSupportEdgeSettings supportEdge = MakeTraceSupportEdgeSettings(ui);
     const int polarityMode = ui.TracePolarityMode();
     TracePointSourceResult traceSource = BuildTracePointSource(
         traceAccumulatedPoints,
@@ -3729,9 +3518,7 @@ void Gui::DrawTraceScene() {
         lineWindowPx,
         lineOrder,
         pcaPeriodMs,
-        histogramBinCount,
-        densityThresholdRatio,
-        edgeMode
+        supportEdge
     );
     if (!fit.valid) {
         ClearTrace3D();
@@ -3896,13 +3683,13 @@ void Gui::DrawTraceScene() {
     );
     DrawText(
         TextFormat(
-            "line: binw=%.1fpx bins=%d win=%.0f edge=%s hist=%d dens=%.0f%%",
+            "line: binw=%.1fpx bins=%d win=%.0f support div=%.0f [%d-%d]",
             fit.lineBinWidthPx,
             fit.lineBinCount,
             lineWindowPx,
-            TraceEdgeModeName(fit.edgeMode),
-            fit.histogramBinCount,
-            fit.densityThresholdRatio * 100.0f
+            fit.supportEdge.supportDivisor,
+            static_cast<int>(fit.supportEdge.minLocalSupport),
+            static_cast<int>(fit.supportEdge.maxLocalSupport)
         ),
         static_cast<int>(dest.x + dest.width + 24.0f),
         static_cast<int>(dest.y + 130.0f),
@@ -3911,11 +3698,13 @@ void Gui::DrawTraceScene() {
     );
     DrawText(
         TextFormat(
-            "order=%d pca=%d @ %.0fms follow=%.0fpx ransac drop=%d sparse=%d",
+            "order=%d pca=%d @ %.0fms follow=%.0fpx rad=%.2f border=%.1f%% drop=%d sparse=%d",
             lineOrder,
             static_cast<int>(fit.temporalPcaSlices.size()),
             fit.pcaPeriodMs,
             followWindowPx,
+            fit.supportEdge.supportRadiusPx,
+            fit.supportEdge.borderRatio * 100.0f,
             fit.ransacRejectedSamples,
             sparseFitCount
         ),
