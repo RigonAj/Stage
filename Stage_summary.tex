@@ -89,6 +89,15 @@ c_x \approx 305~\text{px}, \quad
 c_y \approx 196~\text{px}.
 \]
 
+Cette calibration constitue une première estimation approximative pour la caméra événementielle. Le flux utilisé pour détecter l'échiquier contient beaucoup de bruit, ce qui rend la localisation des coins moins stable qu'avec une caméra classique. L'erreur de calibration indiquée dans le fichier XML est d'environ \(0.486~\text{px}\).
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{images/Calibration.png}
+  \caption{Première calibration approximative de la caméra événementielle DVXplorer.}
+  \label{fig:calibration-dvxplorer}
+\end{figure}
+
 Les séquences simulées utilisent une calibration différente, fournie dans les fichiers de séquence:
 
 \[
@@ -97,17 +106,57 @@ c_x = 320~\text{px}, \quad
 c_y = 240~\text{px}.
 \]
 
-Cette distinction est importante: la calibration physique de la DVXplorer ne doit pas être utilisée pour les séquences simulées. Le lecteur de séquences charge automatiquement l'intrinsèque associé au fichier d'événements.
-
 \section{Visualisation}
 
 L'application fournit plusieurs vues: une vue 2D, une vue 3D, une vue de dessus, une vue de qualité RMSE et une vue Trace. Ces vues servent surtout au diagnostic. Elles permettent de vérifier si les clusters sont cohérents, si le cercle ajusté suit la balle, si la trajectoire 3D est plausible et si la trace événementielle est correctement exploitée.
 
 \chapter{Première méthode: détection par circle fitting}
 
-\section{Principe}
+\section{Signal événementiel et polarités}
 
-La première méthode considère que la balle est une sphère dont la projection dans l'image peut être approchée par un cercle. Après filtrage et regroupement des événements, le tracker sélectionne un groupe de points correspondant probablement à la balle. Un ajustement de cercle est ensuite effectué sur ce nuage de points.
+Une caméra événementielle ne transmet pas des images complètes à fréquence fixe. Chaque pixel fonctionne de manière indépendante et déclenche un événement lorsqu'il détecte une variation suffisante de luminosité. Un événement contient donc quatre informations principales:
+
+\[
+e = (x, y, t, p),
+\]
+
+où \(x\) et \(y\) sont les coordonnées du pixel, \(t\) est le timestamp, et \(p\) est la polarité. La polarité indique le signe de la variation de luminosité: une polarité positive correspond à une augmentation locale de luminosité, tandis qu'une polarité négative correspond à une diminution. Pour une balle en mouvement, ces polarités apparaissent souvent de manière structurée autour du contour de l'objet. Elles peuvent donc aider à vérifier qu'un groupe d'événements ressemble bien au passage d'une balle plutôt qu'à du bruit isolé.
+
+Ce fonctionnement est particulièrement intéressant pour une balle rapide. La caméra ne produit des données que là où quelque chose change, ce qui réduit fortement la quantité d'information à traiter. En revanche, si l'on accumule trop longtemps les événements, la balle ne forme plus un contour circulaire instantané: elle laisse une trace allongée. L'algorithme doit donc conserver assez d'événements pour être robuste, mais pas au point de mélanger plusieurs positions de la balle.
+
+\section{Pipeline de l'algorithme}
+
+La méthode par \emph{circle fitting} considère que la balle est une sphère dont la projection dans l'image peut être approchée par un cercle. L'idée est de détecter les événements appartenant probablement à la balle, d'ajuster un cercle sur ces points, puis d'utiliser le rayon apparent pour calculer la profondeur.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{\detokenize{images/Algo_Cricle_Fitting/Algo_Fitting_Circle.png}}
+  \caption{Pipeline général de l'algorithme de détection 3D par circle fitting.}
+  \label{fig:algo-fitting-circle}
+\end{figure}
+
+Le premier choix important est l'utilisation d'une fenêtre temporelle récente. Cette fenêtre limite les événements analysés aux derniers instants observés par la caméra. Elle réduit le bruit accumulé, évite de mélanger des positions trop anciennes de la balle, et donne une estimation plus réactive. La taille de cette fenêtre est donc un compromis: trop courte, elle ne contient pas assez de points; trop longue, elle transforme le contour de la balle en traînée.
+
+Après ce fenêtrage, les événements sont échantillonnés. Cette étape ne change pas le modèle géométrique, mais elle est importante pour les performances. DBSCAN doit comparer les points entre eux pour former des groupes denses: si trop d'événements sont conservés, le temps de calcul augmente rapidement. L'échantillonnage garde un sous-ensemble représentatif du flux, ce qui permet de conserver une boucle rapide tout en laissant assez de points pour reconnaître la balle.
+
+L'étape suivante est l'\emph{undistortion}. Les coordonnées image sont corrigées avec la calibration OpenCV afin de compenser la distorsion optique de la caméra. Cette correction est nécessaire avant le clustering final et surtout avant la pose 3D, car le calcul de profondeur suppose que les points suivent le modèle de projection calibré. Dans le pipeline utilisé, l'undistortion est appliquée après l'échantillonnage afin de corriger moins de points et donc de réduire le coût de calcul.
+
+DBSCAN est ensuite utilisé pour regrouper les événements en clusters. Ce choix est adapté au problème car le nombre d'objets visibles n'est pas connu à l'avance et le flux contient du bruit. DBSCAN cherche des zones denses dans l'image, rejette les points isolés, et fournit plusieurs clusters candidats. Chaque cluster peut correspondre à la balle, à une partie de la scène en mouvement, ou à un bruit structuré; l'étape de circle fitting sert ensuite à sélectionner le candidat le plus cohérent.
+
+\section{Sous-tranches temporelles}
+
+Lorsqu'un cluster contient des événements répartis sur une durée trop longue, il peut représenter plusieurs positions successives de la balle. Pour limiter cet effet, l'algorithme peut découper le cluster en sous-tranches. Ces sous-tranches peuvent être définies par fenêtre temporelle ou par nombre d'événements. L'objectif est de retrouver une forme plus proche d'un cercle instantané, au lieu d'ajuster un cercle sur toute la trace.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.86\textwidth]{\detokenize{images/Algo_Cricle_Fitting/Evenement_Recent.png}}
+  \caption{Exemple d'événements récents utilisés pour isoler une portion plus cohérente du mouvement de la balle.}
+  \label{fig:evenements-recents-circle}
+\end{figure}
+
+Cette étape est particulièrement utile lorsque la balle se déplace vite dans le plan image. Une sous-tranche récente donne une estimation plus proche de la position actuelle, tandis qu'un cluster complet peut être influencé par des événements plus anciens. Elle prépare donc un nuage de points plus stable pour l'ajustement du cercle.
+
+\section{Ajustement du cercle et validation}
 
 Le cercle estimé fournit trois informations principales:
 
@@ -115,7 +164,64 @@ Le cercle estimé fournit trois informations principales:
 (u, v, r),
 \]
 
-où \(u\) et \(v\) sont les coordonnées du centre dans l'image et \(r\) est le rayon apparent en pixels. En connaissant le rayon réel \(R\) de la balle et la focale \(f_x\), la profondeur est estimée par:
+où \(u\) et \(v\) sont les coordonnées du centre dans l'image et \(r\) est le rayon apparent en pixels. L'algorithme effectue deux ajustements successifs. Le premier cercle est calculé sur le cluster candidat afin d'obtenir une estimation initiale du centre et du rayon. Cette estimation sert ensuite à analyser les polarités, calculer le résidu RMS et éliminer les points aberrants.
+
+La validation par symétrie est une étape importante de première identification de la balle. Après le premier cercle, le centre estimé sert de référence pour regarder comment les événements positifs et négatifs sont répartis autour du candidat. Pour chaque événement \(p_i\), on calcule le vecteur radial normalisé:
+
+\[
+d_i = \frac{p_i - c}{\|p_i - c\|},
+\]
+
+où \(c\) est le centre du cercle estimé. Les vecteurs sont ensuite séparés selon leur polarité. Le code accumule les directions des événements positifs et négatifs:
+
+\[
+D_+ = \sum_{p_i = +} d_i,
+\qquad
+D_- = \sum_{p_i = -} d_i.
+\]
+
+Un vrai passage de balle produit généralement deux groupes de polarités opposés: un bord de la balle provoque une augmentation de luminosité et l'autre une diminution. L'algorithme vérifie donc d'abord que les deux polarités sont présentes et que leurs nombres restent relativement équilibrés:
+
+\[
+\text{sym} =
+\frac{|N_+ - N_-|}{N_+ + N_-}.
+\]
+
+Si cette valeur est trop grande, le cluster est rejeté car il ressemble davantage à du bruit ou à un objet non symétrique qu'à une balle. Ensuite, l'algorithme calcule l'angle moyen de chaque polarité:
+
+\[
+\theta_+ = \operatorname{atan2}(D_{+,y}, D_{+,x}),
+\qquad
+\theta_- = \operatorname{atan2}(D_{-,y}, D_{-,x}).
+\]
+
+La séparation entre ces deux directions doit être proche de \(\pi\), c'est-à-dire que les deux groupes doivent être approximativement opposés:
+
+\[
+\left||\theta_+ - \theta_-| - \pi\right| < \varepsilon.
+\]
+
+Cette étape ne donne pas encore la pose 3D finale, mais elle permet d'écarter tôt les clusters qui ne possèdent pas la structure attendue d'une balle en mouvement. Elle rend donc le choix du cluster plus robuste avant le filtrage des points aberrants et le second ajustement de cercle.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.56\textwidth]{\detokenize{images/Algo_Cricle_Fitting/Symetrie_Graph_Event.png}}
+  \caption{Principe de validation par symétrie des polarités: les événements positifs et négatifs doivent former deux directions moyennes opposées autour du centre du cercle candidat.}
+  \label{fig:symetrie-polarites-circle}
+\end{figure}
+
+Le second cercle est recalculé après ce nettoyage. Cette deuxième régression est plus fiable car elle s'appuie sur un nuage de points déjà filtré. Le but n'est pas de complexifier inutilement l'algorithme, mais d'éviter qu'un petit nombre de points isolés élargisse artificiellement le rayon. Cette précaution est importante, car la profondeur dépend directement de ce rayon apparent.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{\detokenize{images/Algo_Cricle_Fitting/Sortie_algo_2D.png}}
+  \caption{Sortie 2D de l'algorithme. La partie gauche montre les événements bruts, tandis que la partie droite montre les clusters, le cercle retenu et la trajectoire image. La flèche verte indique l'estimation de la direction de la balle; cette direction est stabilisée par la validation de polarité et de symétrie du cluster.}
+  \label{fig:sortie-algo-2d}
+\end{figure}
+
+\section{Détermination de la pose 3D}
+
+En connaissant le rayon réel \(R\) de la balle et la focale \(f_x\), la profondeur est estimée à partir du rayon apparent:
 
 \[
 Z = \frac{f_x R}{r}.
@@ -129,35 +235,95 @@ X = \frac{u - c_x}{f_x} Z,
 Y = \frac{v - c_y}{f_y} Z.
 \]
 
-Dans le projet, la balle utilisée dans les séquences simulées possède un rayon de \(20~\text{mm}\). Le même ordre de grandeur est utilisé pour l'estimation réelle.
+Dans le projet, la balle utilisée dans les séquences simulées possède un rayon de \(20~\text{mm}\). Le même ordre de grandeur est utilisé pour l'estimation réelle. La pose obtenue est exprimée en millimètres dans le repère caméra, puis convertie en mètres pour l'affichage 3D.
+
+La trajectoire représentée sur la figure suivante correspond à de bonnes conditions de détection: le cluster de la balle est bien isolé, le cercle ajusté reste cohérent avec la projection de la balle et le rayon apparent n'est pas trop perturbé par une traînée événementielle. Elle illustre donc le comportement attendu de la méthode lorsque le signal respecte bien l'hypothèse circulaire.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{\detokenize{images/Algo_Cricle_Fitting/ball_tracking_2d.png}}
-  \caption{Détection 2D par circle fitting: événements, cercle ajusté et trajectoire image.}
-  \label{fig:circle-fitting-2d}
+  \includegraphics[width=0.88\textwidth]{\detokenize{images/Algo_Cricle_Fitting/3D_estimation.png}}
+  \caption{Estimation 3D obtenue dans de bonnes conditions de détection, à partir du centre et du rayon du cercle détecté dans l'image.}
+  \label{fig:circle-3d-estimation}
 \end{figure}
 
-\section{Trajectoire 3D}
+\section{Régression de trajectoire 3D}
 
 Chaque position 3D valide est ajoutée à l'historique. La trajectoire est ensuite modélisée par des régressions simples:
 
 \[
-x(t) = a_x t + b_x,
+X(t) = a_x t + b_x,
 \qquad
-y(t) = a_y t + b_y,
+Y(t) = a_y t + b_y,
 \qquad
-z(t) = a_z t^2 + b_z t + c_z.
+Z(t) = a_z t^2 + b_z t + c_z.
 \]
 
-Ce choix correspond au mouvement attendu d'un projectile: les coordonnées latérales évoluent de manière approximativement linéaire, tandis que l'axe vertical suit une évolution parabolique sous l'effet de la gravité. L'objectif n'est pas seulement d'afficher les points mesurés, mais aussi de prédire la suite de la trajectoire pour préparer l'interception robotique.
+Pour une coordonnée linéaire \(q \in \{X,Y\}\), le code calcule directement les coefficients à partir des sommes accumulées:
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.88\textwidth]{\detokenize{images/Algo_Cricle_Fitting/ball_tracking_3d.png}}
-  \caption{Reconstruction de trajectoire 3D à partir des positions estimées par circle fitting.}
-  \label{fig:circle-fitting-3d}
-\end{figure}
+\[
+D = n \sum t_i^2 - \left(\sum t_i\right)^2,
+\]
+
+\[
+a = \frac{n \sum t_i q_i - \left(\sum t_i\right)\left(\sum q_i\right)}{D},
+\qquad
+b = \frac{\sum q_i - a \sum t_i}{n}.
+\]
+
+Pour la coordonnée quadratique \(Z\), le modèle est:
+
+\[
+q(t) = a t^2 + b t + c.
+\]
+
+Les grandeurs intermédiaires utilisées dans le code sont:
+
+\[
+S_{11} = \sum t_i^2 - \frac{\left(\sum t_i\right)^2}{n},
+\qquad
+S_{12} = \sum t_i^3 - \frac{\left(\sum t_i\right)\left(\sum t_i^2\right)}{n},
+\]
+
+\[
+S_{22} = \sum t_i^4 - \frac{\left(\sum t_i^2\right)^2}{n},
+\qquad
+S_{q1} = \sum t_i q_i - \frac{\left(\sum q_i\right)\left(\sum t_i\right)}{n},
+\]
+
+\[
+S_{q2} = \sum t_i^2 q_i - \frac{\left(\sum q_i\right)\left(\sum t_i^2\right)}{n},
+\qquad
+D_q = S_{22}S_{11} - S_{12}^2.
+\]
+
+Les coefficients quadratiques sont alors:
+
+\[
+b = \frac{S_{q1}S_{22} - S_{q2}S_{12}}{D_q},
+\qquad
+a = \frac{S_{q2}S_{11} - S_{q1}S_{12}}{D_q},
+\]
+
+\[
+c = \bar{q} - b\bar{t} - a\overline{t^2}.
+\]
+
+Une version pondérée peut aussi être activée. Elle garde les mêmes modèles, mais remplace les sommes simples par des sommes pondérées. Le poids d'un point combine un terme de récence et un terme robuste basé sur le résidu:
+
+\[
+w_i =
+\exp\left(-3\,\text{clamp}\left(\frac{t_{\max}-t_i}{t_{\max}-t_{\min}},0,1\right)\right)
+\cdot
+\frac{1}{1+\left(\frac{r_i}{s}\right)^2},
+\]
+
+où \(r_i\) est le résidu par rapport à la première régression et \(s\) est une échelle robuste calculée à partir de la médiane des résidus. Les points récents et cohérents ont donc plus d'influence que les anciens points ou les mesures aberrantes.
+
+Ce choix correspond au mouvement attendu d'un projectile: deux axes sont modélisés de manière linéaire, tandis que l'axe soumis principalement à la gravité est modélisé par une parabole. L'objectif n'est pas seulement d'afficher les points mesurés; la trajectoire sert surtout de filtre temporel pour stabiliser la suite de positions 3D et vérifier que les poses successives restent cohérentes.
+
+Le code n'utilise pas une résolution matricielle générale pour ces régressions à chaque boucle. Il accumule directement les sommes nécessaires aux modèles linéaire et quadratique. Ce choix est volontaire: la boucle doit rester rapide, et ces modèles simples peuvent être mis à jour avec peu d'opérations. Construire et résoudre une matrice complète à chaque itération serait plus général, mais moins adapté à une application temps réel où la forme du modèle est déjà connue.
+
+La position de la balle est envoyée en boucle sur le topic ROS 2 à partir des poses 3D validées. La trajectoire 3D sert donc principalement à lisser et filtrer la perception, plutôt qu'à remplacer la mesure instantanée par une prédiction longue.
 
 \section{Limite principale: sensibilité du rayon}
 
@@ -197,37 +363,119 @@ Cela signifie qu'une erreur de \(1~\text{px}\) sur le rayon produit environ \(Z/
 
 En pratique, la caméra événementielle ne voit pas toujours un contour circulaire net. Lors d'un mouvement rapide, les événements s'étalent dans le temps et forment une traînée. Le cercle ajusté peut alors surestimer le rayon apparent. Comme \(Z\) est inversement proportionnel à \(r\), un rayon surestimé donne une balle artificiellement trop proche.
 
+\section{Décalage du plan estimé à haute vitesse}
+
+Un effet visible apparaît lorsque l'on lance une balle de ping-pong dans un plan bien défini devant la caméra. Physiquement, la trajectoire devrait appartenir à un plan réaliste, approximativement perpendiculaire au sol. En vue de dessus, ce plan peut être représenté par une droite. Or les estimations 3D issues du circle fitting ne restent pas toujours sur cette droite: elles peuvent être décalées vers une profondeur plus faible.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{\detokenize{images/Algo_Cricle_Fitting/3D_blem1.png}}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{\detokenize{images/Algo_Cricle_Fitting/3D_blem2.png}}
+  \end{minipage}
+  \caption{Exemples de décalage de la trajectoire 3D estimée lorsque la balle est rapide. Les points estimés ne suivent pas toujours le plan vertical attendu pour le lancer.}
+  \label{fig:circle-fitting-3d-plane-bias}
+\end{figure}
+
+La cause principale est la même que précédemment: à haute vitesse, la traînée événementielle devient plus grande. Le cercle ajusté peut alors englober une zone trop large, ce qui augmente le rayon apparent \(r\). Comme la profondeur est calculée avec \(Z = f_xR/r\), une surestimation de \(r\) produit directement une profondeur trop faible. Les points 3D sont alors ramenés artificiellement vers la caméra, ce qui décale le plan estimé par rapport au plan réel du mouvement.
+
+Pour vérifier si cette erreur peut être corrigée, on peut chercher une relation entre la vitesse de la balle et l'erreur de profondeur. Dans l'outil de visualisation, la vue de dessus ajuste d'abord une droite aux estimations 3D projetées dans le plan \(X/Y\):
+
+\[
+Y = aX + b.
+\]
+
+Cette droite représente le plan vertical attendu vu du dessus. Pour chaque estimation \(P_i = (X_i,Y_i,Z_i)\), l'outil calcule ensuite la distance orthogonale à cette droite:
+
+\[
+d_i =
+\frac{|aX_i - Y_i + b|}{\sqrt{a^2 + 1}}.
+\]
+
+La vitesse utilisée pour comparer cette erreur est la vitesse dans le plan caméra \(X/Z\), calculée à partir de la régression 3D:
+
+\[
+v_{XZ}(t) =
+\sqrt{a_X^2 + \left(2a_Zt + b_Z\right)^2}.
+\]
+
+La distance \(d_i\) est alors tracée en fonction de \(v_{XZ}(t_i)\), puis une régression linéaire est ajustée:
+
+\[
+d \approx \alpha v_{XZ} + \beta.
+\]
+
+Si une proportionnalité apparaît, cela indique que le biais de profondeur dépend de la vitesse. Cette relation pourrait ensuite servir à corriger soit le rayon estimé, soit directement la profondeur, par exemple en ajoutant une correction dépendante de la vitesse.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{\detokenize{images/Algo_Cricle_Fitting/Estimation_coef.png}}
+  \caption{Analyse du biais de profondeur. En haut à droite, la vue de dessus montre le décalage des estimations par rapport au plan attendu; le graphique adjacent trace la distance orthogonale à ce plan en fonction de la vitesse estimée dans le plan caméra. La tendance linéaire suggère une proportionnalité entre vitesse et erreur de profondeur.}
+  \label{fig:circle-fitting-speed-depth-bias}
+\end{figure}
+
+La partie basse de cette figure correspond à la vue RMSE du code. Pour chaque pourcentage \(p\) entre \(10\%\) et \(90\%\), l'algorithme utilise les \(p\%\) premiers points 3D pour ajuster une trajectoire:
+
+\[
+X(t)=a_Xt+b_X,\qquad
+Y(t)=a_Yt+b_Y,\qquad
+Z(t)=a_Zt^2+b_Zt+c_Z.
+\]
+
+Il teste ensuite cette trajectoire sur les points restants, c'est-à-dire les \((100-p)\%\) derniers points. Si \(N_p\) est le nombre de points utilisés pour l'apprentissage, la mesure affichée est:
+
+\[
+\text{RMSE}(p) =
+\sqrt{
+\frac{1}{N-N_p}
+\sum_{i=N_p}^{N-1}
+\left\|
+\hat{P}_i^{(p)} - P_i
+\right\|^2
+}.
+\]
+
+Cette RMSE ne compare pas directement l'estimation à une vérité terrain externe. Elle mesure plutôt la cohérence interne de la trajectoire estimée: on regarde si les premiers points permettent de prédire correctement la suite des estimations. Lorsque le biais de profondeur varie avec la vitesse, cette erreur augmente car la trajectoire estimée devient moins compatible avec un modèle balistique simple.
+
+\section{Conclusion sur la méthode par circle fitting}
+
+La méthode par circle fitting donne une base simple et efficace lorsque la balle produit un contour événementiel suffisamment circulaire. Elle permet d'obtenir rapidement une pose 3D à partir de peu d'informations: un centre image, un rayon apparent et la calibration caméra. Cependant, sa limite principale est structurelle: toute la profondeur dépend directement du rayon estimé. Or ce rayon est lui-même très sensible au bruit, à la densité d'événements, au choix de la fenêtre temporelle et surtout à la vitesse de la balle.
+
+Lorsque la balle se déplace vite, la traînée événementielle augmente le rayon apparent. La profondeur calculée devient alors trop faible, ce qui décale la trajectoire 3D. On peut essayer de corriger ce biais, par exemple en cherchant une relation entre vitesse et erreur de profondeur, puis en appliquant une compensation. Cette piste est possible, mais elle devient rapidement laborieuse: il faut estimer un coefficient fiable, vérifier qu'il reste valable sur plusieurs lancers, et tenir compte de facteurs difficiles à contrôler.
+
+Parmi ces facteurs, on peut citer la luminosité de la scène, le contraste de la balle, l'angle de tir, la distance à la caméra, la rotation éventuelle de la balle, la densité d'événements produite par la caméra et les erreurs de calibration. Certains de ces effets sont difficiles à mesurer directement, et d'autres peuvent varier d'une séquence à l'autre. Corriger uniquement le rayon risque donc de produire une solution fragile, très dépendante des conditions expérimentales.
+
+Il est donc plus intéressant de chercher une méthode moins sensible à une erreur locale sur le rayon. C'est la motivation de la méthode Trace. Au lieu de forcer un cercle sur une forme parfois allongée, elle exploite la forme réellement observée dans le flux événementiel. La largeur de la trace est estimée à partir de plusieurs coupes et de nombreux événements, ce qui réduit l'influence d'un point isolé ou d'un cercle mal ajusté. Cette approche est plus prometteuse pour les balles rapides, car elle utilise directement l'information produite par la caméra événementielle au lieu de la ramener à tout prix à un contour circulaire instantané.
+
 \chapter{Seconde méthode: estimation par trace événementielle}
 
 \section{Motivation}
 
-La méthode par trace part d'une observation simple: pour une balle rapide, l'information utile n'est pas seulement contenue dans un cercle instantané. Elle est répartie dans toute la trace événementielle produite pendant le déplacement de la balle. Cette trace contient beaucoup plus de points qu'un seul contour local.
+La méthode par trace part d'une observation simple: pour une balle rapide, l'information utile n'est pas seulement contenue dans un cercle instantané. Elle est répartie dans toute la trace événementielle produite pendant le déplacement de la balle. Cette trace contient beaucoup plus de points qu'un seul contour local, et elle correspond mieux à ce que la caméra événementielle observe réellement lorsque la balle traverse vite le champ de vision.
 
-L'idée est donc de mesurer la largeur réelle de cette trace, puis d'utiliser cette largeur comme diamètre apparent de la balle. Cette approche est plus robuste car elle s'appuie sur de nombreux événements et sur une cohérence spatiale globale.
+L'idée est donc de mesurer la largeur réelle de la trace, puis d'utiliser cette largeur comme diamètre apparent de la balle. La profondeur n'est plus déduite d'un rayon de cercle ajusté sur quelques événements, mais d'un ruban estimé à partir de nombreuses coupes locales. Cette approche est plus robuste face aux points isolés, aux contours incomplets et aux déformations créées par la vitesse.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.78\textwidth]{\detokenize{images/Algo_Trace/Screenshot from 2026-06-04 17-32-17.png}}
-  \caption{Vue Trace: bord haut, ligne médiane, bord bas et mesures de largeur perpendiculaires.}
-  \label{fig:trace-ribbon}
+  \includegraphics[width=0.86\textwidth]{images/Algo_Trace/Courbe1.png}
+  \caption{Trace test utilisée pour valider la méthode. Les événements forment un ruban courbe: le bord haut est en vert, la ligne médiane en jaune, le bord bas en magenta, et les segments orange représentent les mesures locales de largeur.}
+  \label{fig:trace-test}
 \end{figure}
 
-\section{Pipeline de la méthode Trace}
+\section{Construction des événements de trace}
 
-La méthode Trace suit les étapes suivantes:
+La première étape consiste à construire un nuage d'événements correspondant uniquement à la balle. Le code utilise pour cela une fenêtre mobile centrée sur la trajectoire 2D déjà estimée. Lorsque la parabole 2D de suivi est disponible, la fenêtre n'est pas un simple disque: elle devient un couloir autour de la courbe prédite. Un événement est conservé s'il se trouve assez près de cette trajectoire, avec une tolérance latérale adaptée au rayon apparent de la balle.
 
-\begin{enumerate}
-  \item une fenêtre mobile suit la position courante de la balle;
-  \item les événements récents qui tombent dans cette fenêtre sont accumulés;
-  \item une PCA globale estime la direction principale de la trace;
-  \item des PCA temporelles locales améliorent l'orientation lorsque la trace est courbe;
-  \item les points sont projetés dans un repère local \((s,h)\);
-  \item la trace est découpée en tranches selon \(s\);
-  \item dans chaque tranche, les bords sont détectés sur l'axe normal \(h\);
-  \item trois courbes sont ajustées: bord haut, ligne médiane et bord bas;
-  \item la largeur est mesurée perpendiculairement à la ligne médiane;
-  \item cette largeur est convertie en position 3D.
-\end{enumerate}
+Les événements sont accumulés pendant une courte mémoire temporelle. Cette accumulation est importante: une fenêtre trop courte donne une trace incomplète, alors qu'une mémoire trop longue mélange plusieurs positions et peut épaissir artificiellement le ruban. Le code limite aussi le nombre total d'événements accumulés pour éviter une perte de performances. Les polarités peuvent être gardées ensemble ou filtrées séparément, ce qui permet d'isoler le front ou l'arrière de la balle si une polarité est plus stable dans une scène donnée.
+
+\section{Repère local de la trace}
+
+Une fois les événements sélectionnés, la méthode cherche le repère naturel du ruban. Le centre \(c\) est estimé de manière robuste avec les médianes des coordonnées, puis les points trop éloignés sont retirés à partir d'un quantile radial. Une PCA globale fournit ensuite la direction principale \(d\) de la trace. Pour les trajectoires courbes, cette direction est corrigée par des PCA temporelles calculées sur plusieurs sous-parties de la trace. Dans le code, l'orientation finale combine la direction globale, la moyenne pondérée des directions locales et le déplacement temporel entre le début et la fin de la trace.
 
 Le repère local est défini par:
 
@@ -237,42 +485,178 @@ s = (p - c) \cdot d,
 h = (p - c) \cdot n,
 \]
 
-où \(p\) est un événement image, \(c\) est le centre robuste de la trace, \(d\) la direction principale et \(n\) la normale. Cette transformation convertit un problème 2D difficile en une série de problèmes 1D: pour chaque tranche le long de \(s\), il faut trouver les deux bords sur l'axe \(h\).
-
-\section{Détection des bords soutenus}
-
-La détection des bords ne prend pas simplement le minimum et le maximum des valeurs \(h\). Ces extrêmes peuvent être des points isolés. La méthode cherche plutôt les premiers bords qui possèdent assez de voisins proches dans un petit rayon local. Un bord est donc accepté seulement s'il est soutenu par plusieurs événements.
-
-Cette logique répond mieux au bruit événementiel. Un point isolé à l'extérieur de la trace ne suffit pas à élargir artificiellement la mesure. La largeur locale est ensuite:
-
-\[
-\text{largeur} = h_{\text{haut}} - h_{\text{bas}}.
-\]
-
-Les largeurs locales aberrantes sont rejetées, puis les positions 3D obtenues sont utilisées pour reconstruire une trajectoire.
-
-\section{Conversion 3D par largeur de trace}
-
-La conversion 3D repose sur le même principe géométrique que le circle fitting, mais la grandeur mesurée n'est plus le rayon. La largeur de trace est utilisée comme diamètre apparent:
-
-\[
-Z = \frac{f_{\text{eff}} D}{\text{largeur}_{px}},
-\]
-
-où \(D\) est le diamètre réel de la balle et \(f_{\text{eff}}\) est la focale effective dans la direction normale utilisée pour mesurer la largeur. Le centre de la mesure permet ensuite de retrouver les coordonnées \(X\) et \(Y\).
-
-L'avantage est que la largeur est estimée à partir de nombreuses coupes de la trace. L'erreur d'un événement isolé influence beaucoup moins le résultat que dans le cas d'un cercle ajusté sur une forme déformée par la vitesse.
+où \(p\) est un événement image et \(n=(-d_y,d_x)\) est la normale à la trace. La coordonnée \(s\) donne la position le long de la trajectoire, tandis que \(h\) donne la position dans l'épaisseur du ruban. Cette transformation convertit un problème 2D difficile en une série de problèmes 1D: pour chaque tranche le long de \(s\), il faut trouver les deux bords sur l'axe \(h\).
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.82\textwidth]{\detokenize{images/Algo_Trace/Screenshot from 2026-06-04 17-34-11.png}}
-  \caption{Résultat 3D obtenu avec la méthode Trace. Les points estimés sont comparés à la trajectoire de référence lorsque celle-ci est disponible.}
-  \label{fig:trace-3d}
+  \includegraphics[width=0.78\textwidth]{\detokenize{images/Algo_Trace/Screenshot from 2026-06-04 17-32-17.png}}
+  \caption{Vue Trace dans l'interface. Les événements récents sont colorés selon le temps, puis le ruban est reconstruit avec un bord haut, une ligne médiane, un bord bas et plusieurs mesures de largeur.}
+  \label{fig:trace-ribbon}
 \end{figure}
+
+\section{Détection des bords soutenus}
+
+La trace est découpée en tranches selon \(s\). Dans chaque tranche, on récupère toutes les valeurs \(h\), c'est-à-dire les positions des événements sur l'axe normal au ruban. La recherche de bord devient donc un problème 1D: il faut trouver où commence et où finit le paquet d'événements dans cette coupe.
+
+Une solution simple serait de prendre directement le minimum et le maximum des valeurs \(h\). Cette solution est rejetée car elle serait trop sensible au bruit: un seul événement isolé loin de la trace pourrait devenir un bord et augmenter artificiellement la largeur. L'algorithme utilise donc une recherche par support local. Les valeurs finies de \(h\) sont triées, puis le code cherche les extrêmes qui possèdent assez de voisins proches.
+
+Le nombre de voisins requis est calculé à partir du nombre d'événements dans la tranche:
+
+\[
+\text{localSupport}
+=
+\operatorname{clamp}
+\left(
+\frac{N}{\text{supportDiv}},
+\text{supportMin},
+\text{supportMax}
+\right).
+\]
+
+Le balayage bas part du plus petit \(h\). Pour chaque candidat \(h_k\), le code compte combien de valeurs tombent dans une fenêtre locale de rayon \(r_s\) vers la droite. Le premier candidat qui atteint le support devient le bord bas:
+
+\[
+h_{\text{bas}}
+=
+\min h_k
+\quad \text{tel que} \quad
+\#\{h_i \in [h_k, h_k+r_s]\}
+\geq \text{localSupport}.
+\]
+
+Le balayage haut fait la même chose depuis la droite. Il cherche le dernier candidat qui possède assez de voisins vers la gauche:
+
+\[
+h_{\text{haut}}
+=
+\max h_k
+\quad \text{tel que} \quad
+\#\{h_i \in [h_k-r_s, h_k]\}
+\geq \text{localSupport}.
+\]
+
+La figure suivante illustre pourquoi cette méthode est plus robuste qu'une recherche du minimum et du maximum. Les points rouges sont bien les événements les plus extrêmes, mais ils ne sont pas choisis comme bords car ils ne sont pas soutenus par assez de voisins.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{images/Algo_Trace/Trace_Support_Edges.png}
+  \caption{Recherche locale des bords par support sur l'axe \(h\). Les événements isolés sont ignorés; seuls les extrêmes possédant assez de voisins proches deviennent \(h_{\text{bas}}\) et \(h_{\text{haut}}\).}
+  \label{fig:trace-support-edges}
+\end{figure}
+
+Après la détection des deux extrêmes soutenus, une petite correction extérieure est appliquée. Elle compense le fait que les événements correspondent à des centres de pixels et que le bord apparent peut se trouver légèrement au-delà du dernier événement soutenu. Cette correction est bornée:
+
+\[
+\delta_b
+=
+\operatorname{clamp}
+\left(
+(h_{\text{haut}}-h_{\text{bas}})\,\text{borderRatio},
+0,
+1.5~\text{px}
+\right).
+\]
+
+Les bords finaux deviennent:
+
+\[
+h_{\text{bas}} \leftarrow h_{\text{bas}}-\delta_b,
+\qquad
+h_{\text{haut}} \leftarrow h_{\text{haut}}+\delta_b.
+\]
+
+La coupe est ensuite validée. Elle est rejetée si elle ne contient pas assez d'événements finis, si \(h_{\text{haut}}\leq h_{\text{bas}}\), si la largeur brute est inférieure à \(2~\text{px}\), ou si le nombre d'événements compris entre les deux bords finaux reste inférieur au support minimal demandé. La largeur locale est ensuite:
+
+\[
+w_j = h_{\text{haut},j} - h_{\text{bas},j}.
+\]
+
+Les tranches qui ne contiennent pas assez d'événements sont donc ignorées dès cette étape. Les largeurs locales aberrantes sont ensuite filtrées par cohérence avec les tranches voisines. Cette étape est essentielle car elle empêche un groupe de bruit de devenir une mesure de profondeur.
+
+Le filtrage se fait en deux niveaux. Le premier niveau vérifie la cohérence globale du ruban. À partir des lignes médianes détectées dans chaque tranche, le code ajuste un modèle polynomial simple, linéaire ou quadratique selon le nombre d'échantillons disponibles. Ce modèle sert uniquement à repérer les tranches incohérentes: une tranche est rejetée si sa ligne médiane est trop éloignée de la tendance générale ou si sa largeur locale est trop différente de la largeur médiane du ruban. En pratique, le code utilise une logique de type RANSAC: plusieurs petits sous-ensembles sont essayés, le meilleur modèle est gardé, puis les échantillons dont le résidu est trop élevé sont supprimés.
+
+Le second niveau vérifie la cohérence locale. Pour chaque tranche \(j\), le code regarde les tranches voisines et prédit localement la position attendue du bord haut, du bord bas, de la ligne médiane et de la largeur. Cette prédiction est une petite régression linéaire locale. On obtient par exemple une largeur prédite \(\hat{w}_j\). La tranche est rejetée si:
+
+\[
+|w_j - \hat{w}_j| > \tau_w,
+\]
+
+où \(\tau_w\) dépend à la fois de la largeur médiane du ruban et de la dispersion locale mesurée par une MAD. La même logique est appliquée aux deux bords et à la ligne médiane. Ainsi, une tranche n'est pas supprimée seulement parce qu'elle est différente de la moyenne globale: elle est supprimée lorsqu'elle casse aussi la continuité locale du ruban. Le filtrage n'est appliqué que s'il reste assez d'échantillons après suppression, afin d'éviter de détruire une trace courte mais valide.
+
+\section{Courbes du ruban}
+
+À partir des bords détectés dans chaque tranche, trois ensembles de points sont construits: le bord bas, la ligne médiane et le bord haut. Le code ajuste ensuite trois courbes locales. Le modèle peut être linéaire ou quadratique selon le réglage, mais l'ajustement reste local: autour d'une position \(s\), les échantillons proches reçoivent plus d'importance que les échantillons éloignés.
+
+La construction commence donc avec trois listes d'échantillons:
+
+\[
+(s_j,h_{\text{bas},j}),\qquad
+(s_j,h_{\text{milieu},j}),\qquad
+(s_j,h_{\text{haut},j}).
+\]
+
+La position \(s_j\) d'une tranche est prise comme la médiane des coordonnées \(s\) des événements de cette tranche. Les valeurs \(h_{\text{bas},j}\) et \(h_{\text{haut},j}\) viennent des bords soutenus, et la ligne médiane est définie par:
+
+\[
+h_{\text{milieu},j}
+= \frac{h_{\text{haut},j}+h_{\text{bas},j}}{2}.
+\]
+
+Après le filtrage décrit précédemment, ces trois listes sont utilisées pour construire trois modèles locaux indépendants. On ne force donc pas le bord haut, le bord bas et la ligne médiane à avoir exactement la même forme. Cela permet au ruban de rester souple lorsque la trace est légèrement asymétrique ou lorsque certaines zones contiennent moins d'événements.
+
+Pour un ajustement local quadratique, la forme utilisée est:
+
+\[
+h(s) = a(s-s_0)^2 + b(s-s_0) + c.
+\]
+
+Les coefficients sont recalculés localement autour de \(s_0\). Le poids principal suit un noyau tricube:
+
+\[
+w(u) = (1-|u|^3)^3
+\quad \text{si } |u| \leq 1,
+\]
+
+avec \(u=(s-s_0)/B\), où \(B\) est la largeur de fenêtre locale. Si le support local est insuffisant, le code peut utiliser un poids gaussien plus large en secours. Cette stratégie évite de forcer une seule parabole globale sur toute la trace, ce qui serait moins adapté aux changements locaux de forme.
+
+Pour tracer une courbe complète, le code échantillonne ensuite plusieurs positions \(s_0\) entre le début et la fin du ruban. À chaque position, il recalcule un petit ajustement local et récupère la valeur estimée de \(h(s_0)\). Comme le modèle est centré sur \(s_0\), cette valeur correspond directement au coefficient \(c\). Le point est ensuite reconverti dans l'image avec:
+
+\[
+p(s_0) = c_{\text{trace}} + s_0 d + h(s_0)n,
+\]
+
+où \(c_{\text{trace}}\) est le centre du ruban, \(d\) sa direction principale et \(n\) sa normale. Cette opération est faite pour la ligne médiane, le bord bas et le bord haut. Le code compare ensuite la position moyenne des deux bords dans l'image pour décider lequel doit être affiché comme bord haut ou bord bas, car le signe de la normale dépend de l'orientation de la PCA.
+
+Les zones où le support local est faible sont aussi mémorisées comme points \emph{sparse}. Elles ne bloquent pas forcément l'affichage, mais elles indiquent que la courbe est moins fiable à cet endroit. Cette information est utile pour diagnostiquer les cas où la trace est trop courte, trop bruitée ou mal couverte par les événements.
+
+\section{Conversion 3D par largeur de trace}
+
+La conversion 3D repose sur le même principe géométrique que le circle fitting, mais la grandeur mesurée n'est plus le rayon d'un cercle. Pour plusieurs instants de la trace, le code mesure une largeur perpendiculaire à la ligne médiane. Cette largeur est utilisée comme diamètre apparent de la balle:
+
+\[
+Z = \frac{f_{\text{eff}}D}{w_{px}},
+\]
+
+où \(D\) est le diamètre réel de la balle et \(w_{px}\) la largeur mesurée en pixels. Comme la largeur n'est pas forcément horizontale ou verticale dans l'image, le code utilise une focale effective dans la direction de mesure:
+
+\[
+f_{\text{eff}} =
+\sqrt{(f_x n_x)^2 + (f_y n_y)^2}.
+\]
+
+Le centre image \((u,v)\) de la mesure permet ensuite de retrouver les coordonnées caméra:
+
+\[
+X = \frac{(u-c_x)Z}{f_x},
+\qquad
+Y = \frac{(v-c_y)Z}{f_y}.
+\]
+
+Dans l'affichage 3D, ces coordonnées sont ensuite remappées dans le repère utilisé par l'interface. Les positions 3D aberrantes sont filtrées par sauts temporels et par résidu de trajectoire. Le résultat final est donc une suite de points 3D, puis une trajectoire ajustée sur ces points. Les sorties obtenues avec cette conversion sont présentées dans le chapitre~\ref{chap:simulation-validation}, où la simulation fournit une vérité terrain pour comparer directement l'estimation à la position réelle de la balle.
 
 \section{Régression pondérée de trajectoire}
 
-Une régression pondérée peut être activée pour la trajectoire finale. Le modèle géométrique reste le même:
+Une régression est ensuite calculée sur les positions 3D obtenues. Le modèle reste volontairement simple, comme pour la première méthode:
 
 \[
 x(t) = a t + b,\qquad
@@ -280,13 +664,42 @@ y(t) = a t + b,\qquad
 z(t) = a t^2 + b t + c.
 \]
 
-La différence vient du poids associé à chaque observation. Les points récents reçoivent plus de poids, ce qui rend la trajectoire plus réactive. Les points dont le résidu est élevé reçoivent moins de poids, ce qui limite l'influence des mesures aberrantes. Cette pondération ne remplace pas la détection de trace, mais elle stabilise la trajectoire finale lorsque quelques poses 3D sont moins fiables.
+Les axes \(x\) et \(y\) sont modélisés par une droite car la vitesse horizontale varie peu sur la courte durée observée. L'axe \(z\) est modélisé par un polynôme du second degré pour représenter la courbure verticale de la trajectoire. La différence entre la version non pondérée et la version pondérée vient du poids associé à chaque observation.
+
+Le code multiplie deux termes. Le premier donne plus d'importance aux points récents:
+
+\[
+w_{\text{temps},i} = \exp(-3\,\text{age}_i).
+\]
+
+Le second réduit l'influence des points dont le résidu est élevé:
+
+\[
+w_{\text{robuste},i} =
+\frac{1}{1+\left(\frac{r_i}{\sigma}\right)^2}.
+\]
+
+Le poids final est donc:
+
+\[
+w_i = w_{\text{temps},i}w_{\text{robuste},i}.
+\]
+
+Sans pondération, une mauvaise estimation ancienne peut tirer la courbe finale et créer un décalage visible. Avec pondération, la trajectoire suit davantage les points récents tout en diminuant l'effet des mesures aberrantes. Cela ne change pas le modèle physique, mais rend l'estimation plus stable pour une utilisation en temps réel.
+La comparaison visuelle entre la version pondérée et la version non pondérée est donc placée dans le chapitre de validation, afin de garder ici l'explication de l'algorithme et de réserver les résultats expérimentaux au chapitre suivant.
+
+\section{Bilan de la méthode Trace}
+
+La méthode Trace est plus prometteuse que le circle fitting pour les tirs rapides, car elle exploite la forme réellement produite par la balle dans le flux événementiel. Au lieu de dépendre fortement d'un rayon instantané, elle mesure une largeur sur plusieurs coupes de la trace et combine ces mesures dans le temps. Elle reste sensible aux erreurs de largeur, à la qualité de la fenêtre de suivi et à la quantité d'événements disponibles, mais son information de départ est mieux adaptée au signal observé par la caméra événementielle.
 
 \chapter{Simulation et validation}
+\label{chap:simulation-validation}
 
 \section{Séquences simulées}
 
-Pour tester l'algorithme dans un cadre contrôlé, des séquences simulées ont été générées. La balle est simulée dans un environnement 3D, puis la vidéo MP4 est convertie en événements avec \texttt{v2e}. Cette méthode permet d'obtenir à la fois un flux événementiel et une vérité terrain de la trajectoire.
+Pour tester l'algorithme dans un cadre contrôlé, des séquences simulées ont été générées avec Isaac Sim. Une balle est lancée devant une caméra virtuelle dont les paramètres intrinsèques sont les mêmes que ceux utilisés par l'algorithme. La sortie vidéo de cette caméra est ensuite convertie en événements avec \texttt{v2e}, afin d'obtenir un flux proche de celui fourni par une caméra événementielle. En parallèle, Isaac Sim fournit la position réelle de la balle à chaque instant.
+
+Cette organisation permet de comparer directement les positions estimées par l'algorithme avec une vérité terrain. Dans les figures 3D de ce chapitre, chaque carré de la grille représente \(25~\text{cm}\). Les estimations de l'algorithme sont affichées en bleu, tandis que les positions réelles de référence sont affichées en rouge.
 
 Les séquences locales utilisées dans le projet ont les caractéristiques suivantes:
 
@@ -315,6 +728,60 @@ Les séquences locales utilisées dans le projet ont les caractéristiques suiva
 \end{table}
 
 La vérité terrain contient la position réelle de la balle dans le repère caméra, ainsi que sa projection image. Elle permet de comparer la position estimée par l'algorithme avec la trajectoire attendue. Cette comparaison est importante, car une trajectoire peut sembler visuellement cohérente tout en ayant une erreur de profondeur trop élevée pour l'interception robotique.
+
+\section{Résultats 3D de la méthode Trace}
+
+Les figures suivantes montrent les sorties 3D obtenues avec la méthode Trace sur une séquence simulée. Les points bleus clairs correspondent aux mesures de largeur converties en positions 3D. La courbe bleue est la trajectoire estimée à partir de ces points. Les points rouges représentent la trajectoire réelle fournie par Isaac Sim.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{images/Algo_Trace/Courbe1_3D.png}
+  \vspace{0.45em}
+
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Algo_Trace/Courbe1_3D_2.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Algo_Trace/Courbe1_3D_3.png}
+  \end{minipage}
+  \caption{Sorties 3D obtenues avec la méthode Trace. Chaque carré de la grille correspond à \(25~\text{cm}\). Les points bleus sont les estimations de l'algorithme et les points rouges sont les positions réelles issues d'Isaac Sim.}
+  \label{fig:trace-3d-outputs}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.84\textwidth]{images/Algo_Trace/Courbe1_3D_t_1.png}
+  \vspace{0.35em}
+
+  \includegraphics[width=0.84\textwidth]{images/Algo_Trace/Courbe1_3D_t_2.png}
+  \vspace{0.35em}
+
+  \includegraphics[width=0.84\textwidth]{images/Algo_Trace/Courbe1_3D_t_3.png}
+  \caption{Évolution de la trajectoire Trace dans le temps. À mesure que de nouvelles largeurs sont mesurées, de nouveaux points 3D sont ajoutés et la courbe estimée se stabilise.}
+  \label{fig:trace-3d-time}
+\end{figure}
+
+\section{Effet de la régression pondérée}
+
+La régression pondérée est évaluée sur la même sortie 3D. Sans poids ajustés, la trajectoire bleue peut être attirée par des points anciens ou par des estimations moins fiables. Avec les poids de récence et de robustesse, la courbe tient davantage compte des points récents et réduit l'influence des mesures aberrantes. L'objectif n'est pas de changer le modèle de trajectoire, mais de rendre son estimation plus exploitable en temps réel.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Algo_Trace/Weigth_off.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Algo_Trace/Weigth_on.png}
+  \end{minipage}
+  \caption{Comparaison entre la régression Trace sans poids ajustés à gauche et avec poids ajustés à droite. La pondération récente et robuste aligne mieux la courbe bleue sur les estimations utiles de la trajectoire.}
+  \label{fig:trace-weighted}
+\end{figure}
 
 \section{Rôle des tests}
 

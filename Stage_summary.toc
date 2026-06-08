@@ -1,0 +1,37 @@
+\babel@toc {french}{}\relax 
+\contentsline {chapter}{\numberline {1}Introduction}{3}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Contexte du stage}{3}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Objectifs techniques}{4}{section.1.2}%
+\contentsline {chapter}{\numberline {2}Architecture générale du projet}{5}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Chaîne de traitement}{5}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Calibration et repère 3D}{5}{section.2.2}%
+\contentsline {section}{\numberline {2.3}Visualisation}{6}{section.2.3}%
+\contentsline {chapter}{\numberline {3}Première méthode: détection par circle fitting}{7}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Signal événementiel et polarités}{7}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Pipeline de l'algorithme}{7}{section.3.2}%
+\contentsline {section}{\numberline {3.3}Sous-tranches temporelles}{9}{section.3.3}%
+\contentsline {section}{\numberline {3.4}Ajustement du cercle et validation}{9}{section.3.4}%
+\contentsline {section}{\numberline {3.5}Détermination de la pose 3D}{11}{section.3.5}%
+\contentsline {section}{\numberline {3.6}Régression de trajectoire 3D}{12}{section.3.6}%
+\contentsline {section}{\numberline {3.7}Limite principale: sensibilité du rayon}{13}{section.3.7}%
+\contentsline {section}{\numberline {3.8}Décalage du plan estimé à haute vitesse}{14}{section.3.8}%
+\contentsline {section}{\numberline {3.9}Conclusion sur la méthode par circle fitting}{16}{section.3.9}%
+\contentsline {chapter}{\numberline {4}Seconde méthode: estimation par trace événementielle}{18}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Motivation}{18}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Construction des événements de trace}{19}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Repère local de la trace}{19}{section.4.3}%
+\contentsline {section}{\numberline {4.4}Détection des bords soutenus}{20}{section.4.4}%
+\contentsline {section}{\numberline {4.5}Courbes du ruban}{22}{section.4.5}%
+\contentsline {section}{\numberline {4.6}Conversion 3D par largeur de trace}{23}{section.4.6}%
+\contentsline {section}{\numberline {4.7}Régression pondérée de trajectoire}{24}{section.4.7}%
+\contentsline {section}{\numberline {4.8}Bilan de la méthode Trace}{24}{section.4.8}%
+\contentsline {chapter}{\numberline {5}Simulation et validation}{26}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Séquences simulées}{26}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Résultats 3D de la méthode Trace}{27}{section.5.2}%
+\contentsline {section}{\numberline {5.3}Effet de la régression pondérée}{28}{section.5.3}%
+\contentsline {section}{\numberline {5.4}Rôle des tests}{29}{section.5.4}%
+\contentsline {chapter}{\numberline {6}Partie robotique: Isaac Lab et PPO}{30}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Objectif de la partie robot}{30}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Résultats d'entraînement observés}{31}{section.6.2}%
+\contentsline {section}{\numberline {6.3}Défis pour l'intégration perception-robot}{31}{section.6.3}%
+\contentsline {chapter}{\numberline {7}Bilan provisoire}{32}{chapter.7}%

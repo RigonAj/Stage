@@ -185,10 +185,10 @@ void Pub::timer_callback() {
     }
 
     applyInputCalibration();
-    camera.Undistort();
     gui.nb_event = camera.FilteredCount();
 
     camera.Echantillon(ui.Maxevent());
+    camera.Undistort();
 
     const auto t_pre_end = clock::now();
 

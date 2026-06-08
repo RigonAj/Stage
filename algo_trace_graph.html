@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Algorithme Trace - Pipeline C++</title>
+  <style>
+    :root {
+      --page: #edf1f4;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #596575;
+      --line: #c9d1d9;
+      --acq: #e6f6ef;
+      --acq-line: #1f9d68;
+      --prep: #eaf3ff;
+      --prep-line: #2878c8;
+      --trace: #fff3dc;
+      --trace-line: #d68a1f;
+      --ribbon: #f2ecff;
+      --ribbon-line: #7657c8;
+      --valid: #ffecee;
+      --valid-line: #cf3f53;
+      --pose: #eaf7f8;
+      --pose-line: #2f9ca7;
+      --out: #eef1f6;
+      --out-line: #647386;
+      --reject: #fff0f0;
+      --reject-line: #d34b4b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .sheet {
+      width: min(1760px, calc(100vw - 40px));
+      margin: 20px;
+      padding: 34px 38px 30px;
+      background:
+        linear-gradient(var(--paper), var(--paper)) padding-box,
+        linear-gradient(135deg, #7aa7cc, #d7a24a 55%, #6aa785) border-box;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(31, 42, 55, 0.16);
+    }
+
+    header {
+      margin-bottom: 22px;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(30px, 2.7vw, 48px);
+      line-height: 1.05;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(15px, 1.2vw, 20px);
+      line-height: 1.35;
+    }
+
+    .diagram {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 1px 1px, #dfe5ea 1px, transparent 0) 0 0 / 20px 20px,
+        #ffffff;
+      overflow: hidden;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .flow {
+      fill: none;
+      stroke: #687588;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .flow-soft {
+      fill: none;
+      stroke: #8b97a7;
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      stroke-dasharray: 8 8;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .reject-flow {
+      fill: none;
+      stroke: var(--reject-line);
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      stroke-dasharray: 7 7;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .node rect {
+      rx: 8;
+      stroke-width: 2.4;
+      vector-effect: non-scaling-stroke;
+      filter: drop-shadow(0 5px 9px rgba(31, 42, 55, 0.10));
+    }
+
+    .acq rect { fill: var(--acq); stroke: var(--acq-line); }
+    .prep rect { fill: var(--prep); stroke: var(--prep-line); }
+    .trace rect { fill: var(--trace); stroke: var(--trace-line); }
+    .ribbon rect { fill: var(--ribbon); stroke: var(--ribbon-line); }
+    .valid rect { fill: var(--valid); stroke: var(--valid-line); }
+    .pose rect { fill: var(--pose); stroke: var(--pose-line); }
+    .out rect { fill: var(--out); stroke: var(--out-line); }
+    .reject rect { fill: var(--reject); stroke: var(--reject-line); }
+
+    .node-title {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: 800;
+      text-anchor: middle;
+    }
+
+    .node-detail {
+      fill: var(--muted);
+      font-size: 15px;
+      text-anchor: middle;
+    }
+
+    .code-tag {
+      fill: #334155;
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-anchor: middle;
+    }
+
+    .section-label {
+      fill: #263445;
+      font-size: 18px;
+      font-weight: 800;
+      text-anchor: middle;
+    }
+
+    .small-label {
+      fill: var(--muted);
+      font-size: 14px;
+      text-anchor: middle;
+    }
+
+    .formula {
+      fill: #223042;
+      font-size: 17px;
+      font-weight: 700;
+      text-anchor: middle;
+    }
+
+    .formula-detail {
+      fill: var(--muted);
+      font-size: 13px;
+      text-anchor: middle;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, auto));
+      gap: 10px 18px;
+      align-items: center;
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      gap: 7px;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .chip {
+      width: 15px;
+      height: 15px;
+      border: 2px solid currentColor;
+      border-radius: 4px;
+      background: #ffffff;
+    }
+
+    .chip.acq { color: var(--acq-line); background: var(--acq); }
+    .chip.prep { color: var(--prep-line); background: var(--prep); }
+    .chip.trace { color: var(--trace-line); background: var(--trace); }
+    .chip.ribbon { color: var(--ribbon-line); background: var(--ribbon); }
+    .chip.valid { color: var(--valid-line); background: var(--valid); }
+    .chip.pose { color: var(--pose-line); background: var(--pose); }
+
+    @media (max-width: 1000px) {
+      body {
+        place-items: start center;
+      }
+
+      .sheet {
+        width: min(1200px, calc(100vw - 24px));
+        margin: 12px;
+        padding: 22px;
+      }
+
+      header {
+        text-align: left;
+      }
+
+      .legend {
+        grid-template-columns: repeat(2, minmax(0, auto));
+      }
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+      }
+
+      .sheet {
+        width: 100%;
+        margin: 0;
+        box-shadow: none;
+        border: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet" aria-label="Schéma de l'algorithme Trace">
+    <header>
+      <div>
+        <h1>Algorithme Trace : estimation 3D par largeur de ruban</h1>
+        <p class="subtitle">
+          Construction d'une trace événementielle, mesure robuste de sa largeur,
+          puis conversion en pose 3D et trajectoire.
+        </p>
+      </div>
+    </header>
+
+    <section class="diagram">
+      <svg viewBox="0 0 1570 850" role="img" aria-labelledby="title desc">
+        <title id="title">Pipeline Trace</title>
+        <desc id="desc">Schéma des étapes de traitement pour construire une trace événementielle et estimer la trajectoire 3D de la balle.</desc>
+
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#687588"></path>
+          </marker>
+          <marker id="soft-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b97a7"></path>
+          </marker>
+          <marker id="reject-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#d34b4b"></path>
+          </marker>
+        </defs>
+
+        <text x="785" y="78" class="section-label">1. Sélection des événements appartenant à la trace</text>
+
+        <g class="node acq">
+          <rect x="30" y="105" width="180" height="100"></rect>
+          <text x="120" y="137" class="node-title">Events</text>
+          <text x="120" y="162" class="node-detail">flux caméra ou</text>
+          <text x="120" y="182" class="node-detail">séquence simulée</text>
+          <text x="120" y="199" class="code-tag">dv::EventStore</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="245" y="105" width="190" height="100"></rect>
+          <text x="340" y="137" class="node-title">Prétraitement</text>
+          <text x="340" y="162" class="node-detail">filtre bruit, fenêtre</text>
+          <text x="340" y="182" class="node-detail">samples, undistort</text>
+          <text x="340" y="199" class="code-tag">Filter / Undistort</text>
+        </g>
+
+        <g class="node trace">
+          <rect x="470" y="105" width="190" height="100"></rect>
+          <text x="565" y="137" class="node-title">Fenêtre suivie</text>
+          <text x="565" y="162" class="node-detail">couloir autour de</text>
+          <text x="565" y="182" class="node-detail">la trajectoire 2D</text>
+          <text x="565" y="199" class="code-tag">TraceMotionWindow</text>
+        </g>
+
+        <g class="node trace">
+          <rect x="695" y="105" width="190" height="100"></rect>
+          <text x="790" y="137" class="node-title">Accumulation</text>
+          <text x="790" y="162" class="node-detail">mémoire temporelle</text>
+          <text x="790" y="182" class="node-detail">événements récents</text>
+          <text x="790" y="199" class="code-tag">AppendTraceEvents()</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="1145" y="105" width="180" height="100"></rect>
+          <text x="1235" y="137" class="node-title">Polarité</text>
+          <text x="1235" y="162" class="node-detail">all, positive</text>
+          <text x="1235" y="182" class="node-detail">ou negative</text>
+          <text x="1235" y="199" class="code-tag">AcceptTracePolarity</text>
+        </g>
+
+        <g class="node trace">
+          <rect x="1360" y="105" width="180" height="100"></rect>
+          <text x="1450" y="137" class="node-title">Nuage trace</text>
+          <text x="1450" y="162" class="node-detail">points image</text>
+          <text x="1450" y="182" class="node-detail">+ timestamps</text>
+          <text x="1450" y="199" class="code-tag">TracePoint[]</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M210 155 H245"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M435 155 H470"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M660 155 H695"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M885 155 H1145"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1325 155 H1360"></path>
+
+        <text x="785" y="302" class="section-label">2. Reconstruction du ruban événementiel</text>
+
+        <path class="flow" marker-end="url(#arrow)" d="M1450 205 V268 H130 V330"></path>
+
+        <g class="node ribbon">
+          <rect x="30" y="330" width="200" height="106"></rect>
+          <text x="130" y="361" class="node-title">Centre robuste</text>
+          <text x="130" y="386" class="node-detail">médianes x,y</text>
+          <text x="130" y="406" class="node-detail">inliers 97 %</text>
+          <text x="130" y="426" class="code-tag">Quantile()</text>
+        </g>
+
+        <g class="node ribbon">
+          <rect x="270" y="330" width="200" height="106"></rect>
+          <text x="370" y="361" class="node-title">PCA trace</text>
+          <text x="370" y="386" class="node-detail">direction globale</text>
+          <text x="370" y="406" class="node-detail">+ PCA temporelles</text>
+          <text x="370" y="426" class="code-tag">FitTracePca()</text>
+        </g>
+
+        <g class="node ribbon">
+          <rect x="510" y="330" width="200" height="106"></rect>
+          <text x="610" y="361" class="node-title">Repère local</text>
+          <text x="610" y="386" class="node-detail">coordonnées</text>
+          <text x="610" y="406" class="node-detail">longueur + largeur</text>
+          <text x="610" y="426" class="code-tag">s, h = projection</text>
+        </g>
+
+        <g class="node trace">
+          <rect x="750" y="330" width="200" height="106"></rect>
+          <text x="850" y="361" class="node-title">Tranches</text>
+          <text x="850" y="386" class="node-detail">découpage selon s</text>
+          <text x="850" y="406" class="node-detail">bins de largeur px</text>
+          <text x="850" y="426" class="code-tag">lineBinWidth</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="990" y="330" width="200" height="106"></rect>
+          <text x="1090" y="361" class="node-title">Bords soutenus</text>
+          <text x="1090" y="386" class="node-detail">haut / bas sur h</text>
+          <text x="1090" y="406" class="node-detail">voisins locaux</text>
+          <text x="1090" y="426" class="code-tag">EstimateSupportedEdges</text>
+        </g>
+
+        <g class="node ribbon">
+          <rect x="1230" y="330" width="300" height="106"></rect>
+          <text x="1380" y="361" class="node-title">Courbes du ruban</text>
+          <text x="1380" y="386" class="node-detail">haut, milieu, bas</text>
+          <text x="1380" y="406" class="node-detail">régression locale lin./quad.</text>
+          <text x="1380" y="426" class="code-tag">MakeLocalQuadraticModel</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M230 383 H270"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M470 383 H510"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M710 383 H750"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M950 383 H990"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1190 383 H1230"></path>
+
+        <g class="node reject">
+          <rect x="270" y="468" width="1020" height="46"></rect>
+          <text x="780" y="497" class="section-label">Si le support est insuffisant : rejet du ruban ou des tranches instables</text>
+        </g>
+
+        <path class="reject-flow" marker-end="url(#reject-arrow)" d="M130 436 V468 H370"></path>
+        <path class="reject-flow" marker-end="url(#reject-arrow)" d="M1090 436 V468"></path>
+        <path class="reject-flow" marker-end="url(#reject-arrow)" d="M1380 436 V468 H1190"></path>
+
+        <text x="785" y="568" class="section-label">3. Largeur, pose 3D et trajectoire finale</text>
+
+        <path class="flow" marker-end="url(#arrow)" d="M1380 436 V536 H132.5 V600"></path>
+
+        <g class="node pose">
+          <rect x="30" y="600" width="205" height="108"></rect>
+          <text x="132.5" y="631" class="node-title">Largeurs</text>
+          <text x="132.5" y="655" class="node-detail">coupes temporelles</text>
+          <text x="132.5" y="675" class="node-detail">normal au milieu</text>
+          <text x="132.5" y="696" class="code-tag">EstimateTraceWidths</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="275" y="600" width="205" height="108"></rect>
+          <text x="377.5" y="631" class="node-title">Filtrage</text>
+          <text x="377.5" y="655" class="node-detail">spikes de largeur</text>
+          <text x="377.5" y="675" class="node-detail">mesures invalides</text>
+          <text x="377.5" y="696" class="code-tag">FilterTraceWidthSpikes</text>
+        </g>
+
+        <g class="node pose">
+          <rect x="520" y="600" width="230" height="108"></rect>
+          <text x="635" y="631" class="node-title">Pose 3D</text>
+          <text x="635" y="655" class="node-detail">largeur = diamètre</text>
+          <text x="635" y="675" class="node-detail">projection inverse</text>
+          <text x="635" y="696" class="code-tag">TraceImagePointToWorld</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="790" y="600" width="215" height="108"></rect>
+          <text x="897.5" y="631" class="node-title">Outliers 3D</text>
+          <text x="897.5" y="655" class="node-detail">sauts temporels</text>
+          <text x="897.5" y="675" class="node-detail">résidu trajectoire</text>
+          <text x="897.5" y="696" class="code-tag">FilterTraceWorldOutliers</text>
+        </g>
+
+        <g class="node pose">
+          <rect x="1045" y="600" width="215" height="108"></rect>
+          <text x="1152.5" y="631" class="node-title">Régression</text>
+          <text x="1152.5" y="655" class="node-detail">X,Y linéaires</text>
+          <text x="1152.5" y="675" class="node-detail">Z quadratique</text>
+          <text x="1152.5" y="696" class="code-tag">WeightedRegression</text>
+        </g>
+
+        <g class="node out">
+          <rect x="1300" y="600" width="230" height="108"></rect>
+          <text x="1415" y="631" class="node-title">Sorties</text>
+          <text x="1415" y="655" class="node-detail">pose boucle + trace</text>
+          <text x="1415" y="675" class="node-detail">vues 2D/3D</text>
+          <text x="1415" y="696" class="code-tag">Trace view / ROS</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M235 654 H275"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M480 654 H520"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M750 654 H790"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1005 654 H1045"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1260 654 H1300"></path>
+
+        <g>
+          <rect x="30" y="748" width="1500" height="74" rx="8" fill="#f8fafc" stroke="#cbd5e1"></rect>
+          <text x="210" y="778" class="formula">s = (p - c) · d</text>
+          <text x="455" y="778" class="formula">h = (p - c) · n</text>
+          <text x="700" y="778" class="formula">wpx = hhaut - hbas</text>
+          <text x="995" y="778" class="formula">feff = √((fxnx)² + (fyny)²)</text>
+          <text x="1310" y="778" class="formula">Z = feff · D / wpx</text>
+          <text x="410" y="807" class="formula-detail">n = normale locale au ruban</text>
+          <text x="790" y="807" class="formula-detail">D = diamètre réel de la balle</text>
+          <text x="1190" y="807" class="formula-detail">poids régression = récence × robustesse</text>
+        </g>
+      </svg>
+    </section>
+
+    <div class="legend" aria-label="Légende">
+      <span><i class="chip acq"></i>Acquisition</span>
+      <span><i class="chip prep"></i>Prétraitement</span>
+      <span><i class="chip trace"></i>Sélection Trace</span>
+      <span><i class="chip ribbon"></i>Ruban événementiel</span>
+      <span><i class="chip valid"></i>Validation / rejet</span>
+      <span><i class="chip pose"></i>Pose 3D et trajectoire</span>
+    </div>
+  </main>
+</body>
+</html>

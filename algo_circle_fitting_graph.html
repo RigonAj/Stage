@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Algorithme Circle Fitting - Pipeline C++</title>
+  <style>
+    :root {
+      --page: #edf1f4;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #596575;
+      --line: #c9d1d9;
+      --acq: #e6f6ef;
+      --acq-line: #1f9d68;
+      --prep: #eaf3ff;
+      --prep-line: #2878c8;
+      --cluster: #fff3dc;
+      --cluster-line: #d68a1f;
+      --fit: #f2ecff;
+      --fit-line: #7657c8;
+      --valid: #ffecee;
+      --valid-line: #cf3f53;
+      --pose: #eaf7f8;
+      --pose-line: #2f9ca7;
+      --out: #eef1f6;
+      --out-line: #647386;
+      --reject: #fff0f0;
+      --reject-line: #d34b4b;
+      --highlight: #fff6d9;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .sheet {
+      width: min(1760px, calc(100vw - 40px));
+      margin: 20px;
+      padding: 34px 38px 30px;
+      background:
+        linear-gradient(var(--paper), var(--paper)) padding-box,
+        linear-gradient(135deg, #7aa7cc, #d7a24a 55%, #6aa785) border-box;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(31, 42, 55, 0.16);
+    }
+
+    header {
+      margin-bottom: 22px;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(30px, 2.7vw, 48px);
+      line-height: 1.05;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(15px, 1.2vw, 20px);
+      line-height: 1.35;
+    }
+
+    .diagram {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 1px 1px, #dfe5ea 1px, transparent 0) 0 0 / 20px 20px,
+        #ffffff;
+      overflow: hidden;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .flow {
+      fill: none;
+      stroke: #687588;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .flow-soft {
+      fill: none;
+      stroke: #8b97a7;
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      stroke-dasharray: 8 8;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .reject-flow {
+      fill: none;
+      stroke: var(--reject-line);
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      stroke-dasharray: 7 7;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .node rect {
+      rx: 8;
+      stroke-width: 2.4;
+      vector-effect: non-scaling-stroke;
+      filter: drop-shadow(0 5px 9px rgba(31, 42, 55, 0.10));
+    }
+
+    .acq rect { fill: var(--acq); stroke: var(--acq-line); }
+    .prep rect { fill: var(--prep); stroke: var(--prep-line); }
+    .cluster rect { fill: var(--cluster); stroke: var(--cluster-line); }
+    .fit rect { fill: var(--fit); stroke: var(--fit-line); }
+    .valid rect { fill: var(--valid); stroke: var(--valid-line); }
+    .pose rect { fill: var(--pose); stroke: var(--pose-line); }
+    .out rect { fill: var(--out); stroke: var(--out-line); }
+    .reject rect { fill: var(--reject); stroke: var(--reject-line); }
+
+    .node-title {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: 800;
+      text-anchor: middle;
+    }
+
+    .node-detail {
+      fill: var(--muted);
+      font-size: 15px;
+      text-anchor: middle;
+    }
+
+    .code-tag {
+      fill: #334155;
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-anchor: middle;
+    }
+
+    .section-label {
+      fill: #263445;
+      font-size: 18px;
+      font-weight: 800;
+      text-anchor: middle;
+    }
+
+    .small-label {
+      fill: var(--muted);
+      font-size: 14px;
+      text-anchor: middle;
+    }
+
+    .formula {
+      fill: #223042;
+      font-size: 18px;
+      font-weight: 700;
+      text-anchor: middle;
+    }
+
+    .formula-detail {
+      fill: var(--muted);
+      font-size: 14px;
+      text-anchor: middle;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, auto));
+      gap: 10px 18px;
+      align-items: center;
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      gap: 7px;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .chip {
+      width: 15px;
+      height: 15px;
+      border: 2px solid currentColor;
+      border-radius: 4px;
+      background: #ffffff;
+    }
+
+    .chip.acq { color: var(--acq-line); background: var(--acq); }
+    .chip.prep { color: var(--prep-line); background: var(--prep); }
+    .chip.cluster { color: var(--cluster-line); background: var(--cluster); }
+    .chip.fit { color: var(--fit-line); background: var(--fit); }
+    .chip.pose { color: var(--pose-line); background: var(--pose); }
+    .chip.valid { color: var(--valid-line); background: var(--valid); }
+
+    @media (max-width: 1000px) {
+      body {
+        place-items: start center;
+      }
+
+      .sheet {
+        width: min(1200px, calc(100vw - 24px));
+        margin: 12px;
+        padding: 22px;
+      }
+
+      header {
+        text-align: left;
+      }
+
+      .legend {
+        grid-template-columns: repeat(2, minmax(0, auto));
+      }
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+      }
+
+      .sheet {
+        width: 100%;
+        margin: 0;
+        box-shadow: none;
+        border: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet" aria-label="Schéma de l'algorithme circle fitting">
+    <header>
+      <div>
+        <h1>Algorithme de détection 3D par circle fitting</h1>
+        <p class="subtitle">
+          Traitement d'un flux d'événements pour détecter une balle, estimer sa pose 3D
+          et reconstruire sa trajectoire.
+        </p>
+      </div>
+    </header>
+
+    <section class="diagram">
+      <svg viewBox="0 0 1570 760" role="img" aria-labelledby="title desc">
+        <title id="title">Pipeline circle fitting</title>
+        <desc id="desc">Schéma des étapes de traitement pour détecter une balle et estimer sa trajectoire 3D.</desc>
+
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#687588"></path>
+          </marker>
+          <marker id="soft-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b97a7"></path>
+          </marker>
+          <marker id="reject-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#d34b4b"></path>
+          </marker>
+        </defs>
+
+        <text x="780" y="82" class="section-label">1. Prétraitement caméra et réduction du flux</text>
+
+        <g class="node acq">
+          <rect x="30" y="110" width="180" height="96"></rect>
+          <text x="120" y="141" class="node-title">Events</text>
+          <text x="120" y="165" class="node-detail">DVXplorer ou</text>
+          <text x="120" y="185" class="node-detail">fichier H5/bin</text>
+          <text x="120" y="201" class="code-tag">NextBatch / ReadStore</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="245" y="110" width="180" height="96"></rect>
+          <text x="335" y="141" class="node-title">Filtre bruit</text>
+          <text x="335" y="166" class="node-detail">Background activity</text>
+          <text x="335" y="186" class="node-detail">noise filter</text>
+          <text x="335" y="201" class="code-tag">Filter()</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="460" y="110" width="180" height="96"></rect>
+          <text x="550" y="140" class="node-title">Fenêtre</text>
+          <text x="550" y="164" class="node-detail">événements récents</text>
+          <text x="550" y="184" class="node-detail">sur quelques ms</text>
+          <text x="550" y="201" class="code-tag">KeepRecentFiltered()</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="675" y="110" width="180" height="96"></rect>
+          <text x="765" y="141" class="node-title">Échantillon</text>
+          <text x="765" y="166" class="node-detail">limite le nombre</text>
+          <text x="765" y="186" class="node-detail">d'événements</text>
+          <text x="765" y="201" class="code-tag">Echantillon()</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="890" y="110" width="180" height="96"></rect>
+          <text x="980" y="141" class="node-title">Undistort</text>
+          <text x="980" y="166" class="node-detail">correction OpenCV</text>
+          <text x="980" y="186" class="node-detail">sur les samples</text>
+          <text x="980" y="201" class="code-tag">Undistort()</text>
+        </g>
+
+        <g class="node cluster">
+          <rect x="1105" y="110" width="180" height="96"></rect>
+          <text x="1195" y="140" class="node-title">ROI + temps</text>
+          <text x="1195" y="165" class="node-detail">box image</text>
+          <text x="1195" y="185" class="node-detail">seuil alpha</text>
+          <text x="1195" y="201" class="code-tag">Cluster()</text>
+        </g>
+
+        <g class="node cluster">
+          <rect x="1320" y="110" width="210" height="96"></rect>
+          <text x="1425" y="141" class="node-title">DBSCAN</text>
+          <text x="1425" y="166" class="node-detail">clusters 2D</text>
+          <text x="1425" y="186" class="node-detail">triés par taille</text>
+          <text x="1425" y="201" class="code-tag">formClusters()</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M210 158 H245"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M425 158 H460"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M640 158 H675"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M855 158 H890"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1070 158 H1105"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1285 158 H1320"></path>
+
+        <text x="780" y="278" class="section-label">2. Validation du cluster et ajustement du cercle</text>
+
+        <path class="flow" marker-end="url(#arrow)" d="M1425 206 V244 H120 V305"></path>
+
+        <g class="node cluster">
+          <rect x="30" y="305" width="180" height="98"></rect>
+          <text x="120" y="336" class="node-title">Cluster</text>
+          <text x="120" y="360" class="node-detail">points + polarités</text>
+          <text x="120" y="380" class="node-detail">timestamps min/max</text>
+          <text x="120" y="397" class="code-tag">buildTrackerClusters()</text>
+        </g>
+
+        <g class="node fit">
+          <rect x="245" y="305" width="180" height="98"></rect>
+          <text x="335" y="335" class="node-title">Sous-tranche</text>
+          <text x="335" y="359" class="node-detail">optionnelle :</text>
+          <text x="335" y="379" class="node-detail">temps ou nombre</text>
+          <text x="335" y="397" class="code-tag">sliceMode</text>
+        </g>
+
+        <g class="node fit">
+          <rect x="460" y="305" width="180" height="98"></rect>
+          <text x="550" y="335" class="node-title">Cercle 1</text>
+          <text x="550" y="359" class="node-detail">normalisation</text>
+          <text x="550" y="379" class="node-detail">moindres carrés</text>
+          <text x="550" y="397" class="code-tag">Normalize + Regression</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="675" y="305" width="180" height="98"></rect>
+          <text x="765" y="335" class="node-title">Polarité</text>
+          <text x="765" y="359" class="node-detail">symétrie ON/OFF</text>
+          <text x="765" y="379" class="node-detail">ou positif only</text>
+          <text x="765" y="397" class="code-tag">PolarFilter()</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="890" y="305" width="180" height="98"></rect>
+          <text x="980" y="335" class="node-title">Outliers</text>
+          <text x="980" y="359" class="node-detail">RMS résiduel</text>
+          <text x="980" y="379" class="node-detail">points aberrants</text>
+          <text x="980" y="397" class="code-tag">Rms + OutlierFilter</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="1105" y="305" width="180" height="98"></rect>
+          <text x="1195" y="335" class="node-title">Cercle 2</text>
+          <text x="1195" y="359" class="node-detail">re-fit nettoyé</text>
+          <text x="1195" y="379" class="node-detail">radius gate</text>
+          <text x="1195" y="397" class="code-tag">Regression + gate</text>
+        </g>
+
+        <g class="node fit">
+          <rect x="1320" y="305" width="210" height="98"></rect>
+          <text x="1425" y="336" class="node-title">Cercle validé</text>
+          <text x="1425" y="360" class="node-detail">centre image</text>
+          <text x="1425" y="380" class="node-detail">(u, v) + rayon r</text>
+          <text x="1425" y="397" class="code-tag">result.circle</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M210 354 H245"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M425 354 H460"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M640 354 H675"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M855 354 H890"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1070 354 H1105"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1285 354 H1320"></path>
+
+        <g class="node reject">
+          <rect x="245" y="438" width="1040" height="46"></rect>
+          <text x="765" y="467" class="section-label">Si une validation échoue : rejet du slice ou du cluster, puis essai du candidat suivant</text>
+        </g>
+
+        <path class="reject-flow" marker-end="url(#reject-arrow)" d="M765 403 V438"></path>
+        <path class="reject-flow" marker-end="url(#reject-arrow)" d="M980 403 V438"></path>
+        <path class="reject-flow" marker-end="url(#reject-arrow)" d="M1195 403 V438"></path>
+
+        <text x="780" y="535" class="section-label">3. Pose 3D, historique et sortie trajectoire</text>
+
+        <path class="flow" marker-end="url(#arrow)" d="M1425 403 V504 H120 V568"></path>
+
+        <g class="node pose">
+          <rect x="30" y="568" width="210" height="108"></rect>
+          <text x="135" y="599" class="node-title">Pose 3D</text>
+          <text x="135" y="623" class="node-detail">projection inverse</text>
+          <text x="135" y="643" class="node-detail">en millimètres</text>
+          <text x="135" y="663" class="code-tag">estimateBallPoseFromCircle</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="285" y="568" width="195" height="108"></rect>
+          <text x="382.5" y="598" class="node-title">Anti-saut</text>
+          <text x="382.5" y="622" class="node-detail">rejet si profondeur</text>
+          <text x="382.5" y="642" class="node-detail">varie trop vite</text>
+          <text x="382.5" y="663" class="code-tag">|ΔZ| &gt; 250 mm</text>
+        </g>
+
+        <g class="node pose">
+          <rect x="525" y="568" width="195" height="108"></rect>
+          <text x="622.5" y="598" class="node-title">Historique</text>
+          <text x="622.5" y="622" class="node-detail">poses 3D + temps</text>
+          <text x="622.5" y="642" class="node-detail">track en mètres</text>
+          <text x="622.5" y="663" class="code-tag">Update3DTrack()</text>
+        </g>
+
+        <g class="node pose">
+          <rect x="765" y="568" width="215" height="108"></rect>
+          <text x="872.5" y="598" class="node-title">Régression</text>
+          <text x="872.5" y="622" class="node-detail">X,Y linéaires</text>
+          <text x="872.5" y="642" class="node-detail">Z quadratique</text>
+          <text x="872.5" y="663" class="code-tag">Linear / Quadratic</text>
+        </g>
+
+        <g class="node out">
+          <rect x="1025" y="568" width="235" height="108"></rect>
+          <text x="1142.5" y="598" class="node-title">Publication</text>
+          <text x="1142.5" y="622" class="node-detail">position balle 3D</text>
+          <text x="1142.5" y="642" class="node-detail">topic ROS 2</text>
+          <text x="1142.5" y="663" class="code-tag">ball_position_3d_mm</text>
+        </g>
+
+        <g class="node out">
+          <rect x="1305" y="568" width="225" height="108"></rect>
+          <text x="1417.5" y="598" class="node-title">Affichage</text>
+          <text x="1417.5" y="622" class="node-detail">vues 2D, 3D, TOP</text>
+          <text x="1417.5" y="642" class="node-detail">RMSE et Trace</text>
+          <text x="1417.5" y="663" class="code-tag">Raylib / raygui</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M240 622 H285"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M480 622 H525"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M720 622 H765"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M980 622 H1025"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1260 622 H1305"></path>
+
+        <g>
+          <rect x="30" y="704" width="1500" height="38" rx="8" fill="#f8fafc" stroke="#cbd5e1"></rect>
+          <text x="365" y="728" class="formula">Z = fx · R / r</text>
+          <text x="778" y="728" class="formula">X = ((u - cx) / fx) · Z</text>
+          <text x="1198" y="728" class="formula">Y = ((v - cy) / fy) · Z</text>
+          <text x="1460" y="728" class="formula-detail">R = rayon réel de la balle</text>
+        </g>
+      </svg>
+    </section>
+
+    <div class="legend" aria-label="Légende">
+      <span><i class="chip acq"></i>Acquisition</span>
+      <span><i class="chip prep"></i>Prétraitement</span>
+      <span><i class="chip cluster"></i>Clustering</span>
+      <span><i class="chip fit"></i>Circle fitting</span>
+      <span><i class="chip valid"></i>Validation / rejet</span>
+      <span><i class="chip pose"></i>Pose 3D et trajectoire</span>
+    </div>
+  </main>
+</body>
+</html>
