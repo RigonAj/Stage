@@ -501,6 +501,171 @@ def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) 
     return matches, "ok"
 
 
+def find_calibration_xml_files(search_dirs: Sequence[Path]) -> List[Path]:
+    """List candidate OpenCV calibration XML files, newest first."""
+    found: Dict[str, Path] = {}
+    for directory in search_dirs:
+        if not directory.is_dir():
+            continue
+        for path in directory.glob("*.xml"):
+            try:
+                camera_matrix, _, _ = load_calibration_xml(path)
+            except (RuntimeError, cv.error):
+                continue
+            if camera_matrix is not None:
+                found[str(path.resolve())] = path
+    return sorted(found.values(), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def load_calibration_xml(path: Path) -> Tuple[np.ndarray, np.ndarray, str]:
+    """Load camera_matrix and distortion_coefficients from an OpenCV XML file.
+
+    Supports both a top-level camera node (chessboard tool, mire tool) and
+    matrices stored directly at the root.
+    """
+    fs = cv.FileStorage(str(path), cv.FILE_STORAGE_READ)
+    if not fs.isOpened():
+        raise RuntimeError(f"Cannot open calibration file: {path}")
+    try:
+        root = fs.root()
+        candidate_nodes = [("", root)]
+        for key in root.keys():
+            node = root.getNode(key)
+            if node.isMap():
+                candidate_nodes.append((key, node))
+        for name, node in candidate_nodes:
+            matrix_node = node.getNode("camera_matrix")
+            dist_node = node.getNode("distortion_coefficients")
+            if matrix_node.empty() or dist_node.empty():
+                continue
+            camera_matrix = np.asarray(matrix_node.mat(), dtype=np.float64)
+            dist_coeffs = np.asarray(dist_node.mat(), dtype=np.float64).reshape(-1)
+            if camera_matrix.shape == (3, 3):
+                return camera_matrix, dist_coeffs, name or path.stem
+    finally:
+        fs.release()
+    raise RuntimeError(f"No camera_matrix/distortion_coefficients found in {path}")
+
+
+def _adjacent_grid_pairs(matches: Sequence[Match]) -> List[Tuple[int, int]]:
+    """Index pairs of matches that are horizontal or vertical grid neighbours."""
+    by_key = {(m.dot.row, m.dot.col): idx for idx, m in enumerate(matches)}
+    pairs: List[Tuple[int, int]] = []
+    for (row, col), idx in by_key.items():
+        right = by_key.get((row, col + 1))
+        if right is not None:
+            pairs.append((idx, right))
+        below = by_key.get((row + 1, col))
+        if below is not None:
+            pairs.append((idx, below))
+    return pairs
+
+
+def evaluate_calibration_on_matches(
+    matches: Sequence[Match],
+    camera_matrix: np.ndarray,
+    dist_coeffs: np.ndarray,
+) -> Dict[str, object]:
+    """Validate fixed intrinsics against one mire capture.
+
+    Returns reprojection errors, held-out prediction errors, the estimated
+    camera-to-screen pose, and physical spacing measurements obtained by
+    intersecting the back-projected rays with the estimated screen plane.
+    """
+    object_points = np.array(
+        [[m.dot.object_x_mm, m.dot.object_y_mm, 0.0] for m in matches],
+        dtype=np.float64,
+    )
+    image_points = np.array([[m.blob.x, m.blob.y] for m in matches], dtype=np.float64)
+    if len(matches) < 6:
+        return {"valid": False, "reason": f"only {len(matches)} matched points"}
+
+    ok, rvec, tvec = cv.solvePnP(
+        object_points, image_points, camera_matrix, dist_coeffs, flags=cv.SOLVEPNP_IPPE
+    )
+    if not ok:
+        ok, rvec, tvec = cv.solvePnP(
+            object_points, image_points, camera_matrix, dist_coeffs,
+            flags=cv.SOLVEPNP_ITERATIVE,
+        )
+    if not ok:
+        return {"valid": False, "reason": "solvePnP failed"}
+
+    projected, _ = cv.projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs)
+    errors = np.linalg.norm(projected.reshape(-1, 2) - image_points, axis=1)
+
+    # Held-out check: pose from the border dots only, then predict the
+    # interior dots that were never given to solvePnP.
+    border = [
+        i for i, m in enumerate(matches)
+        if m.dot.row in (0, ROWS - 1) or m.dot.col in (0, COLS - 1)
+    ]
+    interior = [i for i in range(len(matches)) if i not in border]
+    heldout_errors: Optional[np.ndarray] = None
+    if len(border) >= 6 and len(interior) >= 2:
+        ok_border, rvec_b, tvec_b = cv.solvePnP(
+            object_points[border], image_points[border],
+            camera_matrix, dist_coeffs, flags=cv.SOLVEPNP_IPPE,
+        )
+        if ok_border:
+            predicted, _ = cv.projectPoints(
+                object_points[interior], rvec_b, tvec_b, camera_matrix, dist_coeffs
+            )
+            heldout_errors = np.linalg.norm(
+                predicted.reshape(-1, 2) - image_points[interior], axis=1
+            )
+
+    rotation, _ = cv.Rodrigues(rvec)
+    plane_normal = rotation[:, 2]
+    translation = tvec.reshape(3)
+    tilt_deg = math.degrees(
+        math.acos(min(1.0, abs(float(plane_normal[2])) / max(1e-9, np.linalg.norm(plane_normal))))
+    )
+
+    # Physical measurement: intersect each back-projected ray with the
+    # estimated screen plane, then compare neighbour spacings in mm.
+    undistorted = cv.undistortPoints(
+        image_points.reshape(-1, 1, 2), camera_matrix, dist_coeffs
+    ).reshape(-1, 2)
+    rays = np.column_stack([undistorted, np.ones(len(undistorted))])
+    denominators = rays @ plane_normal
+    spacing_measured_mm: List[float] = []
+    spacing_true_mm: List[float] = []
+    if np.all(np.abs(denominators) > 1e-9):
+        scales = (plane_normal @ translation) / denominators
+        points_3d = rays * scales[:, None]
+        for idx_a, idx_b in _adjacent_grid_pairs(matches):
+            measured = float(np.linalg.norm(points_3d[idx_a] - points_3d[idx_b]))
+            true = float(np.linalg.norm(object_points[idx_a] - object_points[idx_b]))
+            spacing_measured_mm.append(measured)
+            spacing_true_mm.append(true)
+
+    spacing_errors = [m - t for m, t in zip(spacing_measured_mm, spacing_true_mm)]
+    result: Dict[str, object] = {
+        "valid": True,
+        "point_count": len(matches),
+        "rms_px": float(np.sqrt(np.mean(errors**2))),
+        "mean_px": float(np.mean(errors)),
+        "max_px": float(np.max(errors)),
+        "heldout_count": int(len(heldout_errors)) if heldout_errors is not None else 0,
+        "heldout_mean_px": float(np.mean(heldout_errors)) if heldout_errors is not None else None,
+        "heldout_max_px": float(np.max(heldout_errors)) if heldout_errors is not None else None,
+        "distance_z_mm": float(translation[2]),
+        "distance_norm_mm": float(np.linalg.norm(translation)),
+        "tilt_deg": float(tilt_deg),
+        "spacing_pairs": len(spacing_errors),
+        "spacing_true_mean_mm": float(np.mean(spacing_true_mm)) if spacing_true_mm else None,
+        "spacing_measured_mean_mm": float(np.mean(spacing_measured_mm)) if spacing_measured_mm else None,
+        "spacing_mean_abs_error_mm": float(np.mean(np.abs(spacing_errors))) if spacing_errors else None,
+        "spacing_max_abs_error_mm": float(np.max(np.abs(spacing_errors))) if spacing_errors else None,
+    }
+    if spacing_errors and result["spacing_true_mean_mm"]:
+        result["spacing_mean_error_percent"] = float(
+            100.0 * np.mean(spacing_errors) / result["spacing_true_mean_mm"]
+        )
+    return result
+
+
 def normalize_activity_to_bgr(activity: np.ndarray) -> np.ndarray:
     if activity.size == 0 or float(np.max(activity)) <= 0.0:
         h, w = activity.shape if activity.ndim == 2 else (480, 640)
@@ -799,6 +964,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.last_blobs: List[Blob] = []
         self.last_matches: List[Match] = []
         self.last_export_paths: List[Path] = []
+        self.test_mode = False
 
         self.mire = MireWindow(args.blink_hz, args.gradient_softness)
         self.mire.calibration_started.connect(self.begin_accumulation)
@@ -910,6 +1076,23 @@ class ControlWindow(QtWidgets.QWidget):
         controls.addStretch(1)
         root.addLayout(controls)
 
+        test_row = QtWidgets.QHBoxLayout()
+        self.calib_file_combo = QtWidgets.QComboBox()
+        self.calib_file_combo.setMinimumWidth(360)
+        self.refresh_calib_button = QtWidgets.QPushButton("Rafraichir")
+        self.measured_distance_edit = QtWidgets.QLineEdit()
+        self.measured_distance_edit.setPlaceholderText("distance reelle camera-ecran en mm (optionnel)")
+        self.measured_distance_edit.setMaximumWidth(300)
+        self.test_button = QtWidgets.QPushButton("Test calib")
+        self.test_button.setMinimumHeight(38)
+        test_row.addWidget(QtWidgets.QLabel("Calibration:"))
+        test_row.addWidget(self.calib_file_combo, 1)
+        test_row.addWidget(self.refresh_calib_button)
+        test_row.addWidget(self.measured_distance_edit)
+        test_row.addWidget(self.test_button)
+        root.addLayout(test_row)
+        self.populate_calibration_files()
+
         self.preview_label = QtWidgets.QLabel()
         self.preview_label.setMinimumSize(720, 480)
         self.preview_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -933,6 +1116,8 @@ class ControlWindow(QtWidgets.QWidget):
         self.calib_button.clicked.connect(self.start_calibration)
         self.erase_button.clicked.connect(self.erase_current)
         self.reset_button.clicked.connect(self.reset_all)
+        self.test_button.clicked.connect(self.start_test)
+        self.refresh_calib_button.clicked.connect(self.populate_calibration_files)
 
     def selected_monitor(self) -> Optional[MonitorInfo]:
         if not (0 <= self.selected_monitor_index < len(self.base_monitors)):
@@ -1162,6 +1347,15 @@ class ControlWindow(QtWidgets.QWidget):
         self.preview_label.setPixmap(pixmap_from_bgr(image, self.preview_label.size()))
 
     def start_calibration(self) -> None:
+        self._start_capture(test_mode=False)
+
+    def start_test(self) -> None:
+        if self.selected_calibration_path() is None:
+            self.append_status("Aucune calibration XML trouvee. Lancer d'abord calibrate_intrinsics_from_mire.py.")
+            return
+        self._start_capture(test_mode=True)
+
+    def _start_capture(self, test_mode: bool) -> None:
         if not self.ensure_camera():
             return
         monitor = self.selected_monitor()
@@ -1179,9 +1373,13 @@ class ControlWindow(QtWidgets.QWidget):
         self.last_preview_blob_update = 0.0
         self.accumulating = False
         self.accum_started_at = 0.0
+        self.test_mode = test_mode
         self.calib_button.setEnabled(False)
+        self.test_button.setEnabled(False)
         self.append_status(
-            "Sequence de calibration lancee: noir -> mire clignotante."
+            "Sequence de test lancee: noir -> mire clignotante."
+            if test_mode
+            else "Sequence de calibration lancee: noir -> mire clignotante."
         )
         self.mire.start_calibration_blink(self.args.accum_ms)
 
@@ -1200,6 +1398,7 @@ class ControlWindow(QtWidgets.QWidget):
             return
         self.accumulating = False
         self.calib_button.setEnabled(True)
+        self.test_button.setEnabled(True)
         elapsed_ms = (time.time() - self.accum_started_at) * 1000.0
         if self.activity is None:
             self.append_status("Aucune accumulation disponible.")
@@ -1215,6 +1414,16 @@ class ControlWindow(QtWidgets.QWidget):
             f"{len(self.last_matches)}/{EXPECTED_DOTS} associations, "
             f"{self.event_count} events, {elapsed_ms:.0f} ms. {reason}"
         )
+        if self.test_mode:
+            self.test_mode = False
+            if len(self.last_matches) >= self.args.min_matched:
+                self.run_calibration_test(overlay, elapsed_ms)
+            else:
+                self.append_status(
+                    f"Test ignore: associations insuffisantes "
+                    f"({len(self.last_matches)}/{self.args.min_matched})."
+                )
+            return
         if len(self.last_matches) >= self.args.min_matched:
             self.export_observation(overlay, elapsed_ms)
         else:
@@ -1277,6 +1486,153 @@ class ControlWindow(QtWidgets.QWidget):
         self.last_export_paths = [json_path, png_path]
         self.append_status(f"Export: {json_path}")
         self.append_status(f"Overlay: {png_path}")
+
+    def populate_calibration_files(self) -> None:
+        previous = self.selected_calibration_path()
+        search_dirs = [Path(self.args.output_dir), Path(".")]
+        files = find_calibration_xml_files(search_dirs)
+        self.calib_file_combo.blockSignals(True)
+        self.calib_file_combo.clear()
+        for path in files:
+            self.calib_file_combo.addItem(path.name, str(path))
+        if previous is not None:
+            index = self.calib_file_combo.findData(str(previous))
+            if index >= 0:
+                self.calib_file_combo.setCurrentIndex(index)
+        self.calib_file_combo.blockSignals(False)
+        if not files:
+            self.calib_file_combo.addItem("Aucune calibration XML trouvee", None)
+
+    def selected_calibration_path(self) -> Optional[Path]:
+        data = self.calib_file_combo.currentData() if hasattr(self, "calib_file_combo") else None
+        return Path(data) if data else None
+
+    def measured_distance_mm(self) -> Optional[float]:
+        text = self.measured_distance_edit.text().strip().replace(",", ".")
+        if not text:
+            return None
+        try:
+            value = float(text)
+        except ValueError:
+            self.append_status(f"Distance mesuree invalide: '{text}' (attendu: mm).")
+            return None
+        return value if value > 0.0 else None
+
+    def run_calibration_test(self, overlay: np.ndarray, elapsed_ms: float) -> None:
+        selected = self.selected_calibration_path()
+        if selected is None:
+            self.append_status("Test impossible: aucune calibration selectionnee.")
+            return
+        try:
+            camera_matrix, dist_coeffs, node_name = load_calibration_xml(selected)
+        except (RuntimeError, cv.error) as exc:
+            self.append_status(f"Lecture calibration impossible: {exc}")
+            return
+
+        result = evaluate_calibration_on_matches(self.last_matches, camera_matrix, dist_coeffs)
+        if not result.get("valid"):
+            self.append_status(f"Test echoue: {result.get('reason')}")
+            return
+
+        measured_mm = self.measured_distance_mm()
+        fx = float(camera_matrix[0, 0])
+        fy = float(camera_matrix[1, 1])
+        self.append_status(
+            f"TEST {selected.name} ({node_name}) fx={fx:.1f} fy={fy:.1f} | "
+            f"{result['point_count']} points"
+        )
+        self.append_status(
+            f"  Reprojection: rms {result['rms_px']:.2f} px, max {result['max_px']:.2f} px | "
+            f"points tenus a l'ecart ({result['heldout_count']}): "
+            + (
+                f"moy {result['heldout_mean_px']:.2f} px, max {result['heldout_max_px']:.2f} px"
+                if result["heldout_mean_px"] is not None
+                else "indisponible"
+            )
+        )
+        if result["spacing_measured_mean_mm"] is not None:
+            self.append_status(
+                f"  Espacement mire: mesure {result['spacing_measured_mean_mm']:.2f} mm "
+                f"vs reel {result['spacing_true_mean_mm']:.2f} mm "
+                f"(erreur moy {result['spacing_mean_abs_error_mm']:.2f} mm"
+                + (
+                    f", {result['spacing_mean_error_percent']:+.2f} %)"
+                    if "spacing_mean_error_percent" in result
+                    else ")"
+                )
+            )
+        distance_line = (
+            f"  Distance camera-ecran estimee: {result['distance_norm_mm']:.0f} mm "
+            f"(z={result['distance_z_mm']:.0f} mm, tilt {result['tilt_deg']:.1f} deg)"
+        )
+        if measured_mm is not None:
+            error_percent = 100.0 * (result["distance_norm_mm"] - measured_mm) / measured_mm
+            distance_line += f" | mesuree {measured_mm:.0f} mm -> erreur {error_percent:+.1f} %"
+            result["measured_distance_mm"] = measured_mm
+            result["distance_error_percent"] = error_percent
+        self.append_status(distance_line)
+
+        # Compare every other available calibration on the same capture.
+        comparisons: List[Dict[str, object]] = []
+        for path in find_calibration_xml_files([Path(self.args.output_dir), Path(".")]):
+            if path.resolve() == selected.resolve():
+                continue
+            try:
+                other_matrix, other_dist, other_name = load_calibration_xml(path)
+            except (RuntimeError, cv.error):
+                continue
+            other = evaluate_calibration_on_matches(self.last_matches, other_matrix, other_dist)
+            if not other.get("valid"):
+                continue
+            other["file"] = str(path)
+            other["node"] = other_name
+            other["fx"] = float(other_matrix[0, 0])
+            comparisons.append(other)
+            line = (
+                f"  Comparaison {path.name}: rms {other['rms_px']:.2f} px, "
+                f"distance {other['distance_norm_mm']:.0f} mm"
+            )
+            if measured_mm is not None:
+                other_error = 100.0 * (other["distance_norm_mm"] - measured_mm) / measured_mm
+                line += f" (erreur {other_error:+.1f} %)"
+            self.append_status(line)
+
+        output_dir = Path(self.args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        json_path = output_dir / f"calibration_test_{stamp}.json"
+        png_path = output_dir / f"calibration_test_{stamp}.png"
+        banner = (
+            f"TEST {selected.name} rms {result['rms_px']:.2f}px "
+            f"dist {result['distance_norm_mm']:.0f}mm"
+        )
+        overlay = draw_preview_banner(overlay.copy(), banner, (0, 255, 0))
+        self.preview_label.setPixmap(pixmap_from_bgr(overlay, self.preview_label.size()))
+
+        monitor = self.selected_monitor()
+        payload = {
+            "created_at": datetime.now().isoformat(timespec="milliseconds"),
+            "calibration_file": str(selected),
+            "calibration_node": node_name,
+            "camera_matrix": camera_matrix.tolist(),
+            "distortion_coefficients": dist_coeffs.tolist(),
+            "monitor": monitor.to_json() if monitor is not None else None,
+            "accumulation": {
+                "duration_ms_requested": self.args.accum_ms,
+                "duration_ms_measured": elapsed_ms,
+                "blink_hz": self.args.blink_hz,
+                "events_accumulated": self.event_count,
+            },
+            "matches": [match.to_json() for match in self.last_matches],
+            "result": result,
+            "comparisons": comparisons,
+            "files": {"overlay_png": str(png_path)},
+        }
+        with json_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        cv.imwrite(str(png_path), overlay)
+        self.last_export_paths = [json_path, png_path]
+        self.append_status(f"Rapport de test: {json_path}")
 
     def erase_current(self) -> None:
         self.accumulating = False
