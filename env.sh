@@ -28,6 +28,22 @@ run() {
   source install/setup.bash && ros2 run ball_tracking_cpp talker
 }
 
+calib() {
+  python3 "${SCRIPT_DIR}/scripts/calibrate_intrinsics_from_mire.py" \
+    --robust \
+    --use-intrinsic-guess \
+    --zero-tangent-dist \
+    --fix-k3 \
+    --output-xml "${SCRIPT_DIR}/recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml" \
+    --output-json "${SCRIPT_DIR}/recordings/mire_calibration/intrinsics_from_mire_robust_constrained_report.json" \
+    --camera-name DVXplorer_mire_robust \
+    "$@"
+}
+
+calib_intrinsics() {
+  calib "$@"
+}
+
 deps() {
   local action="${1:-check}"
 

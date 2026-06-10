@@ -51,6 +51,9 @@ BASE_APT_PACKAGES=(
   lsb-release
   pkg-config
   python3-colcon-common-extensions
+  python3-numpy
+  python3-opencv
+  python3-pyqt5
   software-properties-common
 )
 
@@ -139,6 +142,15 @@ append_unique() {
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+python_module_exists() {
+  python3 - "$1" <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+
+sys.exit(0 if importlib.util.find_spec(sys.argv[1]) is not None else 1)
+PY
 }
 
 apt_installed() {
@@ -293,12 +305,19 @@ check_cpp_libraries() {
 check_dv_processing() {
   if cmake_package_exists dv-processing || pkg_config_exists dv-processing; then
     ok_items+=("dv-processing")
-    return 0
+  else
+    need_dv_repo=1
+    append_unique "dv-processing" missing_apt
+    missing_manual+=("dv-processing was not found by CMake/pkg-config.")
   fi
 
-  need_dv_repo=1
-  append_unique "dv-processing" missing_apt
-  missing_manual+=("dv-processing was not found by CMake/pkg-config.")
+  if python_module_exists dv_processing; then
+    ok_items+=("dv_processing Python module")
+  else
+    need_dv_repo=1
+    append_unique "dv-processing-python" missing_apt
+    missing_manual+=("Python module dv_processing is required by scripts/event_mire_calibration.py.")
+  fi
 }
 
 check_raylib() {

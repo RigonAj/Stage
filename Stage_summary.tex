@@ -10,6 +10,8 @@
 \usepackage{amsmath}
 \usepackage{booktabs}
 \usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,decorations.pathreplacing}
 \usepackage[hidelinks,unicode]{hyperref}
 
 \geometry{margin=2.5cm}
@@ -76,7 +78,7 @@ Le projet principal est un package C++/ROS 2. Il peut fonctionner avec la camér
   \item visualisation et publication ROS 2 de la position estimée.
 \end{enumerate}
 
-Le code évite de traiter directement toute l'image comme une image dense. Il conserve la logique événementielle: seuls les événements utiles sont filtrés, regroupés puis analysés. Cela permet de garder un temps de calcul faible, compatible avec une boucle de traitement très rapide.
+L'approche évite de traiter directement toute l'image comme une image dense. Il conserve la logique événementielle: seuls les événements utiles sont filtrés, regroupés puis analysés. Cela permet de garder un temps de calcul faible, compatible avec une boucle de traitement très rapide.
 
 \section{Calibration et repère 3D}
 
@@ -172,7 +174,7 @@ La validation par symétrie est une étape importante de première identificatio
 d_i = \frac{p_i - c}{\|p_i - c\|},
 \]
 
-où \(c\) est le centre du cercle estimé. Les vecteurs sont ensuite séparés selon leur polarité. Le code accumule les directions des événements positifs et négatifs:
+où \(c\) est le centre du cercle estimé. Les vecteurs sont ensuite séparés selon leur polarité. L'algorithme accumule les directions des événements positifs et négatifs:
 
 \[
 D_+ = \sum_{p_i = +} d_i,
@@ -258,7 +260,7 @@ Y(t) = a_y t + b_y,
 Z(t) = a_z t^2 + b_z t + c_z.
 \]
 
-Pour une coordonnée linéaire \(q \in \{X,Y\}\), le code calcule directement les coefficients à partir des sommes accumulées:
+Pour une coordonnée linéaire \(q \in \{X,Y\}\), les coefficients sont calculés directement à partir des sommes accumulées:
 
 \[
 D = n \sum t_i^2 - \left(\sum t_i\right)^2,
@@ -276,7 +278,7 @@ Pour la coordonnée quadratique \(Z\), le modèle est:
 q(t) = a t^2 + b t + c.
 \]
 
-Les grandeurs intermédiaires utilisées dans le code sont:
+Les grandeurs intermédiaires utilisées sont:
 
 \[
 S_{11} = \sum t_i^2 - \frac{\left(\sum t_i\right)^2}{n},
@@ -321,7 +323,7 @@ où \(r_i\) est le résidu par rapport à la première régression et \(s\) est 
 
 Ce choix correspond au mouvement attendu d'un projectile: deux axes sont modélisés de manière linéaire, tandis que l'axe soumis principalement à la gravité est modélisé par une parabole. L'objectif n'est pas seulement d'afficher les points mesurés; la trajectoire sert surtout de filtre temporel pour stabiliser la suite de positions 3D et vérifier que les poses successives restent cohérentes.
 
-Le code n'utilise pas une résolution matricielle générale pour ces régressions à chaque boucle. Il accumule directement les sommes nécessaires aux modèles linéaire et quadratique. Ce choix est volontaire: la boucle doit rester rapide, et ces modèles simples peuvent être mis à jour avec peu d'opérations. Construire et résoudre une matrice complète à chaque itération serait plus général, mais moins adapté à une application temps réel où la forme du modèle est déjà connue.
+La méthode n'utilise pas une résolution matricielle générale pour ces régressions à chaque boucle. Elle accumule directement les sommes nécessaires aux modèles linéaire et quadratique. Ce choix est volontaire: la boucle doit rester rapide, et ces modèles simples peuvent être mis à jour avec peu d'opérations. Construire et résoudre une matrice complète à chaque itération serait plus général, mais moins adapté à une application temps réel où la forme du modèle est déjà connue.
 
 La position de la balle est envoyée en boucle sur le topic ROS 2 à partir des poses 3D validées. La trajectoire 3D sert donc principalement à lisser et filtrer la perception, plutôt qu'à remplacer la mesure instantanée par une prédiction longue.
 
@@ -419,7 +421,7 @@ Si une proportionnalité apparaît, cela indique que le biais de profondeur dép
   \label{fig:circle-fitting-speed-depth-bias}
 \end{figure}
 
-La partie basse de cette figure correspond à la vue RMSE du code. Pour chaque pourcentage \(p\) entre \(10\%\) et \(90\%\), l'algorithme utilise les \(p\%\) premiers points 3D pour ajuster une trajectoire:
+La partie basse de cette figure correspond à la vue RMSE de l'outil de visualisation. Pour chaque pourcentage \(p\) entre \(10\%\) et \(90\%\), l'algorithme utilise les \(p\%\) premiers points 3D pour ajuster une trajectoire:
 
 \[
 X(t)=a_Xt+b_X,\qquad
@@ -469,13 +471,13 @@ L'idée est donc de mesurer la largeur réelle de la trace, puis d'utiliser cett
 
 \section{Construction des événements de trace}
 
-La première étape consiste à construire un nuage d'événements correspondant uniquement à la balle. Le code utilise pour cela une fenêtre mobile centrée sur la trajectoire 2D déjà estimée. Lorsque la parabole 2D de suivi est disponible, la fenêtre n'est pas un simple disque: elle devient un couloir autour de la courbe prédite. Un événement est conservé s'il se trouve assez près de cette trajectoire, avec une tolérance latérale adaptée au rayon apparent de la balle.
+La première étape consiste à construire un nuage d'événements correspondant uniquement à la balle. La méthode utilise pour cela une fenêtre mobile centrée sur la trajectoire 2D déjà estimée. Lorsque la parabole 2D de suivi est disponible, la fenêtre n'est pas un simple disque: elle devient un couloir autour de la courbe prédite. Un événement est conservé s'il se trouve assez près de cette trajectoire, avec une tolérance latérale adaptée au rayon apparent de la balle.
 
-Les événements sont accumulés pendant une courte mémoire temporelle. Cette accumulation est importante: une fenêtre trop courte donne une trace incomplète, alors qu'une mémoire trop longue mélange plusieurs positions et peut épaissir artificiellement le ruban. Le code limite aussi le nombre total d'événements accumulés pour éviter une perte de performances. Les polarités peuvent être gardées ensemble ou filtrées séparément, ce qui permet d'isoler le front ou l'arrière de la balle si une polarité est plus stable dans une scène donnée.
+Les événements sont accumulés pendant une courte mémoire temporelle. Cette accumulation est importante: une fenêtre trop courte donne une trace incomplète, alors qu'une mémoire trop longue mélange plusieurs positions et peut épaissir artificiellement le ruban. Le nombre total d'événements accumulés est aussi limité pour éviter une perte de performances. Les polarités peuvent être gardées ensemble ou filtrées séparément, ce qui permet d'isoler le front ou l'arrière de la balle si une polarité est plus stable dans une scène donnée.
 
 \section{Repère local de la trace}
 
-Une fois les événements sélectionnés, la méthode cherche le repère naturel du ruban. Le centre \(c\) est estimé de manière robuste avec les médianes des coordonnées, puis les points trop éloignés sont retirés à partir d'un quantile radial. Une PCA globale fournit ensuite la direction principale \(d\) de la trace. Pour les trajectoires courbes, cette direction est corrigée par des PCA temporelles calculées sur plusieurs sous-parties de la trace. Dans le code, l'orientation finale combine la direction globale, la moyenne pondérée des directions locales et le déplacement temporel entre le début et la fin de la trace.
+Une fois les événements sélectionnés, la méthode cherche le repère naturel du ruban. Le centre \(c\) est estimé de manière robuste avec les médianes des coordonnées, puis les points trop éloignés sont retirés à partir d'un quantile radial. Une PCA globale fournit ensuite la direction principale \(d\) de la trace. Pour les trajectoires courbes, cette direction est corrigée par des PCA temporelles calculées sur plusieurs sous-parties de la trace. L'orientation finale combine la direction globale, la moyenne pondérée des directions locales et le déplacement temporel entre le début et la fin de la trace.
 
 Le repère local est défini par:
 
@@ -485,7 +487,9 @@ s = (p - c) \cdot d,
 h = (p - c) \cdot n,
 \]
 
-où \(p\) est un événement image et \(n=(-d_y,d_x)\) est la normale à la trace. La coordonnée \(s\) donne la position le long de la trajectoire, tandis que \(h\) donne la position dans l'épaisseur du ruban. Cette transformation convertit un problème 2D difficile en une série de problèmes 1D: pour chaque tranche le long de \(s\), il faut trouver les deux bords sur l'axe \(h\).
+où \(p\) est un événement image et \(n=(-d_y,d_x)\) est la normale à la trace. La coordonnée \(s\) donne la position le long de la trajectoire, tandis que \(h\) donne la position dans l'épaisseur du ruban. Cette transformation convertit un problème 2D difficile en une série de problèmes 1D: pour chaque petite zone découpée le long de \(s\), il faut trouver les deux bords sur l'axe \(h\).
+
+Il faut distinguer deux notions qui peuvent facilement être confondues. Les sous-parties temporelles utilisées pendant l'estimation de l'orientation servent à stabiliser la direction principale \(d\) lorsque la trace est courbe. Elles ne correspondent pas directement aux mesures de largeur. Une fois le repère \((s,h)\) construit, la méthode travaille surtout avec des \emph{bins spatiaux} le long de \(s\). Chaque bin spatial regroupe les événements qui se trouvent dans une petite portion de la trace, puis produit une estimation locale du bord bas, du bord haut et de la ligne médiane.
 
 \begin{figure}[H]
   \centering
@@ -494,13 +498,61 @@ où \(p\) est un événement image et \(n=(-d_y,d_x)\) est la normale à la trac
   \label{fig:trace-ribbon}
 \end{figure}
 
+
+\section{Découpage spatial et estimation locale de la largeur}
+
+La trace n'est pas découpée ici en tranches temporelles, mais en bins spatiaux selon la coordonnée \(s\). Un bin spatial correspond à une petite portion du ruban le long de sa direction principale. Dans chaque bin, on récupère toutes les valeurs \(h\), c'est-à-dire les positions des événements dans l'épaisseur du ruban.
+
+Le point important est le suivant: un bin spatial ne produit pas plusieurs estimations indépendantes de largeur. Il produit une seule estimation locale composée de trois valeurs:
+
+\[
+(s_j,h_{\text{bas},j}),
+\qquad
+(s_j,h_{\text{milieu},j}),
+\qquad
+(s_j,h_{\text{haut},j}).
+\]
+
+Autrement dit, pour le bin \(j\), l'algorithme cherche où se trouve le bord bas, où se trouve le bord haut, puis il en déduit le milieu:
+
+\[
+h_{\text{milieu},j}
+=
+\frac{h_{\text{haut},j}+h_{\text{bas},j}}{2}.
+\]
+
+On obtient donc une série d'échantillons le long de la trace:
+
+\[
+\begin{array}{c|c|c|c|c}
+\text{bin} & s_j & h_{\text{bas},j} & h_{\text{milieu},j} & h_{\text{haut},j} \\
+\hline
+1 & s_1 & h_{\text{bas},1} & h_{\text{milieu},1} & h_{\text{haut},1} \\
+2 & s_2 & h_{\text{bas},2} & h_{\text{milieu},2} & h_{\text{haut},2} \\
+3 & s_3 & h_{\text{bas},3} & h_{\text{milieu},3} & h_{\text{haut},3} \\
+\vdots & \vdots & \vdots & \vdots & \vdots
+\end{array}
+\]
+
+
+
+La position \(s_j\) d'un bin est généralement prise comme une valeur représentative des coordonnées \(s\) des événements du bin, par exemple la médiane. Les valeurs \(h_{\text{bas},j}\) et \(h_{\text{haut},j}\) sont ensuite estimées à partir de la distribution des valeurs \(h\) contenues dans ce bin.
+
 \section{Détection des bords soutenus}
 
-La trace est découpée en tranches selon \(s\). Dans chaque tranche, on récupère toutes les valeurs \(h\), c'est-à-dire les positions des événements sur l'axe normal au ruban. La recherche de bord devient donc un problème 1D: il faut trouver où commence et où finit le paquet d'événements dans cette coupe.
+La recherche des bords est faite séparément dans chaque bin spatial. La recherche devient donc un problème 1D: à partir de toutes les valeurs \(h\) présentes dans le bin, il faut déterminer où commence et où finit le paquet d'événements.
 
-Une solution simple serait de prendre directement le minimum et le maximum des valeurs \(h\). Cette solution est rejetée car elle serait trop sensible au bruit: un seul événement isolé loin de la trace pourrait devenir un bord et augmenter artificiellement la largeur. L'algorithme utilise donc une recherche par support local. Les valeurs finies de \(h\) sont triées, puis le code cherche les extrêmes qui possèdent assez de voisins proches.
+Une solution naïve consisterait à prendre directement le minimum et le maximum des valeurs \(h\):
 
-Le nombre de voisins requis est calculé à partir du nombre d'événements dans la tranche:
+\[
+h_{\text{bas}} = \min(h_i),
+\qquad
+h_{\text{haut}} = \max(h_i).
+\]
+
+Cette solution est volontairement évitée, car elle serait trop sensible au bruit. Un seul événement isolé très loin du ruban pourrait devenir un faux bord et agrandir artificiellement la largeur. L'algorithme cherche donc des \emph{bords soutenus}: un bord n'est accepté que s'il possède assez de voisins proches sur l'axe \(h\).
+
+Le nombre de voisins requis est calculé à partir du nombre d'événements dans le bin:
 
 \[
 \text{localSupport}
@@ -513,7 +565,7 @@ Le nombre de voisins requis est calculé à partir du nombre d'événements dans
 \right).
 \]
 
-Le balayage bas part du plus petit \(h\). Pour chaque candidat \(h_k\), le code compte combien de valeurs tombent dans une fenêtre locale de rayon \(r_s\) vers la droite. Le premier candidat qui atteint le support devient le bord bas:
+Les valeurs finies de \(h\) sont triées. Pour le bord bas, le balayage part du plus petit \(h\). Pour chaque candidat \(h_k\), on compte combien de valeurs se trouvent dans une fenêtre locale de rayon \(r_s\) vers la droite. Le premier candidat qui atteint le support devient le bord bas:
 
 \[
 h_{\text{bas}}
@@ -524,7 +576,7 @@ h_{\text{bas}}
 \geq \text{localSupport}.
 \]
 
-Le balayage haut fait la même chose depuis la droite. Il cherche le dernier candidat qui possède assez de voisins vers la gauche:
+Pour le bord haut, le principe est symétrique. Le balayage part des grandes valeurs de \(h\), puis vérifie combien de voisins se trouvent dans une fenêtre locale vers la gauche:
 
 \[
 h_{\text{haut}}
@@ -535,7 +587,8 @@ h_{\text{haut}}
 \geq \text{localSupport}.
 \]
 
-La figure suivante illustre pourquoi cette méthode est plus robuste qu'une recherche du minimum et du maximum. Les points rouges sont bien les événements les plus extrêmes, mais ils ne sont pas choisis comme bords car ils ne sont pas soutenus par assez de voisins.
+La figure suivante illustre cette logique. Les points isolés aux extrémités peuvent avoir une valeur \(h\) plus faible ou plus forte que les autres, mais ils ne sont pas retenus comme bords s'ils ne possèdent pas assez de voisins proches.
+
 
 \begin{figure}[H]
   \centering
@@ -544,7 +597,8 @@ La figure suivante illustre pourquoi cette méthode est plus robuste qu'une rech
   \label{fig:trace-support-edges}
 \end{figure}
 
-Après la détection des deux extrêmes soutenus, une petite correction extérieure est appliquée. Elle compense le fait que les événements correspondent à des centres de pixels et que le bord apparent peut se trouver légèrement au-delà du dernier événement soutenu. Cette correction est bornée:
+
+Après la détection des deux extrêmes soutenus, une petite correction extérieure est appliquée. Elle compense le fait que les événements correspondent aux centres des pixels et que le bord apparent peut se trouver légèrement au-delà du dernier événement soutenu. Cette correction est bornée:
 
 \[
 \delta_b
@@ -565,79 +619,168 @@ h_{\text{bas}} \leftarrow h_{\text{bas}}-\delta_b,
 h_{\text{haut}} \leftarrow h_{\text{haut}}+\delta_b.
 \]
 
-La coupe est ensuite validée. Elle est rejetée si elle ne contient pas assez d'événements finis, si \(h_{\text{haut}}\leq h_{\text{bas}}\), si la largeur brute est inférieure à \(2~\text{px}\), ou si le nombre d'événements compris entre les deux bords finaux reste inférieur au support minimal demandé. La largeur locale est ensuite:
+La coupe est ensuite validée. Elle est rejetée si elle ne contient pas assez d'événements finis, si \(h_{\text{haut}}\leq h_{\text{bas}}\), si la largeur brute est trop faible, ou si le nombre d'événements compris entre les deux bords finaux reste inférieur au support minimal demandé. La largeur locale du bin \(j\) est alors:
 
 \[
 w_j = h_{\text{haut},j} - h_{\text{bas},j}.
 \]
 
-Les tranches qui ne contiennent pas assez d'événements sont donc ignorées dès cette étape. Les largeurs locales aberrantes sont ensuite filtrées par cohérence avec les tranches voisines. Cette étape est essentielle car elle empêche un groupe de bruit de devenir une mesure de profondeur.
+\section{Filtrage des estimations locales}
 
-Le filtrage se fait en deux niveaux. Le premier niveau vérifie la cohérence globale du ruban. À partir des lignes médianes détectées dans chaque tranche, le code ajuste un modèle polynomial simple, linéaire ou quadratique selon le nombre d'échantillons disponibles. Ce modèle sert uniquement à repérer les tranches incohérentes: une tranche est rejetée si sa ligne médiane est trop éloignée de la tendance générale ou si sa largeur locale est trop différente de la largeur médiane du ruban. En pratique, le code utilise une logique de type RANSAC: plusieurs petits sous-ensembles sont essayés, le meilleur modèle est gardé, puis les échantillons dont le résidu est trop élevé sont supprimés.
+Après l'étape précédente, chaque bin valide fournit une estimation locale. Cette estimation peut toutefois être mauvaise si un bin contient peu d'événements, si un bruit structuré tombe dans la coupe, ou si le ruban est localement mal couvert. L'algorithme applique donc un filtrage de cohérence avant de construire les courbes finales du ruban.
 
-Le second niveau vérifie la cohérence locale. Pour chaque tranche \(j\), le code regarde les tranches voisines et prédit localement la position attendue du bord haut, du bord bas, de la ligne médiane et de la largeur. Cette prédiction est une petite régression linéaire locale. On obtient par exemple une largeur prédite \(\hat{w}_j\). La tranche est rejetée si:
+Le filtrage se fait en deux niveaux. Le premier niveau vérifie la cohérence globale du ruban. À partir des lignes médianes détectées dans les bins, un modèle polynomial simple est ajusté, linéaire ou quadratique selon le nombre d'échantillons disponibles. Ce modèle ne sert pas encore à tracer définitivement le ruban. Il sert d'abord à repérer les bins incohérents: un bin est rejeté si sa ligne médiane est trop éloignée de la tendance générale ou si sa largeur locale est trop différente de la largeur médiane du ruban.
+
+Le second niveau vérifie la cohérence locale. Pour chaque bin \(j\), on regarde les bins voisins et prédit localement la valeur attendue du bord haut, du bord bas, de la ligne médiane et de la largeur. L'idée est simple: si les bins voisins disent que le ruban passe à un certain endroit avec une certaine largeur, le bin courant ne doit pas créer un saut brutal sans raison.
+
+On peut résumer cette étape par une prédiction locale:
 
 \[
-|w_j - \hat{w}_j| > \tau_w,
+\hat{h}_{\text{bas},j},
+\qquad
+\hat{h}_{\text{milieu},j},
+\qquad
+\hat{h}_{\text{haut},j},
+\qquad
+\hat{w}_j.
 \]
 
-où \(\tau_w\) dépend à la fois de la largeur médiane du ruban et de la dispersion locale mesurée par une MAD. La même logique est appliquée aux deux bords et à la ligne médiane. Ainsi, une tranche n'est pas supprimée seulement parce qu'elle est différente de la moyenne globale: elle est supprimée lorsqu'elle casse aussi la continuité locale du ruban. Le filtrage n'est appliqué que s'il reste assez d'échantillons après suppression, afin d'éviter de détruire une trace courte mais valide.
+La prédiction est construite à partir d'une petite régression locale sur les échantillons voisins. Ce ne sont donc pas seulement les voisins immédiats qui comptent. Selon le paramétrage, cette fenêtre peut couvrir plusieurs bins autour de \(j\). Par exemple, le bin \(j\) peut être comparé aux bins \(j-4\) à \(j+4\), en ignorant le bin courant pour éviter qu'il ne se valide lui-même.
+
+Un bin est considéré comme aberrant s'il casse la continuité locale. Pour la largeur, le principe peut s'écrire:
+
+\[
+|w_j - \hat{w}_j| > \tau_w.
+\]
+
+La même logique est appliquée au bord bas, à la ligne médiane et au bord haut:
+
+\[
+|h_{\text{bas},j}-\hat{h}_{\text{bas},j}| > \tau_{\text{bas}},
+\qquad
+|h_{\text{milieu},j}-\hat{h}_{\text{milieu},j}| > \tau_{\text{milieu}},
+\qquad
+|h_{\text{haut},j}-\hat{h}_{\text{haut},j}| > \tau_{\text{haut}}.
+\]
+
+Les seuils dépendent de la largeur médiane du ruban et de la dispersion locale, souvent estimée par une MAD. L'intérêt de cette étape est d'éviter deux erreurs opposées. Premièrement, elle évite de garder un bin totalement incohérent qui ferait exploser la largeur et donc fausserait la profondeur. Deuxièmement, elle évite de supprimer un bin simplement parce qu'il n'est pas exactement égal à la moyenne globale: il est supprimé seulement s'il est incohérent avec son voisinage.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[x=1.05cm,y=0.9cm,>=Latex]
+    \draw[-Latex,thick] (0,0) -- (9.2,0) node[right] {$s$};
+    \draw[-Latex,thick] (0,-0.2) -- (0,3.2) node[above] {$h$};
+
+    \foreach \x/\y in {0.8/0.8,1.6/1.0,2.4/1.15,3.2/1.35,4.0/1.55,4.8/2.85,5.6/1.85,6.4/2.0,7.2/2.15,8.0/2.35}
+      \fill[black] (\x,\y) circle (1.8pt);
+
+    \draw[dashed,thick] (0.6,0.75) .. controls (2.5,1.1) and (6.2,1.9) .. (8.2,2.35);
+    \draw[red,thick] (4.8,2.85) circle (5pt);
+    \node[above] at (4.8,3.05) {bin aberrant};
+    \node[below] at (4.8,-0.15) {$j$};
+    \draw[decorate,decoration={brace,amplitude=5pt}] (2.4,-0.55) -- (7.2,-0.55)
+      node[midway,below=5pt] {voisins utilisés pour prédire le bin $j$};
+  \end{tikzpicture}
+  \caption{Principe du filtrage local. Le bin courant est comparé à une prédiction construite avec ses voisins; s'il crée une rupture trop forte, il est supprimé.}
+  \label{fig:trace-local-neighbour-filter}
+\end{figure}
 
 \section{Courbes du ruban}
 
-À partir des bords détectés dans chaque tranche, trois ensembles de points sont construits: le bord bas, la ligne médiane et le bord haut. Le code ajuste ensuite trois courbes locales. Le modèle peut être linéaire ou quadratique selon le réglage, mais l'ajustement reste local: autour d'une position \(s\), les échantillons proches reçoivent plus d'importance que les échantillons éloignés.
-
-La construction commence donc avec trois listes d'échantillons:
+Après le filtrage, il reste trois listes d'échantillons propres:
 
 \[
-(s_j,h_{\text{bas},j}),\qquad
-(s_j,h_{\text{milieu},j}),\qquad
-(s_j,h_{\text{haut},j}).
+\mathcal{B} = \{(s_j,h_{\text{bas},j})\},
+\qquad
+\mathcal{M} = \{(s_j,h_{\text{milieu},j})\},
+\qquad
+\mathcal{H} = \{(s_j,h_{\text{haut},j})\}.
 \]
 
-La position \(s_j\) d'une tranche est prise comme la médiane des coordonnées \(s\) des événements de cette tranche. Les valeurs \(h_{\text{bas},j}\) et \(h_{\text{haut},j}\) viennent des bords soutenus, et la ligne médiane est définie par:
+Ces points ne sont pas reliés par une régression séparée dans chaque bin. Un bin ne contient qu'une mesure locale. Les courbes sont construites après coup, à partir de l'ensemble des bins valides restants. Il ne s'agit pas non plus nécessairement d'une seule grande parabole globale imposée sur toute la trace. L'algorithme utilise un ajustement local: autour de la position \(s_0\), les échantillons proches de \(s_0\) ont plus de poids que les échantillons éloignés.
 
-\[
-h_{\text{milieu},j}
-= \frac{h_{\text{haut},j}+h_{\text{bas},j}}{2}.
-\]
+La bonne lecture est donc la suivante:
 
-Après le filtrage décrit précédemment, ces trois listes sont utilisées pour construire trois modèles locaux indépendants. On ne force donc pas le bord haut, le bord bas et la ligne médiane à avoir exactement la même forme. Cela permet au ruban de rester souple lorsque la trace est légèrement asymétrique ou lorsque certaines zones contiennent moins d'événements.
+\begin{itemize}
+  \item les bins servent à produire les points de mesure \((s_j,h_j)\);
+  \item le filtrage supprime les points incohérents;
+  \item les courbes haut, milieu et bas sont ajustées sur tous les échantillons restants, mais avec un poids local autour de la position évaluée.
+\end{itemize}
 
-Pour un ajustement local quadratique, la forme utilisée est:
+Pour un ajustement local quadratique, la forme utilisée autour de \(s_0\) est:
 
 \[
 h(s) = a(s-s_0)^2 + b(s-s_0) + c.
 \]
 
-Les coefficients sont recalculés localement autour de \(s_0\). Le poids principal suit un noyau tricube:
+Le fait de centrer le modèle sur \(s_0\) est pratique: la valeur estimée au point courant est directement \(c\), puisque \(s=s_0\) donne:
 
 \[
-w(u) = (1-|u|^3)^3
-\quad \text{si } |u| \leq 1,
+h(s_0)=c.
 \]
 
-avec \(u=(s-s_0)/B\), où \(B\) est la largeur de fenêtre locale. Si le support local est insuffisant, le code peut utiliser un poids gaussien plus large en secours. Cette stratégie évite de forcer une seule parabole globale sur toute la trace, ce qui serait moins adapté aux changements locaux de forme.
+Les coefficients sont recalculés localement pour plusieurs positions \(s_0\) le long du ruban. L'idée générale est de donner davantage d'influence aux échantillons proches de la position évaluée et moins d'influence aux échantillons éloignés. Ainsi, la courbe reste régulière sans être forcée par une seule régression globale sur toute la trace. Si une zone contient peu d'échantillons, la fenêtre locale peut être élargie afin de conserver une estimation stable.
 
-Pour tracer une courbe complète, le code échantillonne ensuite plusieurs positions \(s_0\) entre le début et la fin du ruban. À chaque position, il recalcule un petit ajustement local et récupère la valeur estimée de \(h(s_0)\). Comme le modèle est centré sur \(s_0\), cette valeur correspond directement au coefficient \(c\). Le point est ensuite reconverti dans l'image avec:
+Les trois courbes sont ajustées indépendamment:
+
+\[
+h_{\text{bas}}(s),
+\qquad
+h_{\text{milieu}}(s),
+\qquad
+h_{\text{haut}}(s).
+\]
+
+Cela permet au ruban de rester souple. Le bord haut et le bord bas ne sont pas forcés à avoir exactement la même forme, ce qui est utile si la trace est légèrement asymétrique, si une polarité domine localement, ou si une zone contient moins d'événements.
+
+Pour tracer une courbe complète, plusieurs positions \(s_0\) sont échantillonnées entre le début et la fin du ruban. À chaque position, un petit ajustement local est recalculé afin de récupérer la valeur estimée. Le point est ensuite reconverti dans le repère image avec:
 
 \[
 p(s_0) = c_{\text{trace}} + s_0 d + h(s_0)n,
 \]
 
-où \(c_{\text{trace}}\) est le centre du ruban, \(d\) sa direction principale et \(n\) sa normale. Cette opération est faite pour la ligne médiane, le bord bas et le bord haut. Le code compare ensuite la position moyenne des deux bords dans l'image pour décider lequel doit être affiché comme bord haut ou bord bas, car le signe de la normale dépend de l'orientation de la PCA.
+où \(c_{\text{trace}}\) est le centre du ruban, \(d\) sa direction principale et \(n\) sa normale. Cette opération est faite pour la ligne médiane, le bord bas et le bord haut.
 
-Les zones où le support local est faible sont aussi mémorisées comme points \emph{sparse}. Elles ne bloquent pas forcément l'affichage, mais elles indiquent que la courbe est moins fiable à cet endroit. Cette information est utile pour diagnostiquer les cas où la trace est trop courte, trop bruitée ou mal couverte par les événements.
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[x=0.95cm,y=0.8cm,>=Latex]
+    \draw[-Latex,thick] (0,0) -- (9,0) node[right] {$s$};
+    \draw[-Latex,thick] (0,-1.2) -- (0,3.0) node[above] {$h$};
+
+    \foreach \x/\yb/\ym/\yh in {0.8/0.2/1.0/1.8,1.6/0.35/1.12/1.9,2.4/0.55/1.3/2.05,3.2/0.75/1.45/2.18,4.0/0.9/1.55/2.28,4.8/1.05/1.68/2.42,5.6/1.15/1.82/2.55,6.4/1.35/1.98/2.68,7.2/1.55/2.15/2.8,8.0/1.75/2.35/2.95}
+    {
+      \fill[magenta] (\x,\yb) circle (1.6pt);
+      \fill[orange] (\x,\ym) circle (1.6pt);
+      \fill[green!60!black] (\x,\yh) circle (1.6pt);
+    }
+
+    \draw[magenta,thick] (0.7,0.15) .. controls (2.7,0.55) and (5.3,1.05) .. (8.2,1.78);
+    \draw[orange,thick,dashed] (0.7,0.95) .. controls (2.8,1.35) and (5.4,1.75) .. (8.2,2.35);
+    \draw[green!60!black,thick] (0.7,1.78) .. controls (2.8,2.05) and (5.4,2.52) .. (8.2,2.95);
+
+    \node[right] at (8.25,2.95) {$h_{\text{haut}}(s)$};
+    \node[right] at (8.25,2.35) {$h_{\text{milieu}}(s)$};
+    \node[right] at (8.25,1.78) {$h_{\text{bas}}(s)$};
+
+    \draw[gray,densely dashed] (4.8,-1.05) -- (4.8,3.0);
+    \node[above right] at (4.8,0.05) {$s_0$};
+    \draw[decorate,decoration={brace,amplitude=5pt}] (3.2,-0.95) -- (6.4,-0.95)
+      node[midway,below=8pt] {fenêtre locale de fit};
+  \end{tikzpicture}
+  \caption{Les trois courbes du ruban sont ajustées à partir des échantillons valides. L'ajustement est local: autour de \(s_0\), les points proches pèsent davantage que les points éloignés.}
+  \label{fig:trace-local-fit-curves}
+\end{figure}
+
 
 \section{Conversion 3D par largeur de trace}
 
-La conversion 3D repose sur le même principe géométrique que le circle fitting, mais la grandeur mesurée n'est plus le rayon d'un cercle. Pour plusieurs instants de la trace, le code mesure une largeur perpendiculaire à la ligne médiane. Cette largeur est utilisée comme diamètre apparent de la balle:
+La conversion 3D repose sur le même principe géométrique que le circle fitting, mais la grandeur mesurée n'est plus le rayon d'un cercle. Pour plusieurs instants de la trace, la méthode mesure une largeur perpendiculaire à la ligne médiane. Cette largeur est utilisée comme diamètre apparent de la balle:
 
 \[
 Z = \frac{f_{\text{eff}}D}{w_{px}},
 \]
 
-où \(D\) est le diamètre réel de la balle et \(w_{px}\) la largeur mesurée en pixels. Comme la largeur n'est pas forcément horizontale ou verticale dans l'image, le code utilise une focale effective dans la direction de mesure:
+où \(D\) est le diamètre réel de la balle et \(w_{px}\) la largeur mesurée en pixels. Comme la largeur n'est pas forcément horizontale ou verticale dans l'image, la méthode utilise une focale effective dans la direction de mesure:
 
 \[
 f_{\text{eff}} =
@@ -666,7 +809,7 @@ z(t) = a t^2 + b t + c.
 
 Les axes \(x\) et \(y\) sont modélisés par une droite car la vitesse horizontale varie peu sur la courte durée observée. L'axe \(z\) est modélisé par un polynôme du second degré pour représenter la courbure verticale de la trajectoire. La différence entre la version non pondérée et la version pondérée vient du poids associé à chaque observation.
 
-Le code multiplie deux termes. Le premier donne plus d'importance aux points récents:
+La pondération combine deux termes. Le premier donne plus d'importance aux points récents:
 
 \[
 w_{\text{temps},i} = \exp(-3\,\text{age}_i).
@@ -793,6 +936,201 @@ Les séquences simulées servent à séparer deux problèmes:
 \end{itemize}
 
 Lorsque l'algorithme échoue sur une séquence simulée avec vérité terrain, l'erreur vient principalement du traitement ou du modèle géométrique. Lorsqu'il fonctionne en simulation mais devient instable sur la caméra réelle, il faut plutôt analyser la calibration, la polarité des événements, la densité de la trace et les conditions expérimentales.
+
+\chapter{Calibration extrinsèque par mire événementielle}
+\label{chap:calibration-extrinseque}
+
+\section{Intuition générale}
+
+Les méthodes de perception précédentes estiment la balle dans le repère de la caméra. Pour qu'un robot puisse utiliser cette information, il faut exprimer cette position dans le repère de sa base. Le problème de calibration extrinsèque consiste donc à estimer une transformation fixe entre la caméra événementielle et la base du robot:
+
+\[
+{}^{B}T_{C}.
+\]
+
+Le principe retenu est d'utiliser le robot lui-même comme système de déplacement connu. Une mire dynamique est affichée sur un écran fixé au bout du bras robotique. Comme l'écran est solidaire de l'effecteur, sa pose dans la base du robot peut être calculée à partir de la cinématique directe et de la géométrie du support mécanique. La caméra événementielle observe cette mire pour plusieurs poses du robot. Chaque observation donne une contrainte géométrique, et l'ensemble des poses permet d'estimer la transformation fixe entre la caméra et le robot.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{images/Calibration/mire_concept.png}
+  \caption{Mire conceptuelle affichée sur un écran. Les disques lumineux peuvent clignoter pour générer une activité événementielle exploitable par la caméra DVXplorer.}
+  \label{fig:calibration-mire-concept}
+\end{figure}
+
+Cette approche est intéressante car elle ne demande pas de déplacer manuellement une mire dans l'espace. Le robot fournit directement des poses connues et répétables, ce qui rend possible une calibration multi-poses cohérente.
+
+\section{Montage envisagé}
+
+Le montage repose sur quatre éléments principaux:
+
+\begin{itemize}
+  \item une caméra événementielle DVXplorer fixe par rapport à l'environnement;
+  \item un robot 6 DOF dont la cinématique directe fournit la pose de l'effecteur;
+  \item un support imprimé en 3D reliant l'effecteur à un écran;
+  \item une mire lumineuse affichée sur cet écran.
+\end{itemize}
+
+L'écran peut être un smartphone, une tablette légère ou un petit écran dédié. Un écran trop lourd est à éviter, car il peut provoquer une flexion du support ou de l'effecteur et fausser la pose réelle de la mire. La rigidité mécanique est donc aussi importante que la précision algorithmique: si la transformation entre l'effecteur et l'écran varie pendant le mouvement, la calibration cherchera à expliquer une erreur qui ne vient pas de la caméra.
+
+\section{Repères et transformations}
+
+On utilise les repères suivants:
+
+\begin{itemize}
+  \item \(B\): repère de la base du robot;
+  \item \(E\): repère de l'effecteur, de la flange ou du TCP robot;
+  \item \(S\): repère de la mire affichée sur l'écran;
+  \item \(C\): repère de la caméra événementielle.
+\end{itemize}
+
+Pour une pose robot \(i\), la cinématique directe donne la transformation \({}^{B}T_{E,i}\). La transformation \({}^{E}T_S\) décrit le placement mécanique de la mire par rapport à l'effecteur. Elle peut provenir de la CAO du support, de mesures mécaniques ou d'une calibration fine du support écran.
+
+La pose de la mire dans la base du robot est alors:
+
+\[
+{}^{B}T_{S,i} = {}^{B}T_{E,i}\,{}^{E}T_S.
+\]
+
+De son côté, la caméra observe la mire et permet d'estimer la transformation \({}^{C}T_{S,i}\), c'est-à-dire la pose de la mire dans le repère caméra. Pour une pose isolée, on peut en déduire une première estimation de la pose caméra dans la base:
+
+\[
+{}^{B}T_{C,i} = {}^{B}T_{S,i}\left({}^{C}T_{S,i}\right)^{-1}.
+\]
+
+Une seule pose reste cependant fragile: une erreur de détection, un mauvais angle de vue ou une légère erreur mécanique peut produire une estimation biaisée. L'objectif réel est donc d'utiliser plusieurs poses et de trouver une transformation unique \({}^{B}T_C\) qui explique au mieux toutes les observations.
+
+\section{Design de la mire dynamique}
+
+La mire envisagée est composée de disques lumineux sur fond noir. Les disques alternent entre un état visible et un état invisible, ou entre deux niveaux de luminosité, afin de générer des événements dans la caméra. Pour une caméra événementielle, l'intérêt n'est pas seulement la forme visible à l'oeil, mais surtout la variation temporelle de luminosité produite par la mire.
+
+Les disques peuvent être pleins ou utiliser un gradient radial, avec un centre plus lumineux et des bords plus progressifs. Le gradient peut produire un signal événementiel moins brutal et potentiellement plus stable, mais il peut aussi rendre le seuil de détection moins net. Une comparaison expérimentale entre disques pleins, disques avec gradient et anneaux serait donc utile.
+
+La mire ne doit pas être parfaitement ambiguë. Une grille régulière de disques identiques peut être difficile à orienter si plusieurs associations 2D/3D sont possibles. Pour lever cette ambiguïté, plusieurs choix sont possibles:
+
+\begin{itemize}
+  \item utiliser une grille asymétrique;
+  \item supprimer un disque à une position connue;
+  \item rendre un disque plus grand que les autres;
+  \item décaler certaines rangées;
+  \item coder temporellement certains disques avec une fréquence ou une phase différente.
+\end{itemize}
+
+La figure \ref{fig:calibration-mire-concept} illustre une première idée de mire: un fond noir, des disques lumineux et un disque plus grand permettant d'aider l'identification de l'orientation.
+
+\section{Extraction des points dans les événements}
+
+La caméra événementielle fournit des événements de la forme:
+
+\[
+e_k = (u_k, v_k, t_k, p_k),
+\]
+
+où \((u_k,v_k)\) sont les coordonnées image, \(t_k\) le timestamp et \(p_k\) la polarité. Pour détecter une mire clignotante, l'idée générale est d'accumuler l'activité sur une courte fenêtre temporelle autour du changement d'état de la mire. Dans cette première approche, les polarités positives et négatives ne sont pas soustraites: elles sont toutes les deux considérées comme de l'activité utile.
+
+On peut donc construire une image d'activité:
+
+\[
+A(u,v) = \sum_{k \in \mathcal{W}} \mathbf{1}\left[(u_k,v_k)=(u,v)\right],
+\]
+
+avec \(\mathcal{W}\) la fenêtre temporelle utilisée. Les zones où l'activité est forte correspondent aux disques qui viennent de changer de luminosité. Après seuillage et regroupement spatial, chaque composante détectée peut être associée à un disque de la mire.
+
+Le centre d'un disque peut être estimé par barycentre pondéré:
+
+\[
+u_c = \frac{\sum u\,A(u,v)}{\sum A(u,v)}, \qquad
+v_c = \frac{\sum v\,A(u,v)}{\sum A(u,v)}.
+\]
+
+Ce centre est généralement plus stable qu'un simple centre de boîte englobante, car il utilise la distribution complète de l'activité dans le blob. Si la mire est vue avec un angle important, un ajustement d'ellipse pourrait aussi être envisagé, mais le barycentre constitue une première estimation simple et rapide.
+
+\section{Association 2D/3D et pose de la mire}
+
+Pour estimer la pose de la mire dans la caméra, il faut associer les centres détectés dans l'image aux points physiques connus de la mire. Les coordonnées des points dans le repère \(S\) sont coplanaires, car ils appartiennent à la surface de l'écran:
+
+\[
+P_{ij}^{S} =
+\begin{bmatrix}
+X_{ij} \\
+Y_{ij} \\
+0
+\end{bmatrix}.
+\]
+
+Pour une grille de \(\text{cols}\) colonnes et \(\text{rows}\) lignes, avec des espacements \(s_x\) et \(s_y\), on peut définir:
+
+\[
+X_{ij} = \left(i-\frac{\text{cols}-1}{2}\right)s_x,
+\qquad
+Y_{ij} = \left(j-\frac{\text{rows}-1}{2}\right)s_y.
+\]
+
+Ces points 3D sont mis en correspondance avec les centres image \((u_{ij},v_{ij})\). La pose \({}^{C}T_{S,i}\) peut alors être estimée avec une méthode de type solvePnP, en utilisant les paramètres intrinsèques de la caméra événementielle et, si nécessaire, les coefficients de distorsion. Une bonne calibration intrinsèque est donc un prérequis: une erreur dans les paramètres caméra se propagera directement dans la transformation extrinsèque.
+
+\section{Calibration multi-poses}
+
+La solution pose par pose permet de vérifier que le système fonctionne, mais elle ne constitue pas la méthode finale. La calibration doit plutôt chercher une transformation unique qui minimise l'erreur de reprojection sur toutes les poses robot et tous les points observés.
+
+Pour chaque pose \(i\) et chaque point \(j\), on connaît:
+
+\begin{itemize}
+  \item la position du point \(P_j^S\) dans la mire;
+  \item la pose robot de la mire \({}^{B}T_{S,i}\);
+  \item l'observation image \(\hat{\mathbf{u}}_{ij}\);
+  \item les paramètres intrinsèques de la caméra.
+\end{itemize}
+
+En cherchant \({}^{C}T_B\), l'erreur de reprojection globale peut s'écrire:
+
+\[
+\min_{{}^{C}T_B}
+\sum_{i,j}
+\left\|
+\pi\left({}^{C}T_B\,{}^{B}T_{S,i}\,P_j^S\right)
+- \hat{\mathbf{u}}_{ij}
+\right\|^2,
+\]
+
+où \(\pi\) représente la projection caméra. Cette formulation est plus robuste qu'une moyenne directe des estimations \({}^{B}T_{C,i}\), car elle ajuste la transformation finale à partir des erreurs réellement visibles dans l'image.
+
+\section{Paramètres physiques de l'écran}
+
+La mire affichée sur l'écran doit être connue en dimensions réelles. Si l'on utilise une mire générée par une page HTML ou une interface graphique, la taille en pixels ne suffit pas: il faut connaître la taille physique de la zone active affichée. La densité en pixels par millimètre peut être estimée par:
+
+\[
+\text{px/mm}_x = \frac{\text{largeur en pixels}}{\text{largeur en mm}},
+\qquad
+\text{px/mm}_y = \frac{\text{hauteur en pixels}}{\text{hauteur en mm}}.
+\]
+
+Cette mesure doit porter sur la zone réellement utilisée par la mire, et non sur la taille extérieure du téléphone ou de la tablette. Les navigateurs et les systèmes d'exploitation ne fournissent pas toujours une taille physique fiable, surtout avec le \emph{device pixel ratio}. Une mesure manuelle au pied à coulisse ou avec une règle reste donc nécessaire pour définir correctement le diamètre des disques, leur espacement et l'origine du repère \(S\).
+
+\section{Précision attendue et points critiques}
+
+La précision finale dépend à la fois de la géométrie, de la détection événementielle et du montage mécanique. Avec un montage rapide imprimé en 3D et une mesure approximative de l'écran, on peut s'attendre à une erreur de l'ordre de quelques centimètres et quelques degrés. Avec un support rigide, une mire bien mesurée, une bonne calibration intrinsèque et plusieurs dizaines de poses variées, l'objectif devient plutôt une précision de quelques millimètres à quelques centimètres, avec une erreur angulaire inférieure au degré dans de bonnes conditions.
+
+L'erreur angulaire est particulièrement importante. Une erreur d'orientation de \(1^\circ\) représente environ \(17~\text{mm}\) d'erreur latérale à \(1~\text{m}\), et environ \(35~\text{mm}\) à \(2~\text{m}\). Pour une tâche d'interception de balle, cette erreur peut devenir aussi critique qu'une erreur directe sur la profondeur.
+
+Le protocole expérimental devra donc privilégier:
+
+\begin{itemize}
+  \item des poses nombreuses et variées, avec des orientations différentes de la mire;
+  \item une couverture large de l'image caméra;
+  \item des plans de mire non tous parallèles;
+  \item une correction correcte de la distorsion;
+  \item le rejet des poses où les blobs sont mal détectés;
+  \item l'analyse des résidus de reprojection après optimisation.
+\end{itemize}
+
+\section{Lien avec l'interception robotique}
+
+Cette calibration est l'étape qui rend la perception exploitable par le robot. Une fois \({}^{B}T_C\) connue, une position de balle estimée dans le repère caméra peut être transformée dans le repère de la base:
+
+\[
+P^B = {}^{B}T_C\,P^C.
+\]
+
+La trajectoire obtenue par la méthode Trace peut alors être exprimée dans le repère robot, filtrée, prédite, puis transmise à la commande ou à une politique d'interception. La qualité de cette transformation conditionne directement la précision finale: même une bonne estimation caméra ne suffit pas si la calibration extrinsèque déplace la balle de plusieurs centimètres dans le repère du robot.
 
 \chapter{Partie robotique: Isaac Lab et PPO}
 
