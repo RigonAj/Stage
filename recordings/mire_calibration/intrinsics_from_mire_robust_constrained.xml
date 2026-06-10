@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<opencv_storage>
+<DVXplorer_mire_robust>
+  <camera_matrix type_id="opencv-matrix">
+    <rows>3</rows>
+    <cols>3</cols>
+    <dt>d</dt>
+    <data>
+      5.2628531935781336e+02 0. 3.3090181723856654e+02 0.
+      5.2555102025241968e+02 2.4224458603197070e+02 0. 0. 1.</data></camera_matrix>
+  <distortion_coefficients type_id="opencv-matrix">
+    <rows>5</rows>
+    <cols>1</cols>
+    <dt>d</dt>
+    <data>
+      -4.0342803867276317e-01 1.6727992983431678e-01 0. 0. 0.</data></distortion_coefficients>
+  <image_width>640</image_width>
+  <image_height>480</image_height>
+  <use_fisheye_model>0</use_fisheye_model>
+  <calibration_error>1.8878510761960535e-01</calibration_error></DVXplorer_mire_robust>
+<use_fisheye_model>0</use_fisheye_model>
+<type>camera</type>
+<pattern_width>5</pattern_width>
+<pattern_height>4</pattern_height>
+<pattern_type>blinking_mire</pattern_type>
+<board_width>5</board_width>
+<board_height>4</board_height>
+<square_size>0.</square_size>
+<calibration_error>1.8878510761960535e-01</calibration_error>
+<calibration_time>"2026-06-09 12:11:29"</calibration_time>
+<source>scripts/calibrate_intrinsics_from_mire.py</source>
+<input_dir>recordings/mire_calibration</input_dir>
+</opencv_storage>
