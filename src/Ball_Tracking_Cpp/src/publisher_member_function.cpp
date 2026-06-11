@@ -187,8 +187,11 @@ void Pub::timer_callback() {
     applyInputCalibration();
     gui.nb_event = camera.FilteredCount();
 
-    camera.Echantillon(ui.Maxevent());
+    // Undistort must run on the full filtered window: the trace accumulation
+    // feeds on the undistorted points, and running it after Echantillon would
+    // cap the trail density to Maxevent subsampled events per window.
     camera.Undistort();
+    camera.Echantillon(ui.Maxevent());
 
     const auto t_pre_end = clock::now();
 
