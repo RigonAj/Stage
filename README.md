@@ -1,45 +1,47 @@
 # Event-Based 3D Ball Tracking
 
-ROS 2 C++ project for detecting and tracking a moving ball with a DVXplorer event camera.
+ROS 2 C++ project for detecting and tracking a fast-moving ball with a DVXplorer event camera.
 
-The application reads asynchronous camera events, filters noise, clusters event points, estimates the 3D position of the ball, and displays the result in 2D, 3D, top-view, RMSE, and trace-analysis views.
+The application reads asynchronous camera events (live or from recorded/simulated files), filters noise, follows the ball in the image, and estimates its 3D position. The main estimation algorithm is the **Trace** algorithm: instead of fitting a circle on the instantaneous ball contour, it measures the width of the event trail left by the fast ball and converts that width into depth. The legacy circle-fitting tracker is still available as an optional mode for comparison.
 
-## Processing Pipeline
+## Why Trace Is the Main Algorithm
 
-1. Acquire event batches from a DVXplorer camera or from a recorded file.
+Fast ball motion creates a long event trail. Fitting a circle on that trail overestimates the apparent radius, and since depth is inversely proportional to the radius, the ball looks too close. The depth sensitivity is roughly `Z / width_px` per pixel of error: at 1.47 m with a ~21 px apparent diameter, a 1 px error already means ~7 cm of depth error.
+
+The Trace algorithm measures the trail width perpendicular to the motion from many local slices, which makes the apparent diameter far less sensitive to isolated events or a badly fitted circle.
+
+## Trace Processing Pipeline
+
+1. Acquire event batches from a DVXplorer camera or from a recorded/simulated file (H5/bin).
 2. Filter background activity with `dv-processing`.
-3. Undistort event coordinates using the OpenCV calibration file.
-4. Keep a recent time window and downsample events for real-time processing.
-5. Cluster events with DBSCAN.
-6. Fit a circle on the best ball cluster.
-7. Estimate the 3D position from the apparent circle radius.
-8. Accumulate 3D positions and fit a trajectory.
-9. Display the tracking result with Raylib/raygui.
+3. Undistort event coordinates using the camera calibration (real OpenCV XML, or the per-sequence `camera/intrinsics.json` for simulated data).
+4. Accumulate recent events inside a moving window that follows the ball trajectory (`Trace ms` memory, polarity filter).
+5. Estimate the trail direction with a global PCA plus temporal PCA slices, and transform events into a local trace frame:
 
-## 3D Position Estimation
+   ```text
+   s = position along the trail
+   h = position normal to the trail
+   ```
 
-The main tracker estimates the ball position from the fitted image circle.
+6. Split the trail into bins along `s` and detect, in each bin, the two *supported edges*: the extreme `h` values that have enough close neighbours (isolated events cannot create an edge).
+7. Reject incoherent bins, then fit three local curves: upper edge, middle line, lower edge.
+8. Measure the local trail width along the normal of the middle line, and reject isolated width spikes.
+9. Convert each center point plus width into a 3D position:
 
-For a ball with known real radius `R` and detected image radius `r`, depth is estimated as:
+   ```text
+   Z = f_eff * real_diameter / width_px
+   f_eff = sqrt((fx*nx)^2 + (fy*ny)^2)
+   X = ((u - cx) / fx) * Z
+   Y = ((v - cy) / fy) * Z
+   ```
 
-```text
-Z = fx * R / r
-X = ((u - cx) / fx) * Z
-Y = ((v - cy) / fy) * Z
-```
+10. Filter 3D outliers and fit the trajectory, then publish the ball position on the ROS 2 topic `ball_position_3d_mm`.
 
-Where:
-
-- `(u, v)` is the circle center in pixels;
-- `r` is the detected circle radius in pixels;
-- `fx`, `fy`, `cx`, `cy` come from the OpenCV camera calibration;
-- `X`, `Y`, `Z` are returned in millimeters by the tracker.
-
-The displayed 3D world coordinates are converted to meters for the Raylib scene.
+The full algorithm is documented visually in `trace_algorithm_explanation.html` (detailed explanation, parameters, diagnostics) and `algo_trace_graph.html` (C++ pipeline graph).
 
 ## Trajectory Fit
 
-Each valid 3D estimate is added to the trajectory history. The current trajectory model is:
+Each valid 3D estimate is added to the trajectory history. The trajectory model is:
 
 ```text
 X(t) = a*t + b
@@ -47,65 +49,57 @@ Y(t) = a*t + b
 Z(t) = a*t^2 + b*t + c
 ```
 
-This keeps the lateral/depth components simple while allowing a parabolic component for the vertical motion.
+An optional **weighted regression** mode (`Weighted reg` toggle) keeps the same model but weights each sample by recency (`exp(-3 * age)`) and by robustness (`1 / (1 + (residual/scale)^2)`), so recent coherent measurements dominate and outliers stop dragging the curve.
 
-## Trace View
+## Circle Fitting (Optional Mode)
 
-Fast ball motion can create a long event trail. In that case, fitting a circle can overestimate the apparent radius and make the ball look too close.
-
-The `Trace` view provides a second geometric analysis:
-
-1. follow the detected ball using a moving window;
-2. accumulate recent raw or undistorted events inside that window;
-3. estimate the trail direction with PCA;
-4. transform events into a local trace frame:
+The original tracker is enabled with the `Circle fit` toggle (off by default). It clusters events with DBSCAN, fits a circle on the best cluster, validates it with the polarity symmetry of the events, and estimates depth from the apparent radius:
 
 ```text
-s = position along the trail
-h = position normal to the trail
+Z = fx * R / r
 ```
 
-5. split the trail along `s`;
-6. detect dense upper/lower borders in each slice using a 1D histogram on `h`;
-7. fit upper, middle, and lower curves;
-8. measure local trail width on the normal direction;
-9. convert center point plus width in pixels into 3D points.
+It works well when the ball projection stays close to a circle, but its depth depends directly on a single radius value (`dZ/dr = -Z/r`), which is why the Trace method replaced it for fast throws. Its pipeline is documented in `algo_circle_fitting_graph.html`.
 
-For trace-based depth, the measured width is treated as the apparent diameter:
+## Views
 
-```text
-Z = f_effective * real_diameter / width_px
-```
+The Raylib/raygui interface provides five views: `2D` (events, clusters, fitted circle), `3D` (estimated trajectory in blue, simulated ground truth in red, 25 cm grid squares), `TOP` (top view and depth-bias analysis), `RMSE` (internal trajectory consistency), and `Trace` (ribbon fit, edge curves, width measurements, all tuning sliders).
 
-The trace algorithm is documented in `trace_algorithm_explanation.html`.
+## Simulated Sequences
+
+Simulated sequences (Isaac Sim video converted to events with v2e) live in the local `sequences/` folder, each with `camera/intrinsics.json`, `labels/ground_truth.csv` and `metadata.json`. The reader automatically loads the per-sequence calibration (`fx = fy = 520`, no distortion, ball radius 0.02 m). The `Option` panel switches the reader source between `Sequences` and `Recordings`.
 
 ## Repository Layout
 
 ```text
 .
-├── build.sh
-├── calibration_camera_DVXplorer_DXA00265-2026_04_23_13_33_50.xml
-├── images/
-├── scripts/
+├── env.sh                              build/run/calib/deps shell helpers
+├── calibration_camera_DVXplorer_*.xml  real camera intrinsics
+├── trace_algorithm_explanation.html    Trace algorithm documentation
+├── algo_trace_graph.html               Trace pipeline graph
+├── algo_circle_fitting_graph.html      circle-fitting pipeline graph
+├── Stage_summary.tex / .pdf            internship report (both methods, validation, calibration)
+├── images/                             report figures
+├── scripts/                            calibration and utility scripts
+├── sequences/                          local simulated sequences (git-ignored)
+├── recordings/                         local camera recordings (git-ignored)
 ├── src/
-│   ├── Ball_Tracking_Cpp/
-│   │   ├── include/Ball_Tracking_Cpp/
-│   │   └── src/
-│   └── ball_tracking/
-├── Stage.pdf
-├── trace_algorithm_explanation.html
+│   └── Ball_Tracking_Cpp/
+│       ├── include/Ball_Tracking_Cpp/
+│       └── src/
 └── README.md
 ```
 
-Generated folders such as `build/`, `install/`, `log/`, `.deps/`, local recordings, and local agent notes are ignored by Git.
+Generated folders such as `build/`, `install/`, `log/`, `.deps/` are ignored by Git.
 
 ## Main Files
 
+- `src/Ball_Tracking_Cpp/src/Gui.cpp`: **Trace algorithm** (ribbon fit, supported edges, width measurement, 3D conversion) and the 2D/3D/TOP/RMSE/Trace views.
+- `src/Ball_Tracking_Cpp/src/publisher_member_function.cpp`: ROS 2 node loop, calibration selection, trace feeding, publication.
 - `src/Ball_Tracking_Cpp/src/Camera.cpp`: camera acquisition, filtering, undistortion, sampling, and DBSCAN clustering.
-- `src/Ball_Tracking_Cpp/src/BallTracker.cpp`: circle fitting, cluster validation, 3D pose estimation, and trajectory fitting.
-- `src/Ball_Tracking_Cpp/src/Gui.cpp`: 2D/3D visualization, top view, RMSE view, and trace-ribbon analysis.
+- `src/Ball_Tracking_Cpp/src/BallTracker.cpp`: optional circle-fitting tracker, cluster validation, classic 3D pose estimation.
+- `src/Ball_Tracking_Cpp/src/EventWriter.cpp`: H5/bin reading and writing, v2e `(N,4)` event format support.
 - `src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/RegressionAccumulator.hpp`: linear and quadratic regressions.
-- `src/Ball_Tracking_Cpp/src/publisher_member_function.cpp`: ROS 2 node loop and GUI/tracker integration.
 
 ## Dependencies
 
@@ -146,17 +140,18 @@ deps-check
 deps-install
 ```
 
-## Build
+## Build and Run
 
 From the workspace root:
 
 ```bash
 source env.sh
 build
+run
 ```
 
-The helper script sets up the ROS environment and builds the C++ package with colcon.
+`build` sets up the ROS environment and builds the C++ package with colcon; `run` starts the `talker` node with the GUI.
 
 ## Notes
 
-Depth estimation is sensitive to the apparent radius or width measured in pixels. A small pixel error can create a large depth error, especially when the ball is far from the camera. The trace view exists to inspect and improve this measurement when fast motion creates an elongated event trail.
+Depth estimation is sensitive to the width measured in pixels: a small pixel error can create a large depth error, especially when the ball is far from the camera. The Trace view exposes every parameter of the supported-edge detector (`Support div/min/max`, `Support radius px`, `Border %`) and of the ribbon fit so this measurement can be inspected and tuned. See `trace_algorithm_explanation.html` for the tuning guide.

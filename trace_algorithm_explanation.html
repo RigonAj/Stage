@@ -636,7 +636,7 @@
       <div class="wrap">
         <h2>Carte du code actuel</h2>
         <p>
-          Toute la partie décrite ici se trouve dans <code>src/Ball_Tracking_Cpp/src/Gui.cpp</code>.
+          Tout le calcul décrit ici se trouve dans <code>src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp</code> (API dans <code>TraceAnalysis.hpp</code>), sans dépendance UI ; <code>Gui.cpp</code> orchestre et dessine.
           La vue trace est principalement un pipeline de visualisation et d’estimation géométrique.
           Les fonctions importantes sont les suivantes.
         </p>
@@ -1582,6 +1582,11 @@ fit_final = régression pondérée</code></pre>
               <td>Plus de mesures de largeur, meilleure couverture mais plus de calcul.</td>
             </tr>
             <tr>
+              <td><code>Width fit</code></td>
+              <td>Lissage robuste du profil de largeur avant la conversion 3D.</td>
+              <td colspan="2"><code>Smooth</code> remplace chaque largeur par un polynôme robuste <code>largeur(t)</code> ajusté sur toute la trace (IRLS, pondéré par le support local) : la profondeur balistique varie de façon lisse, donc le diamètre apparent aussi, et le bruit pixel par échantillon est moyenné. <code>Raw</code> garde les largeurs locales brutes, l'ancien comportement, utile comme référence.</td>
+            </tr>
+            <tr>
               <td><code>PCA ms</code></td>
               <td>Durée cible de chaque PCA temporel.</td>
               <td>Fenêtres plus longues, direction plus stable.</td>
@@ -1628,6 +1633,7 @@ Border % = 3.50
 Fit input = Undist
 Radius gate = OFF
 Line order = Quad
+Width fit = Smooth
 Polarity = Negative</code></pre>
 
         <div class="controls" aria-label="Simulation simple de sensibilité profondeur">
@@ -1912,7 +1918,7 @@ Polarity = Negative</code></pre>
 
   <footer>
     <div class="wrap">
-      Documentation de l’algorithme actuel de <code>Gui.cpp</code>.
+      Documentation de l’algorithme actuel de <code>TraceAnalysis.cpp</code>.
     </div>
   </footer>
 

@@ -33,6 +33,7 @@ add_executable(talker
   src/publisher_member_function.cpp
   src/EventWriter.cpp
   src/Gui.cpp
+  src/TraceAnalysis.cpp
   src/Camera.cpp
   src/BallTracker.cpp
 )

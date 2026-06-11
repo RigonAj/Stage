@@ -19,6 +19,7 @@
 
 #include "EventWriter.h"
 #include "Camera.hpp"
+#include "TraceAnalysis.hpp"
 #include "raygui.h"
 
 static constexpr double RENDER_FPS = 60.0;
@@ -97,6 +98,13 @@ private:
     std::vector<int64_t> traceAccumulatedTimestamps;
     std::vector<bool> traceAccumulatedPolarities;
     int64_t traceLastAccumulatedTimestampUs = std::numeric_limits<int64_t>::min();
+    std::vector<TracePoint> traceSourcePoints_;
+    std::string traceSourceLabel_;
+    Color traceSourceColor_{MAROON};
+    TraceRibbonFit traceFit_;
+    Trace3DAnalysis traceAnalysis_;
+    std::string traceAnalysisKey_;
+    std::chrono::steady_clock::time_point last_reader_file_scan_{};
     bool traceMotionWindowValid = false;
     bool traceMotionParabolaValid = false;
     Circle traceMotionCircle{};
@@ -263,6 +271,7 @@ public:
         trace_border_percent = 3.5f;
         trace_use_raw_input = false;
         trace_radius_gate_enabled = false;
+        trace_width_smoothing_enabled = true;
         weighted_regression_enabled = false;
         trace_polarity_mode = 2;
         temporal_slices = 5.0f;
@@ -361,6 +370,13 @@ public:
             if (GuiButton({px, py, 100.0f, h}, trace_line_order >= 1.5f ? "Quad" : "Linear")) {
                 trace_line_order = trace_line_order >= 1.5f ? 1.0f : 2.0f;
             }
+            px += 120.0f;
+
+            DrawText("Width fit", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
+            GuiToggle(
+                {px, py, 100.0f, h},
+                trace_width_smoothing_enabled ? "Smooth" : "Raw",
+                &trace_width_smoothing_enabled);
             px += 120.0f;
         }
 
@@ -664,6 +680,7 @@ public:
     }
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
+    bool TraceWidthSmoothingEnabled() const { return trace_width_smoothing_enabled; }
     bool CircleFittingEnabled() const { return circle_fitting_enabled; }
     bool WeightedRegressionEnabled() const { return weighted_regression_enabled; }
     int SliceMode() const { return std::clamp(slice_mode, 0, 2); }
@@ -724,6 +741,7 @@ private:
     float trace_border_percent = 3.5f;
     bool trace_use_raw_input = false;
     bool trace_radius_gate_enabled = false;
+    bool trace_width_smoothing_enabled = true;
     bool weighted_regression_enabled = false;
     int trace_polarity_mode = 2;
     float temporal_slices = 5.0f;
