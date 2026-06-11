@@ -2148,7 +2148,8 @@ TraceRibbonFit FitTraceRibbon(
     float localWindowPx,
     int localOrder,
     float pcaPeriodMs,
-    const TraceSupportEdgeSettings &supportEdge) {
+    const TraceSupportEdgeSettings &supportEdge,
+    bool refineEdges) {
 
     TraceRibbonFit fit;
 
@@ -2419,11 +2420,95 @@ TraceRibbonFit FitTraceRibbon(
     );
 
     const double localBandwidth = static_cast<double>(localWindow);
-    const LocalQuadraticModel middleCurve = MakeLocalQuadraticModel(middleSamples, localBandwidth, fitOrder);
-    const LocalQuadraticModel lowCurve = MakeLocalQuadraticModel(lowSamples, localBandwidth, fitOrder);
-    const LocalQuadraticModel highCurve = MakeLocalQuadraticModel(highSamples, localBandwidth, fitOrder);
+    LocalQuadraticModel middleCurve = MakeLocalQuadraticModel(middleSamples, localBandwidth, fitOrder);
+    LocalQuadraticModel lowCurve = MakeLocalQuadraticModel(lowSamples, localBandwidth, fitOrder);
+    LocalQuadraticModel highCurve = MakeLocalQuadraticModel(highSamples, localBandwidth, fitOrder);
     if (!middleCurve.valid || !lowCurve.valid || !highCurve.valid) {
         return fit;
+    }
+
+    if (refineEdges) {
+        // Second pass: re-detect the edges of every bin inside a narrow band
+        // around the fitted curves, so stray events outside the ribbon cannot
+        // pull the supported extremes, then refit the three curves on the
+        // refined samples.
+        std::vector<PolynomialSample> refinedMiddle;
+        std::vector<PolynomialSample> refinedLow;
+        std::vector<PolynomialSample> refinedHigh;
+        std::vector<float> refinedWidths;
+        std::vector<float> bandValues;
+
+        for (int bin = 0; bin < binCount; ++bin) {
+            const std::vector<float> &sBin = binS[static_cast<std::size_t>(bin)];
+            const std::vector<float> &hBin = binH[static_cast<std::size_t>(bin)];
+            if (hBin.size() < minEventsPerBin) {
+                continue;
+            }
+
+            const float s = Quantile(sBin, 0.50f);
+            if (s < fit.sMin || s > fit.sMax) {
+                continue;
+            }
+
+            const float predictedLow = RibbonCurveH(lowCurve, s);
+            const float predictedHigh = RibbonCurveH(highCurve, s);
+            if (!std::isfinite(predictedLow)
+                || !std::isfinite(predictedHigh)
+                || predictedHigh - predictedLow < 2.0f) {
+                continue;
+            }
+
+            const float margin = std::clamp((predictedHigh - predictedLow) * 0.30f, 1.5f, 5.0f);
+            bandValues.clear();
+            for (const float h : hBin) {
+                if (h >= predictedLow - margin && h <= predictedHigh + margin) {
+                    bandValues.push_back(h);
+                }
+            }
+            if (bandValues.size() < minEventsPerBin) {
+                continue;
+            }
+
+            const TraceEdgeEstimate refined = EstimateSupportedEdges(
+                bandValues,
+                minEventsPerBin,
+                edgeSettings
+            );
+            if (!refined.valid) {
+                continue;
+            }
+
+            const float refinedWidth = refined.high - refined.low;
+            if (!std::isfinite(refinedWidth) || refinedWidth < 2.0f) {
+                continue;
+            }
+
+            refinedMiddle.push_back({s, refined.middle});
+            refinedLow.push_back({s, refined.low});
+            refinedHigh.push_back({s, refined.high});
+            refinedWidths.push_back(refinedWidth);
+        }
+
+        const std::size_t minRefinedSamples =
+            static_cast<std::size_t>(std::max(kMinValidBins, fitOrder + 1));
+        if (refinedMiddle.size() >= minRefinedSamples) {
+            FilterCoherentRibbonSamples(refinedMiddle, refinedLow, refinedHigh, refinedWidths);
+            if (refinedMiddle.size() >= minRefinedSamples) {
+                const LocalQuadraticModel refinedMiddleCurve =
+                    MakeLocalQuadraticModel(refinedMiddle, localBandwidth, fitOrder);
+                const LocalQuadraticModel refinedLowCurve =
+                    MakeLocalQuadraticModel(refinedLow, localBandwidth, fitOrder);
+                const LocalQuadraticModel refinedHighCurve =
+                    MakeLocalQuadraticModel(refinedHigh, localBandwidth, fitOrder);
+                if (refinedMiddleCurve.valid && refinedLowCurve.valid && refinedHighCurve.valid) {
+                    middleCurve = refinedMiddleCurve;
+                    lowCurve = refinedLowCurve;
+                    highCurve = refinedHighCurve;
+                    localWidths = std::move(refinedWidths);
+                    fit.widthPx = Quantile(localWidths, 0.50f);
+                }
+            }
+        }
     }
 
     std::vector<Vector2> sparseLowFitPoints;

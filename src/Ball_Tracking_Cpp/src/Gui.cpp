@@ -736,7 +736,8 @@ void Gui::UpdateTraceAnalysis() {
         ui.TraceLineWindowPx(),
         ui.TraceLineOrder(),
         ui.TracePcaPeriodMs(),
-        supportEdge
+        supportEdge,
+        ui.TraceEdgeRefineEnabled()
     );
 
     if (!traceFit_.valid) {

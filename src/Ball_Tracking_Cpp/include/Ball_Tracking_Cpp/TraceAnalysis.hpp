@@ -334,7 +334,8 @@ TraceRibbonFit FitTraceRibbon(
     float localWindowPx,
     int localOrder,
     float pcaPeriodMs,
-    const TraceSupportEdgeSettings &supportEdge);
+    const TraceSupportEdgeSettings &supportEdge,
+    bool refineEdges);
 
 int64_t TraceTimeOriginUs(const std::vector<TracePoint> &tracePoints);
 

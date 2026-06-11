@@ -1582,6 +1582,11 @@ fit_final = régression pondérée</code></pre>
               <td>Plus de mesures de largeur, meilleure couverture mais plus de calcul.</td>
             </tr>
             <tr>
+              <td><code>Edge refine</code></td>
+              <td>Seconde passe de détection des bords dans une bande étroite autour des courbes prédites.</td>
+              <td colspan="2"><code>ON</code> (défaut) : les extrêmes soutenus sont re-détectés par bin dans [bord prédit ± marge], puis les trois courbes sont refittées — les événements isolés hors ruban ne tirent plus les bords. <code>OFF</code> : une seule passe, l'ancien comportement.</td>
+            </tr>
+            <tr>
               <td><code>Width fit</code></td>
               <td>Lissage robuste du profil de largeur avant la conversion 3D.</td>
               <td colspan="2"><code>Smooth</code> remplace chaque largeur par un polynôme robuste <code>largeur(t)</code> ajusté sur toute la trace (IRLS, pondéré par le support local) : la profondeur balistique varie de façon lisse, donc le diamètre apparent aussi, et le bruit pixel par échantillon est moyenné. <code>Raw</code> garde les largeurs locales brutes, l'ancien comportement, utile comme référence.</td>
@@ -1632,6 +1637,7 @@ Support radius px = 1.75
 Border % = 3.50
 Fit input = Undist
 Radius gate = OFF
+Edge refine = ON
 Line order = Quad
 Width fit = Raw
 Polarity = Negative</code></pre>

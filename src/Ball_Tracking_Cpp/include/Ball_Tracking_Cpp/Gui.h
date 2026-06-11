@@ -270,6 +270,7 @@ public:
         trace_border_percent = 3.5f;
         trace_use_raw_input = false;
         trace_radius_gate_enabled = false;
+        trace_edge_refine_enabled = true;
         trace_width_smoothing_enabled = false;
         weighted_regression_enabled = false;
         trace_polarity_mode = 2;
@@ -475,6 +476,10 @@ public:
                 trace_polarity_mode = (trace_polarity_mode + 1) % 3;
             }
             px += 140.0f;
+
+            DrawText("Edge refine", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
+            GuiToggle({px, py, 100.0f, h}, trace_edge_refine_enabled ? "ON" : "OFF", &trace_edge_refine_enabled);
+            px += 120.0f;
         }
         if (!traceView) {
             GuiToggle({px, py, 90.0f, h}, "Positif only", &positive_only);
@@ -679,6 +684,7 @@ public:
     }
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
+    bool TraceEdgeRefineEnabled() const { return trace_edge_refine_enabled; }
     bool TraceWidthSmoothingEnabled() const { return trace_width_smoothing_enabled; }
     bool CircleFittingEnabled() const { return circle_fitting_enabled; }
     bool WeightedRegressionEnabled() const { return weighted_regression_enabled; }
@@ -740,6 +746,7 @@ private:
     float trace_border_percent = 3.5f;
     bool trace_use_raw_input = false;
     bool trace_radius_gate_enabled = false;
+    bool trace_edge_refine_enabled = true;
     bool trace_width_smoothing_enabled = false;
     bool weighted_regression_enabled = false;
     int trace_polarity_mode = 2;
