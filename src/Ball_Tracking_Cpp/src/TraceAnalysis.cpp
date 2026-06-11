@@ -2438,6 +2438,16 @@ TraceRibbonFit FitTraceRibbon(
         std::vector<float> refinedWidths;
         std::vector<float> bandValues;
 
+        // The leading/trailing end caps of the trail are the ball disc
+        // appearing or vanishing: cross sections there are chords of the
+        // disc, not the apparent diameter, which biases both the edges and
+        // the widths. Skip roughly one ball radius at each end when the
+        // trace is long enough.
+        const float capMarginPx = std::clamp(fit.widthPx * 0.55f, 2.0f, 30.0f);
+        const bool trimCaps = fit.lengthPx > 4.0f * capMarginPx;
+        const float refineSMin = trimCaps ? fit.sMin + capMarginPx : fit.sMin;
+        const float refineSMax = trimCaps ? fit.sMax - capMarginPx : fit.sMax;
+
         for (int bin = 0; bin < binCount; ++bin) {
             const std::vector<float> &sBin = binS[static_cast<std::size_t>(bin)];
             const std::vector<float> &hBin = binH[static_cast<std::size_t>(bin)];
@@ -2446,7 +2456,7 @@ TraceRibbonFit FitTraceRibbon(
             }
 
             const float s = Quantile(sBin, 0.50f);
-            if (s < fit.sMin || s > fit.sMax) {
+            if (s < refineSMin || s > refineSMax) {
                 continue;
             }
 
@@ -2506,6 +2516,18 @@ TraceRibbonFit FitTraceRibbon(
                     highCurve = refinedHighCurve;
                     localWidths = std::move(refinedWidths);
                     fit.widthPx = Quantile(localWidths, 0.50f);
+
+                    float refinedSMinSample = static_cast<float>(refinedMiddle.front().x);
+                    float refinedSMaxSample = refinedSMinSample;
+                    for (const PolynomialSample &sample : refinedMiddle) {
+                        refinedSMinSample = std::min(refinedSMinSample, static_cast<float>(sample.x));
+                        refinedSMaxSample = std::max(refinedSMaxSample, static_cast<float>(sample.x));
+                    }
+                    if (refinedSMaxSample - refinedSMinSample >= 35.0f) {
+                        fit.sMin = refinedSMinSample;
+                        fit.sMax = refinedSMaxSample;
+                        fit.lengthPx = fit.sMax - fit.sMin;
+                    }
                 }
             }
         }

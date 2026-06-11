@@ -1584,7 +1584,7 @@ fit_final = régression pondérée</code></pre>
             <tr>
               <td><code>Edge refine</code></td>
               <td>Seconde passe de détection des bords dans une bande étroite autour des courbes prédites.</td>
-              <td colspan="2"><code>ON</code> (défaut) : les extrêmes soutenus sont re-détectés par bin dans [bord prédit ± marge], puis les trois courbes sont refittées — les événements isolés hors ruban ne tirent plus les bords. <code>OFF</code> : une seule passe, l'ancien comportement.</td>
+              <td colspan="2"><code>ON</code> (défaut) : les extrêmes soutenus sont re-détectés par bin dans [bord prédit ± marge], les calottes d'extrémité (~1 rayon de balle à chaque bout, où les coupes mesurent des cordes du disque et non le diamètre apparent) sont exclues, puis les trois courbes sont refittées — les événements isolés hors ruban ne tirent plus les bords et les extrémités ne biaisent plus la 3D. <code>OFF</code> : une seule passe, l'ancien comportement.</td>
             </tr>
             <tr>
               <td><code>Width fit</code></td>
