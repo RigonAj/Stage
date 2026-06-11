@@ -270,7 +270,7 @@ public:
         trace_border_percent = 3.5f;
         trace_use_raw_input = false;
         trace_radius_gate_enabled = false;
-        trace_edge_refine_enabled = true;
+        trace_edge_refine_enabled = false;
         trace_width_smoothing_enabled = false;
         weighted_regression_enabled = false;
         trace_polarity_mode = 2;
@@ -746,7 +746,7 @@ private:
     float trace_border_percent = 3.5f;
     bool trace_use_raw_input = false;
     bool trace_radius_gate_enabled = false;
-    bool trace_edge_refine_enabled = true;
+    bool trace_edge_refine_enabled = false;
     bool trace_width_smoothing_enabled = false;
     bool weighted_regression_enabled = false;
     int trace_polarity_mode = 2;

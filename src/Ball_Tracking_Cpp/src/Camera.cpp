@@ -165,10 +165,7 @@ void DvCamera::Undistort() {
     undistortedFilteredTimestamps_.clear();
     undistortedFilteredPolarities_.clear();
 
-    const bool useSamples = !Samples.isEmpty();
-    dv::EventStore &target = useSamples ? Samples : Filtered;
-
-    if (target.isEmpty()) {
+    if (Filtered.isEmpty()) {
         return;
     }
 
@@ -176,14 +173,14 @@ void DvCamera::Undistort() {
     std::vector<int64_t> timestamps;
     std::vector<bool> polarities;
 
-    distortedPoints.reserve(target.size());
-    timestamps.reserve(target.size());
-    polarities.reserve(target.size());
-    rawFilteredPoints_.reserve(target.size());
-    rawFilteredTimestamps_.reserve(target.size());
-    rawFilteredPolarities_.reserve(target.size());
+    distortedPoints.reserve(Filtered.size());
+    timestamps.reserve(Filtered.size());
+    polarities.reserve(Filtered.size());
+    rawFilteredPoints_.reserve(Filtered.size());
+    rawFilteredTimestamps_.reserve(Filtered.size());
+    rawFilteredPolarities_.reserve(Filtered.size());
 
-    for (const auto& e : target) {
+    for (const auto& e : Filtered) {
         distortedPoints.emplace_back(
             static_cast<float>(e.x()),
             static_cast<float>(e.y())
@@ -261,10 +258,7 @@ void DvCamera::Undistort() {
         }
     }
 
-    target = std::move(output);
-    if (useSamples) {
-        Filtered = target;
-    }
+    Filtered = std::move(output);
 }
 
 void DvCamera::KeepRecentFiltered(double windowSeconds) {
