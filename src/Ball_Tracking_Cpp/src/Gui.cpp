@@ -703,53 +703,12 @@ void Gui::Draw2DScene() {
     DrawImageTrajectory2D();
 }
 
-// Runs the full trace pipeline once per frame and caches the results in
-// members; every view (Trace, 3D, TOP, RMSE) reads from this cache. When the
-// events and every parameter are identical to the previous frame (typically a
-// paused reader), the recomputation is skipped entirely.
+// Runs the full trace pipeline once per rendered frame and caches the
+// results in members; every view (Trace, 3D, TOP, RMSE) reads from this
+// cache so the computation never runs twice in a frame.
 void Gui::UpdateTraceAnalysis() {
     const int polarityMode = ui.TracePolarityMode();
     const TraceSupportEdgeSettings supportEdge = MakeTraceSupportEdgeSettings(ui);
-
-    const auto lastStamp = [](const std::vector<int64_t> *timestamps) -> int64_t {
-        return (timestamps != nullptr && !timestamps->empty()) ? timestamps->back() : -1;
-    };
-    std::string analysisKey = std::format(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        traceAccumulatedPoints.size(),
-        traceLastAccumulatedTimestampUs,
-        traceFloatPoints != nullptr ? traceFloatPoints->size() : 0,
-        lastStamp(traceFloatTimestamps),
-        traceRawPoints != nullptr ? traceRawPoints->size() : 0,
-        lastStamp(traceRawTimestamps),
-        View.size(),
-        traceMotionWindowValid,
-        traceMotionTimestampUs);
-    analysisKey += std::format(
-        "|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        polarityMode,
-        ui.TraceUseRawInput(),
-        ui.TraceUseRadiusGate(),
-        ui.TraceLineBinWidthPx(),
-        ui.TraceLineWindowPx(),
-        ui.TraceLineOrder(),
-        ui.TracePcaPeriodMs(),
-        ui.TraceWidthStepPx(),
-        ui.TraceWidthSmoothingEnabled());
-    analysisKey += std::format(
-        "|{}|{}|{}|{}|{}|{}|{}|{}",
-        supportEdge.supportDivisor,
-        supportEdge.minLocalSupport,
-        supportEdge.maxLocalSupport,
-        supportEdge.supportRadiusPx,
-        supportEdge.borderRatio,
-        traceBallRadiusMm,
-        groundTruthTimesSeconds.size(),
-        traceCalibration.sourcePath);
-
-    if (analysisKey == traceAnalysisKey_) {
-        return;
-    }
 
     TracePointSourceResult source = BuildTracePointSource(
         traceAccumulatedPoints,
@@ -782,7 +741,6 @@ void Gui::UpdateTraceAnalysis() {
 
     if (!traceFit_.valid) {
         ClearTrace3D();
-        traceAnalysisKey_ = std::move(analysisKey);
         return;
     }
 
@@ -805,7 +763,6 @@ void Gui::UpdateTraceAnalysis() {
     trace3DValid = traceAnalysis_.valid;
     traceCurrentWorld3D = traceAnalysis_.currentWorld;
     tracePoseText3D = traceAnalysis_.poseText;
-    traceAnalysisKey_ = std::move(analysisKey);
 }
 
 void Gui::DrawTraceScene() {
@@ -1920,7 +1877,6 @@ void Gui::ClearTrace3D() {
     traceGroundTruthEstimateWorld3D.clear();
     tracePoseText3D = "Trace pose: unavailable";
     traceAnalysis_ = Trace3DAnalysis{};
-    traceAnalysisKey_.clear();
 }
 
 

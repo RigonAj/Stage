@@ -103,7 +103,6 @@ private:
     Color traceSourceColor_{MAROON};
     TraceRibbonFit traceFit_;
     Trace3DAnalysis traceAnalysis_;
-    std::string traceAnalysisKey_;
     std::chrono::steady_clock::time_point last_reader_file_scan_{};
     bool traceMotionWindowValid = false;
     bool traceMotionParabolaValid = false;
@@ -271,7 +270,7 @@ public:
         trace_border_percent = 3.5f;
         trace_use_raw_input = false;
         trace_radius_gate_enabled = false;
-        trace_width_smoothing_enabled = true;
+        trace_width_smoothing_enabled = false;
         weighted_regression_enabled = false;
         trace_polarity_mode = 2;
         temporal_slices = 5.0f;
@@ -741,7 +740,7 @@ private:
     float trace_border_percent = 3.5f;
     bool trace_use_raw_input = false;
     bool trace_radius_gate_enabled = false;
-    bool trace_width_smoothing_enabled = true;
+    bool trace_width_smoothing_enabled = false;
     bool weighted_regression_enabled = false;
     int trace_polarity_mode = 2;
     float temporal_slices = 5.0f;
