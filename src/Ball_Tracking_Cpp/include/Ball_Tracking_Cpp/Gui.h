@@ -36,6 +36,15 @@ struct CoefParabolique { float a = 0.0f; float b = 0.0f; float c = 0.0f; };
 struct LineFit3D { float a = 0.0f; float b = 0.0f; };
 struct QuadFit3D { float a = 0.0f; float b = 0.0f; float c = 0.0f; };
 
+struct TraceCurveSample {
+    LineFit3D x{};
+    LineFit3D y{};
+    QuadFit3D z{};
+    float tMin = 0.0f;
+    float tMax = 0.0f;
+    double wallSeconds = 0.0;
+};
+
 struct TrajectoryQualityPoint {
     float trainRatio = 0.0f;
     float rmseMeters = 0.0f;
@@ -103,6 +112,7 @@ private:
     Color traceSourceColor_{MAROON};
     TraceRibbonFit traceFit_;
     Trace3DAnalysis traceAnalysis_;
+    std::vector<TraceCurveSample> traceCurveHistory_;
     std::chrono::steady_clock::time_point last_reader_file_scan_{};
     bool traceMotionWindowValid = false;
     bool traceMotionParabolaValid = false;
@@ -137,6 +147,7 @@ private:
     void DrawTrajectoryQualityPanel();
     void DrawTopResidualSpeedPanel(const LineFit3D &topFit);
     bool TraceMotionWindowContains(const cv::Point2f &point) const;
+    bool StabilizeTraceCurve(LineFit3D &fitX, LineFit3D &fitY, QuadFit3D &fitZ, float tMin, float tMax);
 
     std::unique_ptr<EventWriter> event_writer_;
     std::unique_ptr<EventReader> event_reader_;
@@ -271,6 +282,7 @@ public:
         trace_use_raw_input = false;
         trace_radius_gate_enabled = false;
         trace_edge_refine_enabled = false;
+        trace_curve_average_enabled = false;
         trace_width_smoothing_enabled = false;
         weighted_regression_enabled = false;
         trace_polarity_mode = 2;
@@ -480,6 +492,10 @@ public:
             DrawText("Edge refine", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
             GuiToggle({px, py, 100.0f, h}, trace_edge_refine_enabled ? "ON" : "OFF", &trace_edge_refine_enabled);
             px += 120.0f;
+
+            DrawText("Curve avg", static_cast<int>(px), static_cast<int>(py) - 14, 13, BLACK);
+            GuiToggle({px, py, 100.0f, h}, trace_curve_average_enabled ? "ON" : "OFF", &trace_curve_average_enabled);
+            px += 120.0f;
         }
         if (!traceView) {
             GuiToggle({px, py, 90.0f, h}, "Positif only", &positive_only);
@@ -685,6 +701,7 @@ public:
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
     bool TraceEdgeRefineEnabled() const { return trace_edge_refine_enabled; }
+    bool TraceCurveAverageEnabled() const { return trace_curve_average_enabled; }
     bool TraceWidthSmoothingEnabled() const { return trace_width_smoothing_enabled; }
     bool CircleFittingEnabled() const { return circle_fitting_enabled; }
     bool WeightedRegressionEnabled() const { return weighted_regression_enabled; }
@@ -747,6 +764,7 @@ private:
     bool trace_use_raw_input = false;
     bool trace_radius_gate_enabled = false;
     bool trace_edge_refine_enabled = false;
+    bool trace_curve_average_enabled = false;
     bool trace_width_smoothing_enabled = false;
     bool weighted_regression_enabled = false;
     int trace_polarity_mode = 2;

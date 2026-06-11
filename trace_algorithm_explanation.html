@@ -1609,6 +1609,11 @@ fit_final = régression pondérée</code></pre>
               <td colspan="2"><code>Negative</code> est le meilleur réglage actuel sur <code>events_filtered.h5</code>. <code>All</code> sert au diagnostic si une séquence change de convention.</td>
             </tr>
             <tr>
+              <td><code>Curve avg</code></td>
+              <td>Stabilisation temporelle de la courbe bleue entre frames.</td>
+              <td colspan="2"><code>ON</code> : la courbe affichée est la moyenne des fits récents (~0.8 s), pondérée par récence (<code>exp(-3·age)</code>) et par robustesse (les fits loin de la courbe consensus comptent moins). <code>OFF</code> (défaut) : le fit instantané de chaque frame, plus réactif mais plus nerveux.</td>
+            </tr>
+            <tr>
               <td><code>Weighted reg</code></td>
               <td>Active la régression pondérée par récence et par distance à la courbe.</td>
               <td>Trajectoire plus réactive, moins influencée par les poses anciennes ou aberrantes.</td>
@@ -1638,6 +1643,7 @@ Border % = 3.50
 Fit input = Undist
 Radius gate = OFF
 Edge refine = OFF
+Curve avg = OFF
 Line order = Quad
 Width fit = Raw
 Polarity = Negative</code></pre>

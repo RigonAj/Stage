@@ -1157,6 +1157,144 @@ void Gui::DrawTraceScene() {
     DrawText("bottom edge", static_cast<int>(bottomLabel.x + 8.0f), static_cast<int>(bottomLabel.y + 4.0f), 16, MAGENTA);
 }
 
+// Temporal stabilization of the blue trace trajectory: averages the curve
+// coefficients over the recently computed fits, weighting recent fits more
+// (exponential recency) and fits far from the consensus curve less (robust
+// 1/(1+(d/scale)^2) on the curve-space distance). O(history) per frame with
+// a small bounded history.
+bool Gui::StabilizeTraceCurve(LineFit3D &fitX, LineFit3D &fitY, QuadFit3D &fitZ, float tMin, float tMax) {
+    constexpr double kMemorySeconds = 0.8;
+    constexpr std::size_t kMaxSamples = 48;
+    constexpr int kEvalPoints = 5;
+
+    const double now = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    // A jump of the trace time range means the reader was scrubbed or the
+    // sequence restarted: the history belongs to another playback position.
+    if (!traceCurveHistory_.empty()) {
+        const TraceCurveSample &last = traceCurveHistory_.back();
+        if (tMax < last.tMax - 0.05f || tMax > last.tMax + 0.35f) {
+            traceCurveHistory_.clear();
+        }
+    }
+
+    traceCurveHistory_.push_back({fitX, fitY, fitZ, tMin, tMax, now});
+
+    std::size_t firstFresh = 0;
+    while (firstFresh < traceCurveHistory_.size()
+        && (traceCurveHistory_.size() - firstFresh > kMaxSamples
+            || now - traceCurveHistory_[firstFresh].wallSeconds > kMemorySeconds)) {
+        ++firstFresh;
+    }
+    if (firstFresh > 0) {
+        traceCurveHistory_.erase(
+            traceCurveHistory_.begin(),
+            traceCurveHistory_.begin() + static_cast<std::ptrdiff_t>(firstFresh));
+    }
+
+    const std::size_t count = traceCurveHistory_.size();
+    if (count < 3) {
+        return false;
+    }
+
+    const auto evalSample = [](const TraceCurveSample &sample, float t, float out[3]) {
+        out[0] = sample.x.a * t + sample.x.b;
+        out[1] = sample.y.a * t + sample.y.b;
+        out[2] = sample.z.a * t * t + sample.z.b * t + sample.z.c;
+    };
+
+    std::vector<double> recencyWeights(count);
+    double consensusX[2] = {0.0, 0.0};
+    double consensusY[2] = {0.0, 0.0};
+    double consensusZ[3] = {0.0, 0.0, 0.0};
+    double recencySum = 0.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const TraceCurveSample &sample = traceCurveHistory_[i];
+        const double age = std::clamp((now - sample.wallSeconds) / kMemorySeconds, 0.0, 1.0);
+        const double weight = std::exp(-3.0 * age);
+        recencyWeights[i] = weight;
+        recencySum += weight;
+        consensusX[0] += weight * sample.x.a;
+        consensusX[1] += weight * sample.x.b;
+        consensusY[0] += weight * sample.y.a;
+        consensusY[1] += weight * sample.y.b;
+        consensusZ[0] += weight * sample.z.a;
+        consensusZ[1] += weight * sample.z.b;
+        consensusZ[2] += weight * sample.z.c;
+    }
+    if (recencySum <= 1.0e-9) {
+        return false;
+    }
+    for (double &value : consensusX) value /= recencySum;
+    for (double &value : consensusY) value /= recencySum;
+    for (double &value : consensusZ) value /= recencySum;
+
+    TraceCurveSample consensus{};
+    consensus.x = {static_cast<float>(consensusX[0]), static_cast<float>(consensusX[1])};
+    consensus.y = {static_cast<float>(consensusY[0]), static_cast<float>(consensusY[1])};
+    consensus.z = {
+        static_cast<float>(consensusZ[0]),
+        static_cast<float>(consensusZ[1]),
+        static_cast<float>(consensusZ[2])
+    };
+
+    std::vector<float> distances(count, 0.0f);
+    for (std::size_t i = 0; i < count; ++i) {
+        float total = 0.0f;
+        for (int k = 0; k < kEvalPoints; ++k) {
+            const float t = tMin + (tMax - tMin) * static_cast<float>(k)
+                / static_cast<float>(kEvalPoints - 1);
+            float a[3];
+            float b[3];
+            evalSample(traceCurveHistory_[i], t, a);
+            evalSample(consensus, t, b);
+            const float dx = a[0] - b[0];
+            const float dy = a[1] - b[1];
+            const float dz = a[2] - b[2];
+            total += std::sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        distances[i] = total / static_cast<float>(kEvalPoints);
+    }
+
+    std::vector<float> sortedDistances = distances;
+    std::nth_element(
+        sortedDistances.begin(),
+        sortedDistances.begin() + static_cast<std::ptrdiff_t>(count / 2),
+        sortedDistances.end());
+    const float scale = std::max(1.0e-4f, sortedDistances[count / 2] * 1.4826f);
+
+    double finalX[2] = {0.0, 0.0};
+    double finalY[2] = {0.0, 0.0};
+    double finalZ[3] = {0.0, 0.0, 0.0};
+    double weightSum = 0.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const double ratio = static_cast<double>(distances[i]) / static_cast<double>(scale);
+        const double weight = recencyWeights[i] / (1.0 + ratio * ratio);
+        const TraceCurveSample &sample = traceCurveHistory_[i];
+        weightSum += weight;
+        finalX[0] += weight * sample.x.a;
+        finalX[1] += weight * sample.x.b;
+        finalY[0] += weight * sample.y.a;
+        finalY[1] += weight * sample.y.b;
+        finalZ[0] += weight * sample.z.a;
+        finalZ[1] += weight * sample.z.b;
+        finalZ[2] += weight * sample.z.c;
+    }
+    if (weightSum <= 1.0e-9) {
+        return false;
+    }
+
+    fitX = {static_cast<float>(finalX[0] / weightSum), static_cast<float>(finalX[1] / weightSum)};
+    fitY = {static_cast<float>(finalY[0] / weightSum), static_cast<float>(finalY[1] / weightSum)};
+    fitZ = {
+        static_cast<float>(finalZ[0] / weightSum),
+        static_cast<float>(finalZ[1] / weightSum),
+        static_cast<float>(finalZ[2] / weightSum)
+    };
+    return true;
+}
+
 void Gui::Draw3DScene() {
     static bool wasControlling = false;
     const bool controlCamera = IsMouseButtonDown(MOUSE_RIGHT_BUTTON);
@@ -1206,6 +1344,20 @@ void Gui::Draw3DScene() {
         }
 
         traceFitValid = traceFitTMax > traceFitTMin;
+
+        if (traceFitValid && ui.TraceCurveAverageEnabled()) {
+            LineFit3D stabilizedX{traceXFit.a, traceXFit.b};
+            LineFit3D stabilizedY{traceYFit.a, traceYFit.b};
+            QuadFit3D stabilizedZ{traceZFit.a, traceZFit.b, traceZFit.c};
+            if (StabilizeTraceCurve(stabilizedX, stabilizedY, stabilizedZ, traceFitTMin, traceFitTMax)) {
+                traceXFit = {stabilizedX.a, stabilizedX.b};
+                traceYFit = {stabilizedY.a, stabilizedY.b};
+                traceZFit = {stabilizedZ.a, stabilizedZ.b, stabilizedZ.c};
+            }
+        }
+        else if (!ui.TraceCurveAverageEnabled()) {
+            traceCurveHistory_.clear();
+        }
     }
 
     if (controlCamera) {
@@ -1878,6 +2030,7 @@ void Gui::ClearTrace3D() {
     traceGroundTruthEstimateWorld3D.clear();
     tracePoseText3D = "Trace pose: unavailable";
     traceAnalysis_ = Trace3DAnalysis{};
+    traceCurveHistory_.clear();
 }
 
 
