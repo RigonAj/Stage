@@ -11,7 +11,10 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -1093,6 +1096,322 @@ def event_coordinates(events: object) -> np.ndarray:
     return np.asarray(coords, dtype=np.int32)
 
 
+# ---------------------------------------------------------------------------
+# Hand-eye collection support (external phone mire + tf2)
+# Plan step 2 of docs/ur3e_camera_base_calibration.md (6-Dof-Ur3e repo):
+# the mire is the phone screen mounted on tool0, served by serve_phone_mire.py;
+# each capture pairs TF base->tool0 with solvePnP camera->mire in one JSON.
+# ---------------------------------------------------------------------------
+
+UR_JOINT_ORDER = [
+    "shoulder_pan_joint",
+    "shoulder_lift_joint",
+    "elbow_joint",
+    "wrist_1_joint",
+    "wrist_2_joint",
+    "wrist_3_joint",
+]
+
+
+def rotation_matrix_to_quat_xyzw(rotation: np.ndarray) -> List[float]:
+    trace = float(np.trace(rotation))
+    if trace > 0.0:
+        s = math.sqrt(trace + 1.0) * 2.0
+        quat = [
+            (rotation[2, 1] - rotation[1, 2]) / s,
+            (rotation[0, 2] - rotation[2, 0]) / s,
+            (rotation[1, 0] - rotation[0, 1]) / s,
+            0.25 * s,
+        ]
+    elif rotation[0, 0] > rotation[1, 1] and rotation[0, 0] > rotation[2, 2]:
+        s = math.sqrt(1.0 + rotation[0, 0] - rotation[1, 1] - rotation[2, 2]) * 2.0
+        quat = [
+            0.25 * s,
+            (rotation[0, 1] + rotation[1, 0]) / s,
+            (rotation[0, 2] + rotation[2, 0]) / s,
+            (rotation[2, 1] - rotation[1, 2]) / s,
+        ]
+    elif rotation[1, 1] > rotation[2, 2]:
+        s = math.sqrt(1.0 + rotation[1, 1] - rotation[0, 0] - rotation[2, 2]) * 2.0
+        quat = [
+            (rotation[0, 1] + rotation[1, 0]) / s,
+            0.25 * s,
+            (rotation[1, 2] + rotation[2, 1]) / s,
+            (rotation[0, 2] - rotation[2, 0]) / s,
+        ]
+    else:
+        s = math.sqrt(1.0 + rotation[2, 2] - rotation[0, 0] - rotation[1, 1]) * 2.0
+        quat = [
+            (rotation[0, 2] + rotation[2, 0]) / s,
+            (rotation[1, 2] + rotation[2, 1]) / s,
+            0.25 * s,
+            (rotation[1, 0] - rotation[0, 1]) / s,
+        ]
+    norm = math.sqrt(sum(v * v for v in quat))
+    return [v / norm for v in quat]
+
+
+def quat_angle_deg(quat_a: Sequence[float], quat_b: Sequence[float]) -> float:
+    dot = abs(sum(a * b for a, b in zip(quat_a, quat_b)))
+    return math.degrees(2.0 * math.acos(min(1.0, dot)))
+
+
+def compute_stationarity(
+    tf_start: Tuple[Sequence[float], Sequence[float]],
+    tf_end: Tuple[Sequence[float], Sequence[float]],
+) -> Dict[str, float]:
+    """TF drift between the start and end of the accumulation window."""
+    xyz_start, quat_start = tf_start
+    xyz_end, quat_end = tf_end
+    trans_delta_mm = 1000.0 * math.sqrt(
+        sum((a - b) ** 2 for a, b in zip(xyz_start, xyz_end))
+    )
+    return {
+        "trans_delta_mm": trans_delta_mm,
+        "rot_delta_deg": quat_angle_deg(quat_start, quat_end),
+    }
+
+
+def fetch_external_layout(
+    base_url: str, timeout_s: float = 3.0
+) -> Tuple[List[ScreenDot], Dict[str, object]]:
+    """Read the layout currently displayed by the phone from serve_phone_mire.py.
+
+    Refuses a layout flagged as not real-fullscreen: the px->mm mapping (and
+    the screen-center origin) would be wrong.
+    """
+    url = base_url.rstrip("/") + "/api/current_layout"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s) as response:
+            payload = json.load(response)
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"mire server unreachable at {url}: {exc}") from exc
+    if "error" in payload:
+        raise RuntimeError(f"mire server: {payload['error']} (ouvrir la page sur le telephone)")
+    screen = payload.get("screen", {})
+    if not screen.get("fullscreen_ok"):
+        raise RuntimeError(
+            "le telephone n'est pas en vrai plein ecran "
+            f"(viewport {screen.get('viewport_px')} vs panneau {screen.get('panel_px')})"
+        )
+    dots = [
+        ScreenDot(
+            row=int(dot["row"]),
+            col=int(dot["col"]),
+            anchor=bool(dot["anchor"]),
+            screen_x_px=float(dot["screen_px"]["x"]),
+            screen_y_px=float(dot["screen_px"]["y"]),
+            radius_px=float(dot["radius_px"]),
+            object_x_mm=float(dot["object_mm"]["x"]),
+            object_y_mm=float(dot["object_mm"]["y"]),
+            object_z_mm=float(dot["object_mm"].get("z", 0.0)),
+        )
+        for dot in payload.get("dots", [])
+    ]
+    if len(dots) != EXPECTED_DOTS:
+        raise RuntimeError(f"layout invalide: {len(dots)} points au lieu de {EXPECTED_DOTS}")
+    return dots, payload
+
+
+def solve_mire_pose_with_ambiguity(
+    matches: Sequence[Match],
+    camera_matrix: np.ndarray,
+    dist_coeffs: np.ndarray,
+) -> Dict[str, object]:
+    """solvePnPGeneric(IPPE) keeping the planar-ambiguity error ratio.
+
+    Returns rvec/tvec (mm), reprojection RMS, tilt and the ratio between the
+    two IPPE solutions (high ratio = unambiguous; ~1 with low tilt = reject).
+    """
+    object_points = np.array(
+        [[m.dot.object_x_mm, m.dot.object_y_mm, m.dot.object_z_mm] for m in matches],
+        dtype=np.float64,
+    )
+    image_points = np.array([[m.blob.x, m.blob.y] for m in matches], dtype=np.float64)
+
+    rvec: Optional[np.ndarray] = None
+    tvec: Optional[np.ndarray] = None
+    ambiguity_ratio: Optional[float] = None
+    try:
+        count, rvecs, tvecs, errors = cv.solvePnPGeneric(
+            object_points, image_points, camera_matrix, dist_coeffs,
+            flags=cv.SOLVEPNP_IPPE,
+        )
+    except cv.error:
+        count = 0
+    if count and len(rvecs) >= 1:
+        flat_errors = np.asarray(errors, dtype=np.float64).reshape(-1)
+        order = np.argsort(flat_errors)
+        rvec = np.asarray(rvecs[order[0]], dtype=np.float64).reshape(3, 1)
+        tvec = np.asarray(tvecs[order[0]], dtype=np.float64).reshape(3, 1)
+        if len(order) >= 2 and flat_errors[order[0]] > 1e-9:
+            ambiguity_ratio = float(flat_errors[order[1]] / flat_errors[order[0]])
+    else:
+        ok, rvec, tvec, reason = solve_pose_from_matches(matches, camera_matrix, dist_coeffs)
+        if not ok:
+            return {"valid": False, "reason": reason}
+
+    projected, _ = cv.projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs)
+    residuals = np.linalg.norm(projected.reshape(-1, 2) - image_points, axis=1)
+    result: Dict[str, object] = {
+        "valid": True,
+        "rvec": rvec,
+        "tvec": tvec,
+        "rms_px": float(np.sqrt(np.mean(residuals**2))),
+        "max_px": float(np.max(residuals)),
+        "ambiguity_ratio": ambiguity_ratio,
+    }
+    result.update(pose_summary(rvec, tvec))
+    return result
+
+
+def handeye_rejection_reason(
+    stationarity: Dict[str, float],
+    matched_dots: int,
+    min_matched: int,
+    ambiguity_ratio: Optional[float],
+    tilt_deg: float,
+    trans_limit_mm: float,
+    rot_limit_deg: float,
+    ambiguity_min_ratio: float,
+    ambiguity_min_tilt_deg: float,
+) -> Optional[str]:
+    """Auto-validation gates of plan section 7; None means the sample is kept."""
+    if matched_dots < min_matched:
+        return f"associations insuffisantes ({matched_dots}/{min_matched})"
+    if stationarity["trans_delta_mm"] > trans_limit_mm or stationarity["rot_delta_deg"] > rot_limit_deg:
+        return (
+            "robot non immobile pendant l'accumulation "
+            f"({stationarity['trans_delta_mm']:.3f} mm / {stationarity['rot_delta_deg']:.4f} deg)"
+        )
+    if (
+        ambiguity_ratio is not None
+        and ambiguity_ratio < ambiguity_min_ratio
+        and tilt_deg < ambiguity_min_tilt_deg
+    ):
+        return (
+            f"ambiguite planaire IPPE (ratio {ambiguity_ratio:.2f} "
+            f"avec tilt {tilt_deg:.1f} deg): incliner davantage l'ecran"
+        )
+    return None
+
+
+def build_handeye_sample(
+    index: int,
+    tf_start: Tuple[Sequence[float], Sequence[float]],
+    tf_end: Tuple[Sequence[float], Sequence[float]],
+    joint_positions_rad: Optional[Sequence[float]],
+    pnp: Dict[str, object],
+    matches: Sequence[Match],
+) -> Dict[str, object]:
+    """One entry of the multi-sample JSON (plan section 5 schema, meters)."""
+    xyz, quat = tf_start
+    rvec = np.asarray(pnp["rvec"], dtype=np.float64).reshape(3)
+    tvec_mm = np.asarray(pnp["tvec"], dtype=np.float64).reshape(3)
+    rotation, _ = cv.Rodrigues(np.asarray(pnp["rvec"], dtype=np.float64))
+    return {
+        "index": index,
+        "stamp": datetime.now().isoformat(timespec="milliseconds"),
+        "T_base_tool0": {
+            "xyz": [float(v) for v in xyz],
+            "quat_xyzw": [float(v) for v in quat],
+        },
+        "T_camera_mire": {
+            "xyz": [float(v) / 1000.0 for v in tvec_mm],
+            "quat_xyzw": rotation_matrix_to_quat_xyzw(rotation),
+            "rvec": [float(v) for v in rvec],
+            "tvec_mm": [float(v) for v in tvec_mm],
+        },
+        "joint_positions_rad": (
+            [float(v) for v in joint_positions_rad] if joint_positions_rad else None
+        ),
+        "stationarity": compute_stationarity(tf_start, tf_end),
+        "reproj_rms_px": float(pnp["rms_px"]),
+        "matched_dots": len(matches),
+        "tilt_deg": float(pnp["tilt_deg"]),
+        "ippe_ambiguity_ratio": (
+            float(pnp["ambiguity_ratio"]) if pnp.get("ambiguity_ratio") is not None else None
+        ),
+        "matches": [match.to_json() for match in matches],
+    }
+
+
+class TfPoseReader:
+    """Background rclpy node: TF base->tool0 lookups and /joint_states.
+
+    The web-UI stack already publishes TF; only a shared ROS_DOMAIN_ID is
+    needed (plan section 9: no custom service, no backend change).
+    """
+
+    def __init__(self, base_frame: str, tool_frame: str) -> None:
+        try:
+            import rclpy
+            from rclpy.executors import SingleThreadedExecutor
+            from sensor_msgs.msg import JointState
+            from tf2_ros import Buffer, TransformListener
+        except ImportError as exc:
+            raise RuntimeError(
+                "rclpy/tf2_ros indisponibles: sourcer ROS 2 avant de lancer "
+                "(source /opt/ros/humble/setup.bash)"
+            ) from exc
+        self._rclpy = rclpy
+        self.base_frame = base_frame
+        self.tool_frame = tool_frame
+        if not rclpy.ok():
+            rclpy.init()
+        self.node = rclpy.create_node("handeye_collector")
+        self.buffer = Buffer()
+        self.listener = TransformListener(self.buffer, self.node)
+        self._joint_lock = threading.Lock()
+        self._joint_names: List[str] = []
+        self._joint_positions: List[float] = []
+        self.node.create_subscription(JointState, "/joint_states", self._on_joint_state, 10)
+        self._executor = SingleThreadedExecutor()
+        self._executor.add_node(self.node)
+        self._thread = threading.Thread(
+            target=self._executor.spin, name="handeye-tf-spin", daemon=True
+        )
+        self._thread.start()
+
+    def _on_joint_state(self, msg) -> None:
+        with self._joint_lock:
+            self._joint_names = list(msg.name)
+            self._joint_positions = list(msg.position)
+
+    def joint_positions(self) -> Optional[List[float]]:
+        """Positions reordered into physical UR order (the driver's
+        /joint_states order is NOT canonical: shoulder_lift arrives first)."""
+        with self._joint_lock:
+            names = list(self._joint_names)
+            positions = list(self._joint_positions)
+        if not names:
+            return None
+        by_name = dict(zip(names, positions))
+        try:
+            return [float(by_name[name]) for name in UR_JOINT_ORDER]
+        except KeyError:
+            return [float(value) for value in positions]
+
+    def lookup_tool_pose(self) -> Tuple[List[float], List[float]]:
+        """Latest TF base->tool0 as (xyz meters, quat xyzw)."""
+        from rclpy.time import Time
+
+        transform = self.buffer.lookup_transform(self.base_frame, self.tool_frame, Time())
+        translation = transform.transform.translation
+        rotation = transform.transform.rotation
+        return (
+            [translation.x, translation.y, translation.z],
+            [rotation.x, rotation.y, rotation.z, rotation.w],
+        )
+
+    def close(self) -> None:
+        try:
+            self._executor.shutdown(timeout_sec=1.0)
+            self.node.destroy_node()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 class MireWindow(QtWidgets.QWidget):
     calibration_started = QtCore.pyqtSignal()
     calibration_done = QtCore.pyqtSignal()
@@ -1249,6 +1568,13 @@ class ControlWindow(QtWidgets.QWidget):
         self.square_phase: Optional[str] = None
         self.square_test_context: Optional[Dict[str, object]] = None
         self.square_validation_index = 0
+        self.external_dots: List[ScreenDot] = []
+        self.external_layout: Optional[Dict[str, object]] = None
+        self.tf_reader: Optional[TfPoseReader] = None
+        self.handeye_session: Optional[Dict[str, object]] = None
+        self.handeye_json_path: Optional[Path] = None
+        self.handeye_tf_start: Optional[Tuple[List[float], List[float]]] = None
+        self.handeye_capture_pending = False
 
         self.mire = MireWindow(args.blink_hz, args.gradient_softness)
         self.mire.calibration_started.connect(self.begin_accumulation)
@@ -1265,7 +1591,9 @@ class ControlWindow(QtWidgets.QWidget):
         self.poll_timer.timeout.connect(self.poll_camera)
         self.poll_timer.start(5)
 
-        if self.selected_monitor_index >= 0:
+        if self.args.external_mire:
+            QtCore.QTimer.singleShot(0, self.setup_external_mire)
+        elif self.selected_monitor_index >= 0:
             self.show_mire_on_selected_monitor()
         QtCore.QTimer.singleShot(0, self.ensure_camera)
 
@@ -1380,6 +1708,20 @@ class ControlWindow(QtWidgets.QWidget):
         root.addLayout(test_row)
         self.populate_calibration_files()
 
+        if self.args.external_mire:
+            handeye_row = QtWidgets.QHBoxLayout()
+            self.handeye_status_label = QtWidgets.QLabel("Hand-eye: initialisation...")
+            self.handeye_status_label.setMinimumHeight(28)
+            self.handeye_refresh_button = QtWidgets.QPushButton("Recharger mire/TF")
+            self.handeye_capture_button = QtWidgets.QPushButton("Capture hand-eye")
+            self.handeye_capture_button.setMinimumHeight(38)
+            self.handeye_undo_button = QtWidgets.QPushButton("Supprimer dernier")
+            handeye_row.addWidget(self.handeye_status_label, 1)
+            handeye_row.addWidget(self.handeye_refresh_button)
+            handeye_row.addWidget(self.handeye_capture_button)
+            handeye_row.addWidget(self.handeye_undo_button)
+            root.addLayout(handeye_row)
+
         self.preview_label = QtWidgets.QLabel()
         self.preview_label.setMinimumSize(720, 480)
         self.preview_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1406,6 +1748,10 @@ class ControlWindow(QtWidgets.QWidget):
         self.test_button.clicked.connect(self.start_test)
         self.square_test_button.clicked.connect(self.start_square_test)
         self.refresh_calib_button.clicked.connect(self.populate_calibration_files)
+        if self.args.external_mire:
+            self.handeye_refresh_button.clicked.connect(self.setup_external_mire)
+            self.handeye_capture_button.clicked.connect(self.start_handeye_capture)
+            self.handeye_undo_button.clicked.connect(self.undo_last_handeye_sample)
 
     def selected_monitor(self) -> Optional[MonitorInfo]:
         if not (0 <= self.selected_monitor_index < len(self.base_monitors)):
@@ -1459,6 +1805,8 @@ class ControlWindow(QtWidgets.QWidget):
         self.calib_button.setEnabled(enabled)
         self.test_button.setEnabled(enabled)
         self.square_test_button.setEnabled(enabled)
+        if hasattr(self, "handeye_capture_button"):
+            self.handeye_capture_button.setEnabled(enabled)
 
     def set_camera_status(self, message: str, state: str) -> None:
         if state == "ok":
@@ -2255,6 +2603,230 @@ class ControlWindow(QtWidgets.QWidget):
         self.last_export_paths = [json_path, png_path]
         self.append_status(f"Rapport de test: {json_path}")
 
+    # ------------------------------------------------------------------
+    # Hand-eye collection (--external-mire)
+    # ------------------------------------------------------------------
+
+    def setup_external_mire(self) -> None:
+        try:
+            self.external_dots, self.external_layout = fetch_external_layout(
+                self.args.external_mire
+            )
+            spacing = float(self.external_layout["layout"]["spacing_x_mm"])
+            self.append_status(
+                f"Mire externe chargee: {len(self.external_dots)} points, "
+                f"espacement {spacing:.2f} mm."
+            )
+        except RuntimeError as exc:
+            self.external_dots = []
+            self.external_layout = None
+            self.append_status(f"Mire externe indisponible: {exc}")
+        if self.tf_reader is None:
+            try:
+                self.tf_reader = TfPoseReader(
+                    self.args.robot_base_frame, self.args.robot_tool_frame
+                )
+                self.append_status(
+                    f"Listener tf2 actif ({self.args.robot_base_frame} -> "
+                    f"{self.args.robot_tool_frame})."
+                )
+            except RuntimeError as exc:
+                self.append_status(str(exc))
+        self.update_handeye_status()
+
+    def update_handeye_status(self) -> None:
+        if not hasattr(self, "handeye_status_label"):
+            return
+        mire_text = (
+            f"mire {len(self.external_dots)} pts" if self.external_dots else "mire ABSENTE"
+        )
+        tf_ok = False
+        if self.tf_reader is not None:
+            try:
+                self.tf_reader.lookup_tool_pose()
+                tf_ok = True
+            except Exception:  # noqa: BLE001
+                tf_ok = False
+        count = len(self.handeye_session["samples"]) if self.handeye_session else 0
+        path_text = f" | {self.handeye_json_path.name}" if self.handeye_json_path else ""
+        self.handeye_status_label.setText(
+            f"Hand-eye: {mire_text} | TF {'ok' if tf_ok else 'ABSENT'} | "
+            f"{count} echantillons{path_text}"
+        )
+
+    def ensure_handeye_session(self, intrinsics_path: Path) -> None:
+        if self.handeye_session is not None:
+            return
+        output_dir = Path(self.args.output_dir) / "handeye"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.handeye_json_path = output_dir / f"handeye_samples_{stamp}.json"
+        self.handeye_session = {
+            "created_at": datetime.now().isoformat(timespec="milliseconds"),
+            "units": "meters",
+            "frames": {
+                "robot_parent": self.args.robot_base_frame,
+                "robot_child": self.args.robot_tool_frame,
+                "camera": self.args.camera_frame,
+                "mire": self.args.mire_frame,
+            },
+            "intrinsics_xml": str(intrinsics_path),
+            "mire_source": {
+                "url": self.args.external_mire,
+                "screen": self.external_layout.get("screen") if self.external_layout else None,
+                "layout": self.external_layout.get("layout") if self.external_layout else None,
+            },
+            "samples": [],
+        }
+
+    def save_handeye_session(self) -> None:
+        if self.handeye_session is None or self.handeye_json_path is None:
+            return
+        with self.handeye_json_path.open("w", encoding="utf-8") as handle:
+            json.dump(self.handeye_session, handle, indent=2)
+
+    def start_handeye_capture(self) -> None:
+        if self.accumulating or self.handeye_capture_pending:
+            return
+        if not self.ensure_camera():
+            return
+        if not self.external_dots or self.tf_reader is None:
+            self.setup_external_mire()
+        if not self.external_dots:
+            self.append_status("Capture annulee: mire externe indisponible.")
+            return
+        if self.tf_reader is None:
+            return
+        selected = self.selected_calibration_path()
+        if selected is None:
+            self.append_status(
+                "Capture annulee: aucune calibration XML (intrinseques requis pour solvePnP)."
+            )
+            return
+        try:
+            self.handeye_tf_start = self.tf_reader.lookup_tool_pose()
+        except Exception as exc:  # noqa: BLE001
+            self.append_status(f"Capture annulee: TF indisponible ({exc}).")
+            self.update_handeye_status()
+            return
+
+        self.activity = np.zeros((self.camera.height, self.camera.width), dtype=np.float32)
+        self.event_count = 0
+        self.last_blobs = []
+        self.last_matches = []
+        self.preview_blobs = []
+        self.last_preview_blob_update = 0.0
+        self.current_capture_duration_ms = int(self.args.accum_ms)
+        self.accumulating = True
+        self.accum_started_at = time.time()
+        self.handeye_capture_pending = True
+        self.set_capture_buttons_enabled(False)
+        self.append_status(
+            f"Capture hand-eye: accumulation {self.current_capture_duration_ms} ms "
+            "(mire telephone en clignotement libre, robot immobile)."
+        )
+        QtCore.QTimer.singleShot(self.current_capture_duration_ms, self.finish_handeye_capture)
+
+    def finish_handeye_capture(self) -> None:
+        if not self.handeye_capture_pending:
+            return
+        self.handeye_capture_pending = False
+        self.accumulating = False
+        self.set_capture_buttons_enabled(True)
+        elapsed_ms = (time.time() - self.accum_started_at) * 1000.0
+
+        try:
+            tf_end = self.tf_reader.lookup_tool_pose()
+        except Exception as exc:  # noqa: BLE001
+            self.append_status(f"Echantillon rejete: TF de fin indisponible ({exc}).")
+            return
+        if self.activity is None or self.handeye_tf_start is None:
+            self.append_status("Echantillon rejete: accumulation manquante.")
+            return
+
+        self.last_blobs = detect_blobs(self.activity, EXPECTED_DOTS)
+        self.last_matches, reason = associate_blobs_to_layout(self.last_blobs, self.external_dots)
+        overlay = make_overlay(self.activity, self.last_blobs, self.last_matches)
+        self.preview_label.setPixmap(pixmap_from_bgr(overlay, self.preview_label.size()))
+        self.append_status(
+            f"Detection: {len(self.last_blobs)} blobs, "
+            f"{len(self.last_matches)}/{EXPECTED_DOTS} associations, "
+            f"{self.event_count} events, {elapsed_ms:.0f} ms. {reason}"
+        )
+
+        selected = self.selected_calibration_path()
+        try:
+            camera_matrix, dist_coeffs, _ = load_calibration_xml(selected)
+        except (RuntimeError, cv.error) as exc:
+            self.append_status(f"Echantillon rejete: intrinseques illisibles ({exc}).")
+            return
+
+        pnp: Dict[str, object] = {"valid": False, "reason": "associations insuffisantes"}
+        if len(self.last_matches) >= self.args.min_matched:
+            pnp = solve_mire_pose_with_ambiguity(self.last_matches, camera_matrix, dist_coeffs)
+        if not pnp.get("valid"):
+            self.append_status(f"Echantillon rejete: {pnp.get('reason')}.")
+            return
+
+        stationarity = compute_stationarity(self.handeye_tf_start, tf_end)
+        rejection = handeye_rejection_reason(
+            stationarity,
+            len(self.last_matches),
+            self.args.min_matched,
+            pnp.get("ambiguity_ratio"),
+            float(pnp["tilt_deg"]),
+            self.args.stationarity_trans_mm,
+            self.args.stationarity_rot_deg,
+            self.args.ambiguity_min_ratio,
+            self.args.ambiguity_min_tilt_deg,
+        )
+        if rejection is not None:
+            self.append_status(f"Echantillon rejete: {rejection}.")
+            banner = draw_preview_banner(overlay.copy(), f"REJET: {rejection}", (0, 180, 255))
+            self.preview_label.setPixmap(pixmap_from_bgr(banner, self.preview_label.size()))
+            return
+
+        self.ensure_handeye_session(selected)
+        sample = build_handeye_sample(
+            len(self.handeye_session["samples"]),
+            self.handeye_tf_start,
+            tf_end,
+            self.tf_reader.joint_positions(),
+            pnp,
+            self.last_matches,
+        )
+        self.handeye_session["samples"].append(sample)
+        self.save_handeye_session()
+
+        ambiguity = sample["ippe_ambiguity_ratio"]
+        ambiguity_text = f", ambiguite {ambiguity:.1f}" if ambiguity is not None else ""
+        self.append_status(
+            f"Echantillon {sample['index']} enregistre: rms {sample['reproj_rms_px']:.2f} px, "
+            f"tilt {sample['tilt_deg']:.1f} deg{ambiguity_text}"
+        )
+        self.append_status(
+            f"  stationnarite {sample['stationarity']['trans_delta_mm']:.3f} mm / "
+            f"{sample['stationarity']['rot_delta_deg']:.4f} deg | "
+            f"distance {float(pnp['distance_norm_mm']):.0f} mm | {self.handeye_json_path}"
+        )
+        banner = draw_preview_banner(
+            overlay.copy(),
+            f"HANDEYE #{sample['index']} rms {sample['reproj_rms_px']:.2f}px "
+            f"tilt {sample['tilt_deg']:.0f}deg",
+            (0, 255, 0),
+        )
+        self.preview_label.setPixmap(pixmap_from_bgr(banner, self.preview_label.size()))
+        self.update_handeye_status()
+
+    def undo_last_handeye_sample(self) -> None:
+        if not self.handeye_session or not self.handeye_session["samples"]:
+            self.append_status("Aucun echantillon hand-eye a supprimer.")
+            return
+        removed = self.handeye_session["samples"].pop()
+        self.save_handeye_session()
+        self.append_status(f"Echantillon {removed['index']} supprime.")
+        self.update_handeye_status()
+
     def erase_current(self) -> None:
         self.accumulating = False
         self.set_capture_buttons_enabled(True)
@@ -2296,6 +2868,8 @@ class ControlWindow(QtWidgets.QWidget):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
         if self.camera is not None:
             self.camera.close()
+        if self.tf_reader is not None:
+            self.tf_reader.close()
         self.mire.close()
         super().closeEvent(event)
 
@@ -2396,6 +2970,83 @@ def run_self_test() -> int:
         if float(square_result["rms_px"]) > 1.5:
             print("square validation error too high")
             return 1
+
+    # Hand-eye collection units (plan step 2).
+    pnp = solve_mire_pose_with_ambiguity(matches, camera_matrix, dist_coeffs)
+    print(
+        f"handeye pnp valid: {pnp.get('valid')} rms={pnp.get('rms_px')} "
+        f"ambiguity={pnp.get('ambiguity_ratio')}"
+    )
+    if not pnp.get("valid") or float(pnp["rms_px"]) > 1.5:
+        print("handeye solvePnP failed")
+        return 1
+    true_distance = float(np.linalg.norm(tvec))
+    est_distance = float(pnp["distance_norm_mm"])
+    if abs(est_distance - true_distance) > 0.02 * true_distance:
+        print(f"handeye distance off: {est_distance} vs {true_distance}")
+        return 1
+
+    rotation, _ = cv.Rodrigues(rvec)
+    quat = rotation_matrix_to_quat_xyzw(rotation)
+    rotation_back = np.zeros((3, 3))
+    x, y, z, w = quat
+    rotation_back = np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ]
+    )
+    if float(np.max(np.abs(rotation_back - rotation))) > 1e-9:
+        print("quaternion round-trip failed")
+        return 1
+
+    tf_start = ([0.30, -0.10, 0.40], [0.0, 0.0, 0.0, 1.0])
+    moved_quat = [0.0, 0.0, math.sin(math.radians(0.05) / 2.0), math.cos(math.radians(0.05) / 2.0)]
+    tf_end = ([0.30, -0.10 + 0.0002, 0.40], moved_quat)
+    stationarity = compute_stationarity(tf_start, tf_end)
+    print(
+        f"handeye stationarity: {stationarity['trans_delta_mm']:.3f} mm "
+        f"{stationarity['rot_delta_deg']:.4f} deg"
+    )
+    if abs(stationarity["trans_delta_mm"] - 0.2) > 1e-6 or abs(stationarity["rot_delta_deg"] - 0.05) > 1e-6:
+        print("stationarity computation failed")
+        return 1
+
+    still = {"trans_delta_mm": 0.02, "rot_delta_deg": 0.005}
+    cases = [
+        (handeye_rejection_reason(still, 19, 19, 5.0, 30.0, 0.1, 0.02, 1.5, 15.0), None),
+        (handeye_rejection_reason(stationarity, 19, 19, 5.0, 30.0, 0.1, 0.02, 1.5, 15.0), "moving"),
+        (handeye_rejection_reason(still, 17, 19, 5.0, 30.0, 0.1, 0.02, 1.5, 15.0), "matches"),
+        (handeye_rejection_reason(still, 19, 19, 1.1, 5.0, 0.1, 0.02, 1.5, 15.0), "ambiguity"),
+        (handeye_rejection_reason(still, 19, 19, 1.1, 30.0, 0.1, 0.02, 1.5, 15.0), None),
+    ]
+    for idx, (reason_text, expectation) in enumerate(cases):
+        ok = (reason_text is None) if expectation is None else (reason_text is not None)
+        if not ok:
+            print(f"handeye rejection case {idx} failed: {reason_text!r}")
+            return 1
+    print("handeye rejection gates ok")
+
+    sample = build_handeye_sample(0, tf_start, tf_end, [0.1] * 6, pnp, matches)
+    required_keys = {
+        "index", "stamp", "T_base_tool0", "T_camera_mire", "joint_positions_rad",
+        "stationarity", "reproj_rms_px", "matched_dots", "tilt_deg",
+        "ippe_ambiguity_ratio", "matches",
+    }
+    if not required_keys.issubset(sample.keys()):
+        print(f"sample schema missing keys: {required_keys - set(sample.keys())}")
+        return 1
+    xyz_m = sample["T_camera_mire"]["xyz"]
+    tvec_mm = sample["T_camera_mire"]["tvec_mm"]
+    if any(abs(m * 1000.0 - mm) > 1e-9 for m, mm in zip(xyz_m, tvec_mm)):
+        print("sample mm->m conversion failed")
+        return 1
+    if sample["matched_dots"] != EXPECTED_DOTS or len(sample["matches"]) != EXPECTED_DOTS:
+        print("sample matches incomplete")
+        return 1
+    print("handeye sample schema ok")
+
     print("self-test ok")
     return 0
 
@@ -2426,6 +3077,41 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Minimum associated centers required before export.",
     )
     parser.add_argument("--self-test", action="store_true", help="Run synthetic blob/layout tests and exit.")
+    parser.add_argument(
+        "--external-mire",
+        metavar="URL",
+        help="Phone mire server URL (serve_phone_mire.py, e.g. http://127.0.0.1:8081). "
+        "Enables hand-eye collection: no local mire window, layout fetched from "
+        "the server, TF base->tool0 read at each capture.",
+    )
+    parser.add_argument("--robot-base-frame", default="base", help="TF parent frame (UR convention).")
+    parser.add_argument("--robot-tool-frame", default="tool0", help="TF child frame (flange).")
+    parser.add_argument("--camera-frame", default="camera_optical", help="Camera frame name in exports.")
+    parser.add_argument("--mire-frame", default="screen_center", help="Mire frame name in exports.")
+    parser.add_argument(
+        "--stationarity-trans-mm",
+        type=float,
+        default=0.1,
+        help="Max TF translation drift during accumulation before rejecting a sample.",
+    )
+    parser.add_argument(
+        "--stationarity-rot-deg",
+        type=float,
+        default=0.02,
+        help="Max TF rotation drift during accumulation before rejecting a sample.",
+    )
+    parser.add_argument(
+        "--ambiguity-min-ratio",
+        type=float,
+        default=1.5,
+        help="Reject a sample when the IPPE ambiguity ratio is below this with low tilt.",
+    )
+    parser.add_argument(
+        "--ambiguity-min-tilt-deg",
+        type=float,
+        default=15.0,
+        help="Tilt below which a low IPPE ambiguity ratio rejects the sample.",
+    )
     return parser.parse_args(argv)
 
 
