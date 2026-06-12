@@ -22,7 +22,10 @@
 #       --output-yaml recordings/mire_calibration/handeye/handeye_result.yaml
 
 set -euo pipefail
-cd "$(dirname "$0")"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "$REPO_ROOT"
 
 MIRE_PORT="${MIRE_PORT:-8081}"
 
@@ -35,7 +38,7 @@ if ! command -v ros2 >/dev/null 2>&1; then
     fi
 fi
 
-python3 serve_phone_mire.py --host 0.0.0.0 --port "$MIRE_PORT" &
+python3 scripts/serve_phone_mire.py --host 0.0.0.0 --port "$MIRE_PORT" &
 MIRE_PID=$!
 trap 'kill "$MIRE_PID" 2>/dev/null || true' EXIT
 
@@ -48,4 +51,4 @@ done
 echo "==============================================================="
 echo
 
-python3 event_mire_calibration.py --external-mire "http://127.0.0.1:${MIRE_PORT}" "$@"
+python3 scripts/event_mire_calibration.py --external-mire "http://127.0.0.1:${MIRE_PORT}" "$@"
