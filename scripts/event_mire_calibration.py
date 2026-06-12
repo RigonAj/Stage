@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import os
@@ -26,6 +27,13 @@ COLS = 5
 MISSING_DOT = (1, 2)
 ANCHOR_DOT = (0, 0)
 EXPECTED_DOTS = ROWS * COLS - 1
+SQUARE_EXPECTED_DOTS = 4
+SQUARE_SEQUENCE = [
+    {"id": "center_large", "label": "centre grand", "offset_x": 0.0, "offset_y": 0.0, "side_scale": 2.0},
+    {"id": "upper_left_medium", "label": "haut gauche moyen", "offset_x": -0.65, "offset_y": -0.45, "side_scale": 1.35},
+    {"id": "upper_right_small", "label": "haut droite petit", "offset_x": 0.75, "offset_y": -0.25, "side_scale": 1.10},
+    {"id": "lower_center_medium", "label": "bas centre moyen", "offset_x": 0.20, "offset_y": 0.65, "side_scale": 1.55},
+]
 
 
 @dataclass
@@ -92,9 +100,12 @@ class ScreenDot:
     object_x_mm: float
     object_y_mm: float
     object_z_mm: float = 0.0
+    label: Optional[str] = None
 
     @property
     def dot_id(self) -> str:
+        if self.label is not None:
+            return self.label
         return f"r{self.row}_c{self.col}"
 
     def to_json(self) -> Dict[str, object]:
@@ -325,6 +336,68 @@ def build_mire_layout(
         "center_y_px": center_y,
         "small_radius_px": small_radius,
         "anchor_radius_px": anchor_radius,
+    }
+    return dots, meta
+
+
+def build_square_layout(
+    width_px: int,
+    height_px: int,
+    mm_per_px_x: float,
+    mm_per_px_y: float,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
+    side_scale: float = 2.0,
+    variant_id: str = "center_large",
+    variant_label: str = "centre grand",
+) -> Tuple[List[ScreenDot], Dict[str, float]]:
+    _, mire_meta = build_mire_layout(width_px, height_px, mm_per_px_x, mm_per_px_y)
+    screen_center_x = width_px * 0.5
+    screen_center_y = height_px * 0.5
+    center_dx_px = offset_x * mire_meta["spacing_px"]
+    center_dy_px = offset_y * mire_meta["spacing_px"]
+    center_x = screen_center_x + center_dx_px
+    center_y = screen_center_y + center_dy_px
+    side_px = side_scale * mire_meta["spacing_px"]
+    half_side_px = side_px * 0.5
+    radius_px = mire_meta["small_radius_px"]
+    corners = [
+        ("tl", 0, 0, -half_side_px, -half_side_px),
+        ("tr", 0, 1, half_side_px, -half_side_px),
+        ("bl", 1, 0, -half_side_px, half_side_px),
+        ("br", 1, 1, half_side_px, half_side_px),
+    ]
+
+    dots = [
+        ScreenDot(
+            row=row,
+            col=col,
+            anchor=False,
+            screen_x_px=center_x + dx,
+            screen_y_px=center_y + dy,
+            radius_px=radius_px,
+            object_x_mm=(center_dx_px + dx) * mm_per_px_x,
+            object_y_mm=(center_dy_px + dy) * mm_per_px_y,
+            label=label,
+        )
+        for label, row, col, dx, dy in corners
+    ]
+    meta = {
+        "pattern": "square4",
+        "variant_id": variant_id,
+        "variant_label": variant_label,
+        "offset_x_spacing": offset_x,
+        "offset_y_spacing": offset_y,
+        "side_scale_spacing": side_scale,
+        "side_px": side_px,
+        "side_x_mm": side_px * mm_per_px_x,
+        "side_y_mm": side_px * mm_per_px_y,
+        "center_x_px": center_x,
+        "center_y_px": center_y,
+        "object_center_x_mm": center_dx_px * mm_per_px_x,
+        "object_center_y_mm": center_dy_px * mm_per_px_y,
+        "radius_px": radius_px,
+        "base_mire_spacing_px": mire_meta["spacing_px"],
     }
     return dots, meta
 
@@ -561,6 +634,113 @@ def _adjacent_grid_pairs(matches: Sequence[Match]) -> List[Tuple[int, int]]:
     return pairs
 
 
+def _square_edge_pairs(matches: Sequence[Match]) -> List[Tuple[int, int]]:
+    by_id = {m.dot.dot_id: idx for idx, m in enumerate(matches)}
+    pairs: List[Tuple[int, int]] = []
+    for a, b in (("tl", "tr"), ("tl", "bl"), ("tr", "br"), ("bl", "br")):
+        if a in by_id and b in by_id:
+            pairs.append((by_id[a], by_id[b]))
+    return pairs
+
+
+def solve_pose_from_matches(
+    matches: Sequence[Match],
+    camera_matrix: np.ndarray,
+    dist_coeffs: np.ndarray,
+    min_points: int = 6,
+) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray], str]:
+    if len(matches) < min_points:
+        return False, None, None, f"only {len(matches)} matched points"
+    object_points = np.array(
+        [[m.dot.object_x_mm, m.dot.object_y_mm, m.dot.object_z_mm] for m in matches],
+        dtype=np.float64,
+    )
+    image_points = np.array([[m.blob.x, m.blob.y] for m in matches], dtype=np.float64)
+    ok, rvec, tvec = cv.solvePnP(
+        object_points, image_points, camera_matrix, dist_coeffs, flags=cv.SOLVEPNP_IPPE
+    )
+    if not ok:
+        ok, rvec, tvec = cv.solvePnP(
+            object_points, image_points, camera_matrix, dist_coeffs,
+            flags=cv.SOLVEPNP_ITERATIVE,
+        )
+    if not ok:
+        return False, None, None, "solvePnP failed"
+    return True, rvec, tvec, "ok"
+
+
+def plane_spacing_metrics(
+    matches: Sequence[Match],
+    camera_matrix: np.ndarray,
+    dist_coeffs: np.ndarray,
+    rvec: np.ndarray,
+    tvec: np.ndarray,
+    pairs: Sequence[Tuple[int, int]],
+) -> Dict[str, object]:
+    if not pairs:
+        return {
+            "spacing_pairs": 0,
+            "spacing_true_mean_mm": None,
+            "spacing_measured_mean_mm": None,
+            "spacing_mean_abs_error_mm": None,
+            "spacing_max_abs_error_mm": None,
+        }
+
+    image_points = np.array([[m.blob.x, m.blob.y] for m in matches], dtype=np.float64)
+    object_points = np.array(
+        [[m.dot.object_x_mm, m.dot.object_y_mm, m.dot.object_z_mm] for m in matches],
+        dtype=np.float64,
+    )
+    rotation, _ = cv.Rodrigues(rvec)
+    plane_normal = rotation[:, 2]
+    translation = tvec.reshape(3)
+    undistorted = cv.undistortPoints(
+        image_points.reshape(-1, 1, 2), camera_matrix, dist_coeffs
+    ).reshape(-1, 2)
+    rays = np.column_stack([undistorted, np.ones(len(undistorted))])
+    denominators = rays @ plane_normal
+    measured_mm: List[float] = []
+    true_mm: List[float] = []
+    if np.all(np.abs(denominators) > 1e-9):
+        scales = (plane_normal @ translation) / denominators
+        points_3d = rays * scales[:, None]
+        for idx_a, idx_b in pairs:
+            measured = float(np.linalg.norm(points_3d[idx_a] - points_3d[idx_b]))
+            true = float(np.linalg.norm(object_points[idx_a] - object_points[idx_b]))
+            measured_mm.append(measured)
+            true_mm.append(true)
+
+    spacing_errors = [m - t for m, t in zip(measured_mm, true_mm)]
+    metrics: Dict[str, object] = {
+        "spacing_pairs": len(spacing_errors),
+        "spacing_true_mean_mm": float(np.mean(true_mm)) if true_mm else None,
+        "spacing_measured_mean_mm": float(np.mean(measured_mm)) if measured_mm else None,
+        "spacing_mean_abs_error_mm": float(np.mean(np.abs(spacing_errors))) if spacing_errors else None,
+        "spacing_max_abs_error_mm": float(np.max(np.abs(spacing_errors))) if spacing_errors else None,
+    }
+    if spacing_errors and metrics["spacing_true_mean_mm"]:
+        metrics["spacing_mean_error_percent"] = float(
+            100.0 * np.mean(spacing_errors) / float(metrics["spacing_true_mean_mm"])
+        )
+    return metrics
+
+
+def pose_summary(rvec: np.ndarray, tvec: np.ndarray) -> Dict[str, object]:
+    rotation, _ = cv.Rodrigues(rvec)
+    plane_normal = rotation[:, 2]
+    translation = tvec.reshape(3)
+    tilt_deg = math.degrees(
+        math.acos(min(1.0, abs(float(plane_normal[2])) / max(1e-9, np.linalg.norm(plane_normal))))
+    )
+    return {
+        "rvec": rvec.reshape(3).tolist(),
+        "tvec": translation.tolist(),
+        "distance_z_mm": float(translation[2]),
+        "distance_norm_mm": float(np.linalg.norm(translation)),
+        "tilt_deg": float(tilt_deg),
+    }
+
+
 def evaluate_calibration_on_matches(
     matches: Sequence[Match],
     camera_matrix: np.ndarray,
@@ -573,23 +753,14 @@ def evaluate_calibration_on_matches(
     intersecting the back-projected rays with the estimated screen plane.
     """
     object_points = np.array(
-        [[m.dot.object_x_mm, m.dot.object_y_mm, 0.0] for m in matches],
+        [[m.dot.object_x_mm, m.dot.object_y_mm, m.dot.object_z_mm] for m in matches],
         dtype=np.float64,
     )
     image_points = np.array([[m.blob.x, m.blob.y] for m in matches], dtype=np.float64)
-    if len(matches) < 6:
-        return {"valid": False, "reason": f"only {len(matches)} matched points"}
-
-    ok, rvec, tvec = cv.solvePnP(
-        object_points, image_points, camera_matrix, dist_coeffs, flags=cv.SOLVEPNP_IPPE
-    )
+    ok, rvec, tvec, reason = solve_pose_from_matches(matches, camera_matrix, dist_coeffs)
     if not ok:
-        ok, rvec, tvec = cv.solvePnP(
-            object_points, image_points, camera_matrix, dist_coeffs,
-            flags=cv.SOLVEPNP_ITERATIVE,
-        )
-    if not ok:
-        return {"valid": False, "reason": "solvePnP failed"}
+        return {"valid": False, "reason": reason}
+    assert rvec is not None and tvec is not None
 
     projected, _ = cv.projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs)
     errors = np.linalg.norm(projected.reshape(-1, 2) - image_points, axis=1)
@@ -615,32 +786,10 @@ def evaluate_calibration_on_matches(
                 predicted.reshape(-1, 2) - image_points[interior], axis=1
             )
 
-    rotation, _ = cv.Rodrigues(rvec)
-    plane_normal = rotation[:, 2]
-    translation = tvec.reshape(3)
-    tilt_deg = math.degrees(
-        math.acos(min(1.0, abs(float(plane_normal[2])) / max(1e-9, np.linalg.norm(plane_normal))))
+    summary = pose_summary(rvec, tvec)
+    spacing = plane_spacing_metrics(
+        matches, camera_matrix, dist_coeffs, rvec, tvec, _adjacent_grid_pairs(matches)
     )
-
-    # Physical measurement: intersect each back-projected ray with the
-    # estimated screen plane, then compare neighbour spacings in mm.
-    undistorted = cv.undistortPoints(
-        image_points.reshape(-1, 1, 2), camera_matrix, dist_coeffs
-    ).reshape(-1, 2)
-    rays = np.column_stack([undistorted, np.ones(len(undistorted))])
-    denominators = rays @ plane_normal
-    spacing_measured_mm: List[float] = []
-    spacing_true_mm: List[float] = []
-    if np.all(np.abs(denominators) > 1e-9):
-        scales = (plane_normal @ translation) / denominators
-        points_3d = rays * scales[:, None]
-        for idx_a, idx_b in _adjacent_grid_pairs(matches):
-            measured = float(np.linalg.norm(points_3d[idx_a] - points_3d[idx_b]))
-            true = float(np.linalg.norm(object_points[idx_a] - object_points[idx_b]))
-            spacing_measured_mm.append(measured)
-            spacing_true_mm.append(true)
-
-    spacing_errors = [m - t for m, t in zip(spacing_measured_mm, spacing_true_mm)]
     result: Dict[str, object] = {
         "valid": True,
         "point_count": len(matches),
@@ -650,20 +799,90 @@ def evaluate_calibration_on_matches(
         "heldout_count": int(len(heldout_errors)) if heldout_errors is not None else 0,
         "heldout_mean_px": float(np.mean(heldout_errors)) if heldout_errors is not None else None,
         "heldout_max_px": float(np.max(heldout_errors)) if heldout_errors is not None else None,
-        "distance_z_mm": float(translation[2]),
-        "distance_norm_mm": float(np.linalg.norm(translation)),
-        "tilt_deg": float(tilt_deg),
-        "spacing_pairs": len(spacing_errors),
-        "spacing_true_mean_mm": float(np.mean(spacing_true_mm)) if spacing_true_mm else None,
-        "spacing_measured_mean_mm": float(np.mean(spacing_measured_mm)) if spacing_measured_mm else None,
-        "spacing_mean_abs_error_mm": float(np.mean(np.abs(spacing_errors))) if spacing_errors else None,
-        "spacing_max_abs_error_mm": float(np.max(np.abs(spacing_errors))) if spacing_errors else None,
     }
-    if spacing_errors and result["spacing_true_mean_mm"]:
-        result["spacing_mean_error_percent"] = float(
-            100.0 * np.mean(spacing_errors) / result["spacing_true_mean_mm"]
-        )
+    result.update(summary)
+    result.update(spacing)
     return result
+
+
+def evaluate_square_validation(
+    pose_matches: Sequence[Match],
+    square_blobs: Sequence[Blob],
+    square_dots: Sequence[ScreenDot],
+    camera_matrix: np.ndarray,
+    dist_coeffs: np.ndarray,
+) -> Tuple[Dict[str, object], List[Match], List[Dict[str, object]]]:
+    ok, rvec, tvec, reason = solve_pose_from_matches(pose_matches, camera_matrix, dist_coeffs)
+    if not ok:
+        return {"valid": False, "reason": reason}, [], []
+    assert rvec is not None and tvec is not None
+    if len(square_blobs) < len(square_dots):
+        return {
+            "valid": False,
+            "reason": f"not enough square blobs: {len(square_blobs)}/{len(square_dots)}",
+        }, [], []
+
+    object_points = np.array(
+        [[dot.object_x_mm, dot.object_y_mm, dot.object_z_mm] for dot in square_dots],
+        dtype=np.float64,
+    )
+    projected, _ = cv.projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs)
+    projected_points = projected.reshape(-1, 2)
+    selected = list(square_blobs[: len(square_dots)])
+    blob_points = np.array([[blob.x, blob.y] for blob in selected], dtype=np.float64)
+    distances = np.linalg.norm(projected_points[:, None, :] - blob_points[None, :, :], axis=2)
+
+    best_perm: Optional[Tuple[int, ...]] = None
+    best_score = math.inf
+    for perm in itertools.permutations(range(len(selected)), len(square_dots)):
+        score = float(sum(distances[dot_idx, blob_idx] for dot_idx, blob_idx in enumerate(perm)))
+        if score < best_score:
+            best_score = score
+            best_perm = tuple(perm)
+    if best_perm is None:
+        return {"valid": False, "reason": "could not associate square blobs"}, [], []
+
+    matches: List[Match] = []
+    for dot_idx, blob_idx in enumerate(best_perm):
+        dot = square_dots[dot_idx]
+        blob = selected[blob_idx]
+        matches.append(
+            Match(
+                dot=dot,
+                blob=blob,
+                reproj_error_px=float(distances[dot_idx, blob_idx]),
+            )
+        )
+    errors = np.array([match.reproj_error_px for match in matches], dtype=np.float64)
+    summary = pose_summary(rvec, tvec)
+    spacing = plane_spacing_metrics(
+        matches, camera_matrix, dist_coeffs, rvec, tvec, _square_edge_pairs(matches)
+    )
+    expected = [
+        {
+            "dot_id": dot.dot_id,
+            "object_mm": {
+                "x": dot.object_x_mm,
+                "y": dot.object_y_mm,
+                "z": dot.object_z_mm,
+            },
+            "projected_px": {
+                "x": float(point[0]),
+                "y": float(point[1]),
+            },
+        }
+        for dot, point in zip(square_dots, projected_points)
+    ]
+    result: Dict[str, object] = {
+        "valid": True,
+        "point_count": len(matches),
+        "rms_px": float(np.sqrt(np.mean(errors**2))),
+        "mean_px": float(np.mean(errors)),
+        "max_px": float(np.max(errors)),
+    }
+    result.update(summary)
+    result.update(spacing)
+    return result, matches, expected
 
 
 def normalize_activity_to_bgr(activity: np.ndarray) -> np.ndarray:
@@ -713,7 +932,7 @@ def draw_blob_indicators(
         )
 
     for match in matches:
-        text = f"{match.dot.row},{match.dot.col}"
+        text = match.dot.dot_id if match.dot.label is not None else f"{match.dot.row},{match.dot.col}"
         cv.putText(
             image,
             text,
@@ -721,6 +940,39 @@ def draw_blob_indicators(
             cv.FONT_HERSHEY_SIMPLEX,
             0.45,
             (255, 255, 255),
+            1,
+            cv.LINE_AA,
+        )
+    return image
+
+
+def draw_expected_points(
+    image: np.ndarray,
+    expected: Sequence[Dict[str, object]],
+) -> np.ndarray:
+    for point in expected:
+        projected = point.get("projected_px", {})
+        if not isinstance(projected, dict):
+            continue
+        x = int(round(float(projected.get("x", 0.0))))
+        y = int(round(float(projected.get("y", 0.0))))
+        label = str(point.get("dot_id", "expected"))
+        color = (255, 80, 80)
+        cv.drawMarker(
+            image,
+            (x, y),
+            color,
+            markerType=cv.MARKER_TILTED_CROSS,
+            markerSize=14,
+            thickness=2,
+        )
+        cv.putText(
+            image,
+            f"E {label}",
+            (x + 8, y + 16),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            color,
             1,
             cv.LINE_AA,
         )
@@ -853,6 +1105,8 @@ class MireWindow(QtWidgets.QWidget):
         self.monitor = MonitorInfo("unknown", 0, 0, 640, 480, 0.0, 0.0, 0.0, 0.0, 1.0, "none")
         self.dots: List[ScreenDot] = []
         self.layout_meta: Dict[str, float] = {}
+        self.pattern = "mire"
+        self.square_variant: Dict[str, object] = dict(SQUARE_SEQUENCE[0])
         self.lit = False
         self.blink_hz = blink_hz
         self.gradient_softness = int(np.clip(gradient_softness, 0, 100))
@@ -875,6 +1129,19 @@ class MireWindow(QtWidgets.QWidget):
         self.gradient_softness = int(np.clip(gradient_softness, 0, 100))
         self.update()
 
+    def set_pattern(self, pattern: str) -> None:
+        if pattern not in {"mire", "square4"}:
+            pattern = "mire"
+        if self.pattern == pattern:
+            return
+        self.pattern = pattern
+        self.update_layout()
+
+    def set_square_variant(self, variant: Dict[str, object]) -> None:
+        self.square_variant = dict(variant)
+        if self.pattern == "square4":
+            self.update_layout()
+
     def show_on_monitor(self, monitor: MonitorInfo) -> None:
         self.monitor = monitor
         self.setGeometry(monitor.x, monitor.y, monitor.width_px, monitor.height_px)
@@ -884,12 +1151,25 @@ class MireWindow(QtWidgets.QWidget):
         self.activateWindow()
 
     def update_layout(self) -> None:
-        self.dots, self.layout_meta = build_mire_layout(
-            self.monitor.width_px,
-            self.monitor.height_px,
-            self.monitor.mm_per_px_x,
-            self.monitor.mm_per_px_y,
-        )
+        if self.pattern == "square4":
+            self.dots, self.layout_meta = build_square_layout(
+                self.monitor.width_px,
+                self.monitor.height_px,
+                self.monitor.mm_per_px_x,
+                self.monitor.mm_per_px_y,
+                offset_x=float(self.square_variant.get("offset_x", 0.0)),
+                offset_y=float(self.square_variant.get("offset_y", 0.0)),
+                side_scale=float(self.square_variant.get("side_scale", 2.0)),
+                variant_id=str(self.square_variant.get("id", "square")),
+                variant_label=str(self.square_variant.get("label", "carre")),
+            )
+        else:
+            self.dots, self.layout_meta = build_mire_layout(
+                self.monitor.width_px,
+                self.monitor.height_px,
+                self.monitor.mm_per_px_x,
+                self.monitor.mm_per_px_y,
+            )
         self.update()
 
     def toggle_lit(self) -> None:
@@ -958,6 +1238,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.live_event_count = 0
         self.accumulating = False
         self.accum_started_at = 0.0
+        self.current_capture_duration_ms = int(args.accum_ms)
         self.last_preview_update = 0.0
         self.last_preview_blob_update = 0.0
         self.preview_blobs: List[Blob] = []
@@ -965,6 +1246,9 @@ class ControlWindow(QtWidgets.QWidget):
         self.last_matches: List[Match] = []
         self.last_export_paths: List[Path] = []
         self.test_mode = False
+        self.square_phase: Optional[str] = None
+        self.square_test_context: Optional[Dict[str, object]] = None
+        self.square_validation_index = 0
 
         self.mire = MireWindow(args.blink_hz, args.gradient_softness)
         self.mire.calibration_started.connect(self.begin_accumulation)
@@ -1084,12 +1368,15 @@ class ControlWindow(QtWidgets.QWidget):
         self.measured_distance_edit.setPlaceholderText("distance reelle camera-ecran en mm (optionnel)")
         self.measured_distance_edit.setMaximumWidth(300)
         self.test_button = QtWidgets.QPushButton("Test calib")
+        self.square_test_button = QtWidgets.QPushButton("Test carre")
         self.test_button.setMinimumHeight(38)
+        self.square_test_button.setMinimumHeight(38)
         test_row.addWidget(QtWidgets.QLabel("Calibration:"))
         test_row.addWidget(self.calib_file_combo, 1)
         test_row.addWidget(self.refresh_calib_button)
         test_row.addWidget(self.measured_distance_edit)
         test_row.addWidget(self.test_button)
+        test_row.addWidget(self.square_test_button)
         root.addLayout(test_row)
         self.populate_calibration_files()
 
@@ -1117,6 +1404,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.erase_button.clicked.connect(self.erase_current)
         self.reset_button.clicked.connect(self.reset_all)
         self.test_button.clicked.connect(self.start_test)
+        self.square_test_button.clicked.connect(self.start_square_test)
         self.refresh_calib_button.clicked.connect(self.populate_calibration_files)
 
     def selected_monitor(self) -> Optional[MonitorInfo]:
@@ -1166,6 +1454,11 @@ class ControlWindow(QtWidgets.QWidget):
     def append_status(self, message: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
         self.status_text.appendPlainText(f"[{stamp}] {message}")
+
+    def set_capture_buttons_enabled(self, enabled: bool) -> None:
+        self.calib_button.setEnabled(enabled)
+        self.test_button.setEnabled(enabled)
+        self.square_test_button.setEnabled(enabled)
 
     def set_camera_status(self, message: str, state: str) -> None:
         if state == "ok":
@@ -1319,7 +1612,7 @@ class ControlWindow(QtWidgets.QWidget):
             banner = (
                 f"ACCUM {self.event_count} events | "
                 f"blobs {len(self.preview_blobs)}/{EXPECTED_DOTS} | "
-                f"fenetre {self.args.accum_ms} ms"
+                f"fenetre {self.current_capture_duration_ms} ms"
             )
             image = draw_preview_banner(image, banner, (0, 255, 255))
         elif self.live_activity is not None:
@@ -1355,13 +1648,46 @@ class ControlWindow(QtWidgets.QWidget):
             return
         self._start_capture(test_mode=True)
 
-    def _start_capture(self, test_mode: bool) -> None:
+    def start_square_test(self) -> None:
+        selected = self.selected_calibration_path()
+        if selected is None:
+            self.append_status("Aucune calibration XML trouvee. Lancer d'abord calibrate_intrinsics_from_mire.py.")
+            return
+        try:
+            camera_matrix, dist_coeffs, node_name = load_calibration_xml(selected)
+        except (RuntimeError, cv.error) as exc:
+            self.append_status(f"Lecture calibration impossible: {exc}")
+            return
+        self.square_test_context = {
+            "calibration_file": selected,
+            "calibration_node": node_name,
+            "camera_matrix": camera_matrix,
+            "dist_coeffs": dist_coeffs,
+            "square_sequence": [dict(variant) for variant in SQUARE_SEQUENCE],
+            "square_results": [],
+        }
+        self.square_validation_index = 0
+        self._start_capture(test_mode=False, square_phase="pose")
+
+    def square_capture_duration_ms(self) -> int:
+        return max(int(self.args.accum_ms) * 4, 1200)
+
+    def _start_capture(
+        self,
+        test_mode: bool,
+        square_phase: Optional[str] = None,
+        duration_ms: Optional[int] = None,
+    ) -> None:
         if not self.ensure_camera():
             return
         monitor = self.selected_monitor()
         if monitor is None:
             self.append_status("Aucun ecran selectionne.")
             return
+        if square_phase == "validation":
+            variant = SQUARE_SEQUENCE[self.square_validation_index]
+            self.mire.set_square_variant(variant)
+        self.mire.set_pattern("square4" if square_phase == "validation" else "mire")
         if not self.mire.isVisible():
             self.show_mire_on_selected_monitor()
 
@@ -1374,14 +1700,23 @@ class ControlWindow(QtWidgets.QWidget):
         self.accumulating = False
         self.accum_started_at = 0.0
         self.test_mode = test_mode
-        self.calib_button.setEnabled(False)
-        self.test_button.setEnabled(False)
-        self.append_status(
-            "Sequence de test lancee: noir -> mire clignotante."
-            if test_mode
-            else "Sequence de calibration lancee: noir -> mire clignotante."
-        )
-        self.mire.start_calibration_blink(self.args.accum_ms)
+        self.square_phase = square_phase
+        self.current_capture_duration_ms = int(duration_ms if duration_ms is not None else self.args.accum_ms)
+        self.set_capture_buttons_enabled(False)
+        if square_phase == "pose":
+            message = "Test carre phase 1/2: estimation pose avec la mire 19 points."
+        elif square_phase == "validation":
+            variant = SQUARE_SEQUENCE[self.square_validation_index]
+            message = (
+                f"Test carre {self.square_validation_index + 1}/{len(SQUARE_SEQUENCE)}: "
+                f"{variant['label']} pendant {self.current_capture_duration_ms} ms."
+            )
+        elif test_mode:
+            message = "Sequence de test lancee: noir -> mire clignotante."
+        else:
+            message = "Sequence de calibration lancee: noir -> mire clignotante."
+        self.append_status(message)
+        self.mire.start_calibration_blink(self.current_capture_duration_ms)
 
     def begin_accumulation(self) -> None:
         if self.camera is None or self.activity is None:
@@ -1389,7 +1724,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.accumulating = True
         self.accum_started_at = time.time()
         self.append_status(
-            f"Accumulation active pour {self.args.accum_ms} ms "
+            f"Accumulation active pour {self.current_capture_duration_ms} ms "
             f"(polarites ON/OFF additionnees)."
         )
 
@@ -1397,14 +1732,23 @@ class ControlWindow(QtWidgets.QWidget):
         if not self.accumulating:
             return
         self.accumulating = False
-        self.calib_button.setEnabled(True)
-        self.test_button.setEnabled(True)
+        square_phase = self.square_phase
+        if square_phase not in ("pose", "validation"):
+            self.set_capture_buttons_enabled(True)
         elapsed_ms = (time.time() - self.accum_started_at) * 1000.0
         if self.activity is None:
             self.append_status("Aucune accumulation disponible.")
+            self.square_phase = None
+            self.square_test_context = None
+            self.set_capture_buttons_enabled(True)
             return
 
-        self.last_blobs = detect_blobs(self.activity, EXPECTED_DOTS)
+        expected = SQUARE_EXPECTED_DOTS if square_phase == "validation" else EXPECTED_DOTS
+        self.last_blobs = detect_blobs(self.activity, expected)
+        if square_phase == "validation":
+            self.finish_square_validation(elapsed_ms)
+            return
+
         self.last_matches, reason = associate_blobs_to_layout(self.last_blobs, self.mire.dots)
         overlay = make_overlay(self.activity, self.last_blobs, self.last_matches)
         self.preview_label.setPixmap(pixmap_from_bgr(overlay, self.preview_label.size()))
@@ -1424,6 +1768,18 @@ class ControlWindow(QtWidgets.QWidget):
                     f"({len(self.last_matches)}/{self.args.min_matched})."
                 )
             return
+        if square_phase == "pose":
+            if len(self.last_matches) >= self.args.min_matched:
+                self.finish_square_pose(overlay, elapsed_ms)
+            else:
+                self.square_phase = None
+                self.square_test_context = None
+                self.set_capture_buttons_enabled(True)
+                self.append_status(
+                    f"Test carre ignore: associations phase 1 insuffisantes "
+                    f"({len(self.last_matches)}/{self.args.min_matched})."
+                )
+            return
         if len(self.last_matches) >= self.args.min_matched:
             self.export_observation(overlay, elapsed_ms)
         else:
@@ -1431,6 +1787,271 @@ class ControlWindow(QtWidgets.QWidget):
                 f"Export ignore: associations insuffisantes "
                 f"({len(self.last_matches)}/{self.args.min_matched})."
             )
+
+    def finish_square_pose(self, overlay: np.ndarray, elapsed_ms: float) -> None:
+        if self.square_test_context is None:
+            self.square_phase = None
+            self.set_capture_buttons_enabled(True)
+            self.append_status("Test carre abandonne: contexte interne manquant.")
+            return
+
+        camera_matrix = self.square_test_context["camera_matrix"]
+        dist_coeffs = self.square_test_context["dist_coeffs"]
+        assert isinstance(camera_matrix, np.ndarray)
+        assert isinstance(dist_coeffs, np.ndarray)
+        pose_result = evaluate_calibration_on_matches(self.last_matches, camera_matrix, dist_coeffs)
+        if not pose_result.get("valid"):
+            self.square_phase = None
+            self.square_test_context = None
+            self.set_capture_buttons_enabled(True)
+            self.append_status(f"Test carre echoue phase 1: {pose_result.get('reason')}")
+            return
+
+        self.square_test_context.update(
+            {
+                "pose_elapsed_ms": elapsed_ms,
+                "pose_event_count": self.event_count,
+                "pose_layout": dict(self.mire.layout_meta),
+                "pose_matches": list(self.last_matches),
+                "pose_result": pose_result,
+            }
+        )
+        self.append_status(
+            f"Phase 1 ok: pose estimee avec {len(self.last_matches)} points, "
+            f"rms {pose_result['rms_px']:.2f} px, distance {pose_result['distance_norm_mm']:.0f} mm."
+        )
+        self.preview_label.setPixmap(pixmap_from_bgr(overlay, self.preview_label.size()))
+        self.square_validation_index = 0
+        self._start_capture(
+            test_mode=False,
+            square_phase="validation",
+            duration_ms=self.square_capture_duration_ms(),
+        )
+
+    def finish_square_validation(self, elapsed_ms: float) -> None:
+        context = self.square_test_context
+        if context is None:
+            self.square_phase = None
+            self.set_capture_buttons_enabled(True)
+            self.append_status("Test carre abandonne: contexte phase 1 manquant.")
+            return
+
+        camera_matrix = context["camera_matrix"]
+        dist_coeffs = context["dist_coeffs"]
+        pose_matches = context.get("pose_matches", [])
+        records = context.setdefault("square_results", [])
+        assert isinstance(camera_matrix, np.ndarray)
+        assert isinstance(dist_coeffs, np.ndarray)
+        assert isinstance(pose_matches, list)
+        assert isinstance(records, list)
+        variant = dict(SQUARE_SEQUENCE[self.square_validation_index])
+
+        result, square_matches, expected_points = evaluate_square_validation(
+            pose_matches,
+            self.last_blobs,
+            self.mire.dots,
+            camera_matrix,
+            dist_coeffs,
+        )
+        self.last_matches = square_matches
+        overlay = make_overlay(self.activity, self.last_blobs, self.last_matches)
+        draw_expected_points(overlay, expected_points)
+
+        measured_mm = self.measured_distance_mm()
+        if measured_mm is not None and result.get("valid"):
+            distance_error = 100.0 * (result["distance_norm_mm"] - measured_mm) / measured_mm
+            result["measured_distance_mm"] = measured_mm
+            result["distance_error_percent"] = distance_error
+
+        spacing_error = result.get("spacing_mean_abs_error_mm")
+        record = {
+            "index": self.square_validation_index,
+            "variant": variant,
+            "duration_ms_requested": self.current_capture_duration_ms,
+            "duration_ms_measured": elapsed_ms,
+            "blink_hz": self.args.blink_hz,
+            "events_accumulated": self.event_count,
+            "layout": dict(self.mire.layout_meta),
+            "dots": [dot.to_json() for dot in self.mire.dots],
+            "blobs": [blob.to_json() for blob in self.last_blobs],
+            "expected_projected_points": expected_points,
+            "matches": [match.to_json() for match in square_matches],
+            "result": result,
+        }
+        records.append(record)
+
+        if result.get("valid"):
+            self.append_status(
+                f"Carre {self.square_validation_index + 1}/{len(SQUARE_SEQUENCE)} "
+                f"({variant['label']}): rms {result['rms_px']:.2f} px, "
+                f"max {result['max_px']:.2f} px, distance {result['distance_norm_mm']:.0f} mm."
+            )
+            if spacing_error is not None:
+                self.append_status(
+                    f"  Cote mesure {result['spacing_measured_mean_mm']:.2f} mm "
+                    f"vs reel {result['spacing_true_mean_mm']:.2f} mm "
+                    f"(erreur moy {spacing_error:.2f} mm)."
+                )
+        else:
+            self.append_status(
+                f"Carre {self.square_validation_index + 1}/{len(SQUARE_SEQUENCE)} "
+                f"({variant['label']}) echoue: {result.get('reason')}"
+            )
+
+        if result.get("valid"):
+            spacing_text = (
+                f" spacing {float(spacing_error):.1f}mm"
+                if spacing_error is not None
+                else ""
+            )
+            banner = (
+                f"SQUARE {self.square_validation_index + 1}/{len(SQUARE_SEQUENCE)} "
+                f"rms {result['rms_px']:.2f}px{spacing_text}"
+            )
+            color = (0, 255, 0)
+        else:
+            banner = (
+                f"SQUARE {self.square_validation_index + 1}/{len(SQUARE_SEQUENCE)} "
+                f"failed"
+            )
+            color = (0, 180, 255)
+        overlay = draw_preview_banner(overlay.copy(), banner, color)
+        self.preview_label.setPixmap(pixmap_from_bgr(overlay, self.preview_label.size()))
+
+        if self.square_validation_index + 1 < len(SQUARE_SEQUENCE):
+            self.square_validation_index += 1
+            QtCore.QTimer.singleShot(
+                300,
+                lambda: self._start_capture(
+                    test_mode=False,
+                    square_phase="validation",
+                    duration_ms=self.square_capture_duration_ms(),
+                ),
+            )
+            return
+
+        self.export_square_sequence_report(overlay)
+
+    def square_aggregate_result(self, records: Sequence[Dict[str, object]]) -> Dict[str, object]:
+        errors: List[float] = []
+        spacing_errors: List[float] = []
+        valid_count = 0
+        for record in records:
+            result = record.get("result", {})
+            if not isinstance(result, dict) or not result.get("valid"):
+                continue
+            valid_count += 1
+            for match in record.get("matches", []):
+                if isinstance(match, dict):
+                    value = match.get("reprojection_error_px")
+                    if value is not None:
+                        errors.append(float(value))
+            spacing_error = result.get("spacing_mean_abs_error_mm")
+            if spacing_error is not None:
+                spacing_errors.append(float(spacing_error))
+
+        aggregate: Dict[str, object] = {
+            "valid": valid_count == len(records) and len(records) > 0,
+            "square_count": len(records),
+            "valid_square_count": valid_count,
+            "point_count": len(errors),
+            "rms_px": float(np.sqrt(np.mean(np.square(errors)))) if errors else None,
+            "mean_px": float(np.mean(errors)) if errors else None,
+            "max_px": float(np.max(errors)) if errors else None,
+            "spacing_mean_abs_error_mm": float(np.mean(spacing_errors)) if spacing_errors else None,
+            "spacing_max_abs_error_mm": float(np.max(spacing_errors)) if spacing_errors else None,
+        }
+        context = self.square_test_context or {}
+        pose_result = context.get("pose_result", {})
+        if isinstance(pose_result, dict):
+            for key in ("distance_z_mm", "distance_norm_mm", "tilt_deg"):
+                if key in pose_result:
+                    aggregate[key] = pose_result[key]
+        measured_mm = self.measured_distance_mm()
+        if measured_mm is not None and aggregate.get("distance_norm_mm") is not None:
+            aggregate["measured_distance_mm"] = measured_mm
+            aggregate["distance_error_percent"] = (
+                100.0 * (float(aggregate["distance_norm_mm"]) - measured_mm) / measured_mm
+            )
+        return aggregate
+
+    def export_square_sequence_report(self, overlay: np.ndarray) -> None:
+        context = self.square_test_context
+        if context is None:
+            self.square_phase = None
+            self.set_capture_buttons_enabled(True)
+            self.append_status("Test carre abandonne: contexte final manquant.")
+            return
+
+        camera_matrix = context["camera_matrix"]
+        dist_coeffs = context["dist_coeffs"]
+        pose_matches = context.get("pose_matches", [])
+        records = context.get("square_results", [])
+        assert isinstance(camera_matrix, np.ndarray)
+        assert isinstance(dist_coeffs, np.ndarray)
+        assert isinstance(pose_matches, list)
+        assert isinstance(records, list)
+        aggregate = self.square_aggregate_result(records)
+        output_dir = Path(self.args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        json_path = output_dir / f"square_test_{stamp}.json"
+        png_path = output_dir / f"square_test_{stamp}.png"
+
+        rms_text = (
+            f"rms {float(aggregate['rms_px']):.2f}px"
+            if aggregate.get("rms_px") is not None
+            else "rms n/a"
+        )
+        spacing_text = ""
+        if aggregate.get("spacing_mean_abs_error_mm") is not None:
+            spacing_text = f" spacing {float(aggregate['spacing_mean_abs_error_mm']):.1f}mm"
+        distance_text = ""
+        if aggregate.get("distance_norm_mm") is not None:
+            distance_text = f" dist {float(aggregate['distance_norm_mm']):.0f}mm"
+        banner = (
+            f"SQUARE TEST valid {aggregate['valid_square_count']}/{aggregate['square_count']} "
+            f"{rms_text}{spacing_text}{distance_text}"
+        )
+        overlay = draw_preview_banner(overlay.copy(), banner, (0, 255, 0))
+        self.preview_label.setPixmap(pixmap_from_bgr(overlay, self.preview_label.size()))
+
+        selected = context["calibration_file"]
+        node_name = context["calibration_node"]
+        monitor = self.selected_monitor()
+        payload = {
+            "created_at": datetime.now().isoformat(timespec="milliseconds"),
+            "calibration_file": str(selected),
+            "calibration_node": node_name,
+            "camera_matrix": camera_matrix.tolist(),
+            "distortion_coefficients": dist_coeffs.tolist(),
+            "monitor": monitor.to_json() if monitor is not None else None,
+            "phase_pose": {
+                "duration_ms_measured": context.get("pose_elapsed_ms"),
+                "events_accumulated": context.get("pose_event_count"),
+                "layout": context.get("pose_layout"),
+                "matches": [match.to_json() for match in pose_matches],
+                "result": context.get("pose_result"),
+            },
+            "square_sequence": context.get("square_sequence", []),
+            "phase_squares": records,
+            "aggregate_result": aggregate,
+            "files": {"overlay_png": str(png_path)},
+        }
+        with json_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        cv.imwrite(str(png_path), overlay)
+        self.last_export_paths = [json_path, png_path]
+        self.append_status(
+            f"Rapport test carre: {json_path} "
+            f"({aggregate['valid_square_count']}/{aggregate['square_count']} carres valides)"
+        )
+
+        self.square_phase = None
+        self.square_test_context = None
+        self.square_validation_index = 0
+        self.mire.set_pattern("mire")
+        self.set_capture_buttons_enabled(True)
 
     def export_observation(self, overlay: np.ndarray, elapsed_ms: float) -> None:
         monitor = self.selected_monitor()
@@ -1636,7 +2257,10 @@ class ControlWindow(QtWidgets.QWidget):
 
     def erase_current(self) -> None:
         self.accumulating = False
-        self.calib_button.setEnabled(True)
+        self.set_capture_buttons_enabled(True)
+        self.square_phase = None
+        self.square_test_context = None
+        self.square_validation_index = 0
         if self.camera is not None:
             self.activity = np.zeros((self.camera.height, self.camera.width), dtype=np.float32)
         self.event_count = 0
@@ -1663,6 +2287,7 @@ class ControlWindow(QtWidgets.QWidget):
             self.camera.close()
             self.camera = None
         self.mire.lit = False
+        self.mire.set_pattern("mire")
         self.mire.restart_blink()
         self.mire.update()
         self.set_camera_status("Camera: reset, appuyer sur Reconnecter camera", "warn")
@@ -1675,51 +2300,50 @@ class ControlWindow(QtWidgets.QWidget):
         super().closeEvent(event)
 
 
-def make_synthetic_activity() -> Tuple[np.ndarray, List[ScreenDot]]:
-    width, height = 640, 480
-    dots, _ = build_mire_layout(width, height, 0.2, 0.2)
+def render_synthetic_activity(
+    width: int,
+    height: int,
+    dots: Sequence[ScreenDot],
+    camera_matrix: np.ndarray,
+    dist_coeffs: np.ndarray,
+    rvec: np.ndarray,
+    tvec: np.ndarray,
+) -> np.ndarray:
     activity = np.zeros((height, width), dtype=np.float32)
-    src = np.array([[dot.object_x_mm, dot.object_y_mm] for dot in dots], dtype=np.float32)
-    dst = np.array(
-        [
-            [115, 85],
-            [245, 72],
-            [374, 78],
-            [504, 96],
-            [596, 118],
-            [103, 204],
-            [244, 195],
-            [498, 215],
-            [610, 238],
-            [92, 335],
-            [236, 326],
-            [370, 330],
-            [500, 348],
-            [618, 374],
-            [82, 440],
-            [226, 430],
-            [360, 435],
-            [492, 452],
-            [620, 470],
-        ],
-        dtype=np.float32,
+    object_points = np.array(
+        [[dot.object_x_mm, dot.object_y_mm, dot.object_z_mm] for dot in dots],
+        dtype=np.float64,
     )
-    homography, _ = cv.findHomography(src, dst)
-    for dot in dots:
-        point = np.array([dot.object_x_mm, dot.object_y_mm, 1.0], dtype=np.float32)
-        projected = homography @ point
-        cx = int(round(projected[0] / projected[2]))
-        cy = int(round(projected[1] / projected[2]))
+    projected, _ = cv.projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs)
+    for dot, point in zip(dots, projected.reshape(-1, 2)):
+        cx = int(round(float(point[0])))
+        cy = int(round(float(point[1])))
+        if not (0 <= cx < width and 0 <= cy < height):
+            continue
         radius = 11 if dot.anchor else 7
         cv.circle(activity, (cx, cy), radius, 80.0 if dot.anchor else 45.0, -1)
     noise_y = np.random.default_rng(123).integers(0, height, 200)
     noise_x = np.random.default_rng(456).integers(0, width, 200)
     activity[noise_y, noise_x] += 1.0
-    return activity, dots
+    return activity
+
+
+def make_synthetic_activity() -> Tuple[np.ndarray, List[ScreenDot], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    width, height = 640, 480
+    dots, _ = build_mire_layout(width, height, 1.0, 1.0)
+    camera_matrix = np.array(
+        [[520.0, 0.0, 320.0], [0.0, 520.0, 240.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    dist_coeffs = np.zeros(5, dtype=np.float64)
+    rvec = np.array([[0.05], [-0.18], [0.03]], dtype=np.float64)
+    tvec = np.array([[15.0], [5.0], [680.0]], dtype=np.float64)
+    activity = render_synthetic_activity(width, height, dots, camera_matrix, dist_coeffs, rvec, tvec)
+    return activity, dots, camera_matrix, dist_coeffs, rvec, tvec
 
 
 def run_self_test() -> int:
-    activity, dots = make_synthetic_activity()
+    activity, dots, camera_matrix, dist_coeffs, rvec, tvec = make_synthetic_activity()
     blobs = detect_blobs(activity)
     matches, reason = associate_blobs_to_layout(blobs, dots)
     print(f"synthetic blobs: {len(blobs)}")
@@ -1733,6 +2357,45 @@ def run_self_test() -> int:
     if len(matches) != EXPECTED_DOTS:
         print("association failed")
         return 1
+    pose_result = evaluate_calibration_on_matches(matches, camera_matrix, dist_coeffs)
+    print(f"synthetic pose valid: {pose_result.get('valid')} rms={pose_result.get('rms_px')}")
+    if not pose_result.get("valid"):
+        print(f"pose evaluation failed: {pose_result.get('reason')}")
+        return 1
+
+    for index, variant in enumerate(SQUARE_SEQUENCE):
+        square_dots, _ = build_square_layout(
+            640,
+            480,
+            1.0,
+            1.0,
+            offset_x=float(variant["offset_x"]),
+            offset_y=float(variant["offset_y"]),
+            side_scale=float(variant["side_scale"]),
+            variant_id=str(variant["id"]),
+            variant_label=str(variant["label"]),
+        )
+        square_activity = render_synthetic_activity(
+            640, 480, square_dots, camera_matrix, dist_coeffs, rvec, tvec
+        )
+        square_blobs = detect_blobs(square_activity, SQUARE_EXPECTED_DOTS)
+        square_result, square_matches, _ = evaluate_square_validation(
+            matches, square_blobs, square_dots, camera_matrix, dist_coeffs
+        )
+        print(f"synthetic square {index + 1} blobs: {len(square_blobs)}")
+        print(
+            f"synthetic square {index + 1} matches: {len(square_matches)} "
+            f"rms={square_result.get('rms_px')} ({square_result.get('reason', 'ok')})"
+        )
+        if len(square_blobs) != SQUARE_EXPECTED_DOTS:
+            print("square blob detection failed")
+            return 1
+        if len(square_matches) != SQUARE_EXPECTED_DOTS or not square_result.get("valid"):
+            print("square validation failed")
+            return 1
+        if float(square_result["rms_px"]) > 1.5:
+            print("square validation error too high")
+            return 1
     print("self-test ok")
     return 0
 
