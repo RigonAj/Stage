@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <title>Mire calibration (serveur)</title>
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      color: #f4f4f4;
+      font-family: system-ui, sans-serif;
+      touch-action: none;
+      overscroll-behavior: none;
+    }
+    canvas { display: block; width: 100vw; height: 100vh; background: #000; }
+    #panel {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #050505;
+      z-index: 2;
+    }
+    #panel-inner {
+      width: min(92vw, 460px);
+      border: 1px solid #2b2b2b;
+      background: #111;
+      padding: 18px;
+    }
+    h1 { margin: 0 0 12px; font-size: 20px; }
+    p { margin: 8px 0; color: #d2d2d2; font-size: 13px; line-height: 1.45; }
+    dl {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 12px;
+      margin: 14px 0;
+      font-size: 13px;
+    }
+    dt { color: #9c9c9c; }
+    dd { margin: 0; text-align: right; }
+    button {
+      width: 100%;
+      margin-top: 10px;
+      border: 0;
+      border-radius: 6px;
+      font: inherit;
+      font-size: 16px;
+      font-weight: 700;
+      padding: 13px 16px;
+    }
+    #start { background: #fff; color: #000; }
+    #measure { background: #2a2a2a; color: #eee; }
+    #panel.hidden { display: none; }
+    #warning {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 3;
+      background: #5a1111;
+      color: #ffb4b4;
+      font-size: 12px;
+      padding: 4px 8px;
+      display: none;
+    }
+    #error { color: #ff9c9c; font-size: 13px; min-height: 1em; }
+  </style>
+</head>
+<body>
+  <canvas id="mire"></canvas>
+  <div id="warning"></div>
+
+  <div id="panel">
+    <div id="panel-inner">
+      <h1>Mire calibration hand-eye</h1>
+      <p>La disposition des points vient du serveur (source de v&eacute;rit&eacute; unique).
+         Luminosit&eacute; 100&nbsp;%, rafra&icirc;chissement fixe, veille d&eacute;sactiv&eacute;e.</p>
+      <dl>
+        <dt>Fr&eacute;quence</dt><dd><span id="hz-label">?</span> Hz</dd>
+        <dt>Points</dt><dd><span id="dots-label">?</span></dd>
+        <dt>Viewport</dt><dd><span id="viewport-label">?</span> px</dd>
+        <dt>&Eacute;cran</dt><dd><span id="screen-label">?</span> mm</dd>
+        <dt>Espacement attendu</dt><dd><span id="spacing-label">?</span> mm</dd>
+      </dl>
+      <p>V&eacute;rifier au pied &agrave; coulisse l&apos;espacement entre centres de points
+         voisins (mode mesure, points fixes) avant toute capture.</p>
+      <button id="start">D&eacute;marrer (clignote)</button>
+      <button id="measure">Mode mesure (points fixes)</button>
+      <p id="error"></p>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    const params = new URLSearchParams(window.location.search);
+    const hzOverride = params.get("hz") === null ? null : Number(params.get("hz"));
+
+    const canvas = document.getElementById("mire");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const panel = document.getElementById("panel");
+    const warning = document.getElementById("warning");
+    const errorLabel = document.getElementById("error");
+
+    let layout = null;
+    let blinkHz = 6.0;
+    let softness = 0.55;
+    let running = false;
+    let staticMode = false;
+    let lastLit = null;
+    let wakeLock = null;
+
+    function physicalViewport() {
+      const dpr = window.devicePixelRatio || 1;
+      return {
+        width: Math.round(window.innerWidth * dpr),
+        height: Math.round(window.innerHeight * dpr),
+        panelWidth: Math.round(window.screen.width * dpr),
+        panelHeight: Math.round(window.screen.height * dpr),
+      };
+    }
+
+    async function fetchLayout() {
+      const vp = physicalViewport();
+      const query = new URLSearchParams({
+        width_px: vp.width,
+        height_px: vp.height,
+        panel_width_px: vp.panelWidth,
+        panel_height_px: vp.panelHeight,
+      });
+      const response = await fetch("/api/layout?" + query.toString(), { cache: "no-store" });
+      if (!response.ok) throw new Error("layout HTTP " + response.status);
+      layout = await response.json();
+      blinkHz = hzOverride !== null && Number.isFinite(hzOverride) && hzOverride > 0
+        ? Math.min(60, hzOverride)
+        : layout.render.blink_hz;
+      softness = layout.render.gradient_softness_percent / 100;
+      updatePanelInfo(vp);
+      updateWarning();
+      configureCanvas(vp);
+      lastLit = null;
+      draw(staticMode);
+    }
+
+    function updatePanelInfo(vp) {
+      document.getElementById("hz-label").textContent = blinkHz.toFixed(1);
+      document.getElementById("dots-label").textContent =
+        layout.dots.length + "/" + (layout.pattern.rows * layout.pattern.cols);
+      document.getElementById("viewport-label").textContent = vp.width + " x " + vp.height;
+      document.getElementById("screen-label").textContent =
+        layout.screen.size_mm.width.toFixed(2) + " x " + layout.screen.size_mm.height.toFixed(2);
+      document.getElementById("spacing-label").textContent =
+        layout.layout.spacing_x_mm.toFixed(2) + " (h) / " + layout.layout.spacing_y_mm.toFixed(2) + " (v)";
+    }
+
+    function updateWarning() {
+      if (layout && !layout.screen.fullscreen_ok) {
+        warning.textContent =
+          "PAS EN PLEIN ECRAN REEL: viewport " +
+          layout.screen.viewport_px.width + "x" + layout.screen.viewport_px.height +
+          " vs panneau " + layout.screen.panel_px.width + "x" + layout.screen.panel_px.height +
+          " - calibration invalide";
+        warning.style.display = "block";
+      } else {
+        warning.style.display = "none";
+      }
+    }
+
+    function configureCanvas(vp) {
+      canvas.width = vp.width;
+      canvas.height = vp.height;
+      canvas.style.width = window.innerWidth + "px";
+      canvas.style.height = window.innerHeight + "px";
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    function draw(lit) {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (!lit || !layout) return;
+
+      const innerStop = 0.85 - 0.65 * softness;
+      const midStop = 0.96 - 0.24 * softness;
+      const midValue = Math.round(245 - 145 * softness);
+      const midColor = "rgb(" + midValue + "," + midValue + "," + midValue + ")";
+
+      for (const dot of layout.dots) {
+        const x = dot.screen_px.x;
+        const y = dot.screen_px.y;
+        const radius = dot.radius_px;
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        gradient.addColorStop(0.0, "#fff");
+        gradient.addColorStop(innerStop, "#fff");
+        gradient.addColorStop(midStop, midColor);
+        gradient.addColorStop(1.0, "#000");
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function animate(now) {
+      if (!running) return;
+      if (staticMode) {
+        if (lastLit !== true) { draw(true); lastLit = true; }
+      } else {
+        const halfPeriodMs = 1000 / (blinkHz * 2);
+        const lit = Math.floor(now / halfPeriodMs) % 2 === 0;
+        if (lit !== lastLit) { draw(lit); lastLit = lit; }
+      }
+      window.requestAnimationFrame(animate);
+    }
+
+    async function requestWakeLock() {
+      if (!("wakeLock" in navigator)) return;
+      try { wakeLock = await navigator.wakeLock.request("screen"); }
+      catch (_error) { wakeLock = null; }
+    }
+
+    async function start(asStatic) {
+      errorLabel.textContent = "";
+      staticMode = asStatic;
+      try {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (_error) {
+        // The fullscreen check below will flag a cropped viewport anyway.
+      }
+      // Let the browser settle into its fullscreen viewport before measuring.
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      try {
+        await fetchLayout();
+      } catch (error) {
+        errorLabel.textContent = "Erreur serveur: " + error.message;
+        return;
+      }
+      await requestWakeLock();
+      panel.classList.add("hidden");
+      running = true;
+      window.requestAnimationFrame(animate);
+    }
+
+    async function refreshAfterViewportChange() {
+      if (!running) return;
+      try { await fetchLayout(); }
+      catch (_error) { /* keep the previous layout; next resize retries */ }
+    }
+
+    document.getElementById("start").addEventListener("click", () => start(false));
+    document.getElementById("measure").addEventListener("click", () => start(true));
+    window.addEventListener("resize", () => window.setTimeout(refreshAfterViewportChange, 250));
+    window.addEventListener("orientationchange", () => window.setTimeout(refreshAfterViewportChange, 400));
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && running) requestWakeLock();
+    });
+
+    // Pre-fill the info panel without entering fullscreen yet.
+    fetchLayout().catch((error) => {
+      errorLabel.textContent = "Erreur serveur: " + error.message;
+    });
+  </script>
+</body>
+</html>
