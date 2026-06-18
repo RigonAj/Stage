@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-/home/rigon/Dv-Rosws/Dv-Rosws/scripts/launch_ball_tracking.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/launch_ball_tracking.sh"
 status=$?
 
 echo

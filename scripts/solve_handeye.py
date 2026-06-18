@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Offline eye-to-hand solver: camera -> robot base from multi-sample JSON.
 
-Implements section 4 of docs/ur3e_camera_base_calibration.md (repo
-6-Dof-Ur3e-Catch-a-ball): the DVXplorer camera is fixed in the room, the
+Implements section 4 of docs/Robot_Control/ur3e_camera_base_calibration.md:
+the DVXplorer camera is fixed in the room, the
 phone mire is mounted on the UR3e flange (tool0). Per pose i the collector
 stores T_base_tool0(i) (FK) and T_camera_mire(i) (solvePnP), both as
 xyz (meters) + quat xyzw. The solver recovers:

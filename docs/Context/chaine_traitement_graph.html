@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chaîne de traitement - Pipeline C++ / ROS 2</title>
+  <style>
+    :root {
+      --page: #edf1f4;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #596575;
+      --line: #c9d1d9;
+      --source: #e6f6ef;
+      --source-line: #1f9d68;
+      --prep: #eaf3ff;
+      --prep-line: #2878c8;
+      --cluster: #fff3dc;
+      --cluster-line: #d68a1f;
+      --estimate: #f2ecff;
+      --estimate-line: #7657c8;
+      --valid: #ffecee;
+      --valid-line: #cf3f53;
+      --pose: #eaf7f8;
+      --pose-line: #2f9ca7;
+      --out: #eef1f6;
+      --out-line: #647386;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .sheet {
+      width: min(1760px, calc(100vw - 40px));
+      margin: 20px;
+      padding: 34px 38px 30px;
+      background:
+        linear-gradient(var(--paper), var(--paper)) padding-box,
+        linear-gradient(135deg, #7aa7cc, #d7a24a 55%, #6aa785) border-box;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(31, 42, 55, 0.16);
+    }
+
+    header {
+      margin-bottom: 22px;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(30px, 2.7vw, 48px);
+      line-height: 1.05;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(15px, 1.2vw, 20px);
+      line-height: 1.35;
+    }
+
+    .diagram {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 1px 1px, #dfe5ea 1px, transparent 0) 0 0 / 20px 20px,
+        #ffffff;
+      overflow: hidden;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .flow {
+      fill: none;
+      stroke: #687588;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .flow-soft {
+      fill: none;
+      stroke: #8b97a7;
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      stroke-dasharray: 8 8;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .node rect {
+      rx: 8;
+      stroke-width: 2.4;
+      vector-effect: non-scaling-stroke;
+      filter: drop-shadow(0 5px 9px rgba(31, 42, 55, 0.10));
+    }
+
+    .source rect { fill: var(--source); stroke: var(--source-line); }
+    .prep rect { fill: var(--prep); stroke: var(--prep-line); }
+    .cluster rect { fill: var(--cluster); stroke: var(--cluster-line); }
+    .estimate rect { fill: var(--estimate); stroke: var(--estimate-line); }
+    .valid rect { fill: var(--valid); stroke: var(--valid-line); }
+    .pose rect { fill: var(--pose); stroke: var(--pose-line); }
+    .out rect { fill: var(--out); stroke: var(--out-line); }
+
+    .node-title {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: 800;
+      text-anchor: middle;
+    }
+
+    .node-detail {
+      fill: var(--muted);
+      font-size: 15px;
+      text-anchor: middle;
+    }
+
+    .code-tag {
+      fill: #334155;
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-anchor: middle;
+    }
+
+    .section-label {
+      fill: #263445;
+      font-size: 18px;
+      font-weight: 800;
+      text-anchor: middle;
+    }
+
+    .note-title {
+      fill: #223042;
+      font-size: 18px;
+      font-weight: 800;
+      text-anchor: middle;
+    }
+
+    .note-detail {
+      fill: var(--muted);
+      font-size: 14px;
+      text-anchor: middle;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, auto));
+      gap: 10px 18px;
+      align-items: center;
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      gap: 7px;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .chip {
+      width: 15px;
+      height: 15px;
+      border: 2px solid currentColor;
+      border-radius: 4px;
+      background: #ffffff;
+    }
+
+    .chip.source { color: var(--source-line); background: var(--source); }
+    .chip.prep { color: var(--prep-line); background: var(--prep); }
+    .chip.cluster { color: var(--cluster-line); background: var(--cluster); }
+    .chip.estimate { color: var(--estimate-line); background: var(--estimate); }
+    .chip.valid { color: var(--valid-line); background: var(--valid); }
+    .chip.pose { color: var(--pose-line); background: var(--pose); }
+    .chip.out { color: var(--out-line); background: var(--out); }
+
+    @media (max-width: 1000px) {
+      body {
+        place-items: start center;
+      }
+
+      .sheet {
+        width: min(1200px, calc(100vw - 24px));
+        margin: 12px;
+        padding: 22px;
+      }
+
+      header {
+        text-align: left;
+      }
+
+      .legend {
+        grid-template-columns: repeat(2, minmax(0, auto));
+      }
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+      }
+
+      .sheet {
+        width: 100%;
+        margin: 0;
+        box-shadow: none;
+        border: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet" aria-label="Schéma de la chaîne de traitement C++ et ROS 2">
+    <header>
+      <h1>Chaîne de traitement C++ / ROS 2</h1>
+      <p class="subtitle">
+        Du flux événementiel DVXplorer à la trajectoire 3D publiée pour la partie robotique.
+      </p>
+    </header>
+
+    <section class="diagram">
+      <svg viewBox="0 0 1570 930" role="img" aria-labelledby="title desc">
+        <title id="title">Pipeline général de traitement</title>
+        <desc id="desc">Schéma des étapes de traitement: acquisition ou relecture, filtrage, correction, fenêtre temporelle, échantillonnage, clustering, estimation 2D, trajectoire 3D, visualisation et publication ROS 2.</desc>
+
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#687588"></path>
+          </marker>
+          <marker id="soft-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b97a7"></path>
+          </marker>
+        </defs>
+
+        <text x="785" y="76" class="section-label">1. Acquisition et prétraitement des événements</text>
+
+        <g class="node source">
+          <rect x="30" y="110" width="215" height="100"></rect>
+          <text x="137.5" y="142" class="node-title">DVXplorer</text>
+          <text x="137.5" y="167" class="node-detail">caméra réelle</text>
+          <text x="137.5" y="187" class="node-detail">événements actifs</text>
+          <text x="137.5" y="204" class="code-tag">dv-processing</text>
+        </g>
+
+        <g class="node source">
+          <rect x="30" y="245" width="215" height="100"></rect>
+          <text x="137.5" y="277" class="node-title">Replay</text>
+          <text x="137.5" y="302" class="node-detail">séquences</text>
+          <text x="137.5" y="322" class="node-detail">enregistrées</text>
+          <text x="137.5" y="339" class="code-tag">EventWriter</text>
+        </g>
+
+        <g class="node source">
+          <rect x="300" y="178" width="210" height="100"></rect>
+          <text x="405" y="210" class="node-title">Source active</text>
+          <text x="405" y="235" class="node-detail">même pipeline</text>
+          <text x="405" y="255" class="node-detail">essais répétables</text>
+          <text x="405" y="272" class="code-tag">events in</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="560" y="178" width="190" height="100"></rect>
+          <text x="655" y="210" class="node-title">Filtrage</text>
+          <text x="655" y="235" class="node-detail">bruit de fond</text>
+          <text x="655" y="255" class="node-detail">événements utiles</text>
+          <text x="655" y="272" class="code-tag">noise filter</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="800" y="178" width="210" height="100"></rect>
+          <text x="905" y="210" class="node-title">OpenCV</text>
+          <text x="905" y="235" class="node-detail">correction</text>
+          <text x="905" y="255" class="node-detail">géométrique</text>
+          <text x="905" y="272" class="code-tag">undistort</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="1060" y="178" width="200" height="100"></rect>
+          <text x="1160" y="210" class="node-title">Fenêtre</text>
+          <text x="1160" y="235" class="node-detail">temps récent</text>
+          <text x="1160" y="255" class="node-detail">mémoire courte</text>
+          <text x="1160" y="272" class="code-tag">time window</text>
+        </g>
+
+        <g class="node prep">
+          <rect x="1310" y="178" width="220" height="100"></rect>
+          <text x="1420" y="210" class="node-title">Échantillons</text>
+          <text x="1420" y="235" class="node-detail">charge bornée</text>
+          <text x="1420" y="255" class="node-detail">boucle rapide</text>
+          <text x="1420" y="272" class="code-tag">sampling</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M245 160 H270 V228 H300"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M245 295 H270 V228 H300"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M510 228 H560"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M750 228 H800"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1010 228 H1060"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1260 228 H1310"></path>
+
+        <text x="785" y="386" class="section-label">2. Regroupement spatial et estimation de la balle</text>
+
+        <path class="flow" marker-end="url(#arrow)" d="M1420 278 V348 H137.5 V430"></path>
+
+        <g class="node cluster">
+          <rect x="30" y="430" width="215" height="106"></rect>
+          <text x="137.5" y="462" class="node-title">Clusters</text>
+          <text x="137.5" y="487" class="node-detail">regroupement</text>
+          <text x="137.5" y="507" class="node-detail">spatial 2D</text>
+          <text x="137.5" y="528" class="code-tag">DBSCAN</text>
+        </g>
+
+        <g class="node cluster">
+          <rect x="300" y="430" width="210" height="106"></rect>
+          <text x="405" y="462" class="node-title">Candidat</text>
+          <text x="405" y="487" class="node-detail">nuage probable</text>
+          <text x="405" y="507" class="node-detail">de la balle</text>
+          <text x="405" y="528" class="code-tag">cluster events</text>
+        </g>
+
+        <g class="node estimate">
+          <rect x="575" y="370" width="220" height="104"></rect>
+          <text x="685" y="402" class="node-title">Cercle</text>
+          <text x="685" y="427" class="node-detail">centre + rayon</text>
+          <text x="685" y="447" class="node-detail">sur points image</text>
+          <text x="685" y="468" class="code-tag">circle fitting</text>
+        </g>
+
+        <g class="node estimate">
+          <rect x="575" y="490" width="220" height="104"></rect>
+          <text x="685" y="522" class="node-title">Trace</text>
+          <text x="685" y="547" class="node-detail">ruban produit</text>
+          <text x="685" y="567" class="node-detail">par la vitesse</text>
+          <text x="685" y="588" class="code-tag">trace width</text>
+        </g>
+
+        <g class="node estimate">
+          <rect x="860" y="430" width="220" height="106"></rect>
+          <text x="970" y="462" class="node-title">Estimation 2D</text>
+          <text x="970" y="487" class="node-detail">position image</text>
+          <text x="970" y="507" class="node-detail">et taille apparente</text>
+          <text x="970" y="528" class="code-tag">center / radius</text>
+        </g>
+
+        <g class="node valid">
+          <rect x="1135" y="430" width="205" height="106"></rect>
+          <text x="1237.5" y="462" class="node-title">Validation</text>
+          <text x="1237.5" y="487" class="node-detail">cohérence</text>
+          <text x="1237.5" y="507" class="node-detail">outliers rejetés</text>
+          <text x="1237.5" y="528" class="code-tag">filters</text>
+        </g>
+
+        <g class="node estimate">
+          <rect x="1390" y="430" width="150" height="106"></rect>
+          <text x="1465" y="462" class="node-title">Mesures</text>
+          <text x="1465" y="487" class="node-detail">2D prêtes</text>
+          <text x="1465" y="507" class="node-detail">pour la 3D</text>
+          <text x="1465" y="528" class="code-tag">image obs.</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M245 483 H300"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M510 483 H540 V422 H575"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M510 483 H540 V542 H575"></path>
+        <path class="flow-soft" marker-end="url(#soft-arrow)" d="M795 422 H830 V483 H860"></path>
+        <path class="flow-soft" marker-end="url(#soft-arrow)" d="M795 542 H830 V483 H860"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1080 483 H1135"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1340 483 H1390"></path>
+
+        <text x="785" y="670" class="section-label">3. Reconstruction 3D, visualisation et publication ROS 2</text>
+
+        <path class="flow" marker-end="url(#arrow)" d="M1465 536 V630 H135 V710"></path>
+
+        <g class="node pose">
+          <rect x="30" y="710" width="210" height="108"></rect>
+          <text x="135" y="741" class="node-title">Pose 3D</text>
+          <text x="135" y="765" class="node-detail">projection inverse</text>
+          <text x="135" y="785" class="node-detail">avec calibration</text>
+          <text x="135" y="806" class="code-tag">X,Y,Z mm</text>
+        </g>
+
+        <g class="node pose">
+          <rect x="290" y="710" width="225" height="108"></rect>
+          <text x="402.5" y="741" class="node-title">Trajectoire</text>
+          <text x="402.5" y="765" class="node-detail">régression</text>
+          <text x="402.5" y="785" class="node-detail">des positions 3D</text>
+          <text x="402.5" y="806" class="code-tag">line / parabola</text>
+        </g>
+
+        <g class="node out">
+          <rect x="565" y="710" width="220" height="108"></rect>
+          <text x="675" y="741" class="node-title">Visualisation</text>
+          <text x="675" y="765" class="node-detail">vues 2D, 3D</text>
+          <text x="675" y="785" class="node-detail">et diagnostics</text>
+          <text x="675" y="806" class="code-tag">Raylib / raygui</text>
+        </g>
+
+        <g class="node out">
+          <rect x="835" y="710" width="220" height="108"></rect>
+          <text x="945" y="741" class="node-title">Publication</text>
+          <text x="945" y="765" class="node-detail">position estimée</text>
+          <text x="945" y="785" class="node-detail">pour le robot</text>
+          <text x="945" y="806" class="code-tag">ROS 2 topic</text>
+        </g>
+
+        <g class="node out">
+          <rect x="1105" y="710" width="425" height="108"></rect>
+          <text x="1317.5" y="741" class="node-title">Sortie temps réel</text>
+          <text x="1317.5" y="765" class="node-detail">position de la balle et trajectoire exploitable</text>
+          <text x="1317.5" y="785" class="node-detail">par une chaîne d'interception robotique</text>
+          <text x="1317.5" y="806" class="code-tag">ball_position_3d_mm</text>
+        </g>
+
+        <path class="flow" marker-end="url(#arrow)" d="M240 764 H290"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M515 764 H565"></path>
+        <path class="flow-soft" marker-end="url(#soft-arrow)" d="M785 764 H835"></path>
+        <path class="flow" marker-end="url(#arrow)" d="M1055 764 H1105"></path>
+
+        <g>
+          <rect x="30" y="850" width="1500" height="58" rx="8" fill="#f8fafc" stroke="#cbd5e1"></rect>
+          <text x="785" y="876" class="note-title">Principe de la chaîne</text>
+          <text x="785" y="898" class="note-detail">ne pas reconstruire une image dense : filtrer les événements utiles, les regrouper, puis produire une estimation 3D avec une latence faible.</text>
+        </g>
+      </svg>
+    </section>
+
+    <div class="legend" aria-label="Légende">
+      <span><i class="chip source"></i>Sources</span>
+      <span><i class="chip prep"></i>Prétraitement</span>
+      <span><i class="chip cluster"></i>Regroupement</span>
+      <span><i class="chip estimate"></i>Estimation 2D</span>
+      <span><i class="chip valid"></i>Validation</span>
+      <span><i class="chip pose"></i>Pose 3D</span>
+      <span><i class="chip out"></i>Sorties</span>
+    </div>
+  </main>
+</body>
+</html>

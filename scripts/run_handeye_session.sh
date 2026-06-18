@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Hand-eye capture session (plan step 4 of ur3e_camera_base_calibration.md,
-# 6-Dof-Ur3e-Catch-a-ball repo): phone mire server + event-camera collector.
+# Hand-eye capture session (plan step 4 of
+# docs/Robot_Control/ur3e_camera_base_calibration.md): phone mire server +
+# event-camera collector.
 #
 # Prerequisites, in this order:
-#   1. Robot stack running (ur3e_stack from the 6-Dof repo) so TF base->tool0
+#   1. Robot stack running (ur3e_stack after source env.sh) so TF base->tool0
 #      is published; same ROS_DOMAIN_ID as this terminal.
 #   2. Intrinsics validated (Test calib / Test carre: distance and spacing
 #      errors < 1 %).

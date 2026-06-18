@@ -56,9 +56,15 @@ private:
     void publishBallPose(const BallPose3D &pose) const;
     void draw2DOverlay(const BallPose3D &pose);
     void drawTrackerResult(const BallTrackerResult &result);
+    void drawDbscanClusters(const std::vector<BallTrackerClusterInput> &clusters);
 
     std::vector<BallTrackerClusterInput> buildTrackerClusters() const;
     BallTrackerSettings trackerSettings() const;
+    std::string readerTrackingCacheSignature(
+        const BallTrackerSettings &settings,
+        int maxEvent,
+        int bandwidth,
+        uint32_t minNb) const;
 
 private:
     Ui ui;
@@ -75,6 +81,7 @@ private:
     std::optional<BallTrackerResult> paused_reader_tracking_cache_;
     double paused_reader_tracking_time_seconds_ = -1.0;
     double paused_reader_tracking_window_seconds_ = -1.0;
+    std::string paused_reader_tracking_signature_;
     std::string active_calibration_source_;
     std::string active_reader_path_;
     bool active_reader_calibration_override_ = false;
@@ -139,9 +146,6 @@ void Pub::timer_callback() {
     const auto t_loop_start = clock::now();
 
     camera.Samples = dv::EventStore();
-    camera.Filtered = dv::EventStore();
-
-    gui.ClearCurrentBall3D();
 
     if (gui.ClearPoses) {
         resetTracks();
@@ -152,10 +156,15 @@ void Pub::timer_callback() {
         camera.NextBatch();
 
         if (!camera.isCameraRunning()) {
+            camera.Filtered = dv::EventStore();
+            gui.ClearCurrentBall3D();
             gui.AddHudText(8.0f, 16.0f,"No DVXplorer camera connected - switch to reader mode or load a .bin file",RED, 22);
             gui.Update(); return;}
 
-        if (!camera.EventsAvailable()) {gui.Update();return; }
+        // Live getNextEventBatch() can be empty between real event batches. Do
+        // not redraw an empty texture in that case; keep the last camera view
+        // on screen until a new batch arrives.
+        if (!camera.EventsAvailable()) {return; }
 
         camera.Filter();
 
@@ -171,6 +180,8 @@ void Pub::timer_callback() {
 
         if (readerEvents.isEmpty()) {
             camera.Events.reset();
+            camera.Filtered = dv::EventStore();
+            gui.ClearCurrentBall3D();
             gui.Update();
             return;
         }
@@ -179,27 +190,37 @@ void Pub::timer_callback() {
     }
 
     if (!camera.FilteredAvailable()) {
+        if (!ui.UseReader()) {
+            return;
+        }
         gui.nb_event = 0;
+        gui.ClearCurrentBall3D();
         gui.Update();
         return;
     }
 
+    gui.ClearCurrentBall3D();
     applyInputCalibration();
     gui.nb_event = camera.FilteredCount();
 
     // Undistort must run on the full filtered window: the trace accumulation
     // feeds on the undistorted points, and running it after Echantillon would
     // cap the trail density to Maxevent subsampled events per window.
+    const int maxEvent = static_cast<int>(ui.Maxevent());
+    const int bandwidth = ui.Bandwidth();
+    const uint32_t minNb = static_cast<uint32_t>(ui.MinNb());
+
     camera.Undistort();
-    camera.Echantillon(ui.Maxevent());
+    camera.Echantillon(maxEvent);
 
     const auto t_pre_end = clock::now();
 
     const auto t_cluster_start = clock::now();
 
-    camera.Cluster(box,ui.Alpha(), ui.Bandwidth(), static_cast<uint32_t>(ui.MinNb()));
+    camera.Cluster(box, ui.Alpha(), bandwidth, minNb);
 
     const auto trackerClusters = buildTrackerClusters();
+    drawDbscanClusters(trackerClusters);
 
     const auto t_cluster_end = clock::now();
     const auto t_post_start = clock::now();
@@ -211,6 +232,9 @@ void Pub::timer_callback() {
 
     const double readerTimeSeconds = ui.PlaybackTimeSeconds();
     const double readerWindowSeconds = ui.PlaybackWindowSeconds();
+    const BallTrackerSettings currentTrackerSettings = trackerSettings();
+    const std::string readerTrackingSignature =
+        readerTrackingCacheSignature(currentTrackerSettings, maxEvent, bandwidth, minNb);
     const bool canReusePausedReaderTracking =
         ui.CircleFittingEnabled()
         &&
@@ -218,7 +242,8 @@ void Pub::timer_callback() {
         && !ui.PlaybackPlaying()
         && paused_reader_tracking_cache_.has_value()
         && std::fabs(readerTimeSeconds - paused_reader_tracking_time_seconds_) < 1.0e-9
-        && std::fabs(readerWindowSeconds - paused_reader_tracking_window_seconds_) < 1.0e-9;
+        && std::fabs(readerWindowSeconds - paused_reader_tracking_window_seconds_) < 1.0e-9
+        && readerTrackingSignature == paused_reader_tracking_signature_;
 
     BallTrackerResult tracking;
 
@@ -229,23 +254,26 @@ void Pub::timer_callback() {
         tracking = tracker.Update(
             trackerClusters,
             camera.calibration,
-            trackerSettings());
+            currentTrackerSettings);
 
         if (ui.UseReader()) {
             paused_reader_tracking_cache_ = tracking;
             paused_reader_tracking_time_seconds_ = readerTimeSeconds;
             paused_reader_tracking_window_seconds_ = readerWindowSeconds;
+            paused_reader_tracking_signature_ = readerTrackingSignature;
         }
         else {
             paused_reader_tracking_cache_.reset();
             paused_reader_tracking_time_seconds_ = -1.0;
             paused_reader_tracking_window_seconds_ = -1.0;
+            paused_reader_tracking_signature_.clear();
         }
     }
     else {
         paused_reader_tracking_cache_.reset();
         paused_reader_tracking_time_seconds_ = -1.0;
         paused_reader_tracking_window_seconds_ = -1.0;
+        paused_reader_tracking_signature_.clear();
     }
 
     if (tracking.hasCircle) {
@@ -353,11 +381,35 @@ BallTrackerSettings Pub::trackerSettings() const {
     return settings;
 }
 
-void Pub::drawTrackerResult(const BallTrackerResult &result) {
-    for (const auto &clusterView : result.clusterViews) {
-        gui.AddClusterView(clusterView);
-    }
+std::string Pub::readerTrackingCacheSignature(
+    const BallTrackerSettings &settings,
+    int maxEvent,
+    int bandwidth,
+    uint32_t minNb) const {
+    std::ostringstream signature;
+    signature.setf(std::ios::fixed);
+    signature << std::setprecision(6)
+              << "maxEvent=" << maxEvent
+              << ";bandwidth=" << bandwidth
+              << ";minNb=" << minNb
+              << ";ballRadiusMm=" << settings.ballRadiusMm
+              << ";positiveOnly=" << settings.positiveOnly
+              << ";coef=" << settings.coef
+              << ";filterSize=" << settings.filterSize
+              << ";maxResidual=" << settings.maxResidual
+              << ";rayonCote=" << settings.rayonCote
+              << ";symCoef=" << settings.symCoef
+              << ";symCoef2=" << settings.symCoef2
+              << ";alpha=" << settings.alpha
+              << ";radiusGate=" << settings.radiusGateEnabled
+              << ";weightedRegression=" << settings.weightedRegressionEnabled
+              << ";sliceMode=" << static_cast<int>(settings.sliceMode)
+              << ";temporalSliceCount=" << settings.temporalSliceCount
+              << ";eventsPerSlice=" << settings.eventsPerSlice;
+    return signature.str();
+}
 
+void Pub::drawTrackerResult(const BallTrackerResult &result) {
     if (result.hasCircle) {
         const Circle &c = result.circle;
         gui.AddCircle(c.x, c.y, c.r, GREEN);
@@ -400,11 +452,20 @@ void Pub::drawTrackerResult(const BallTrackerResult &result) {
     }
 }
 
+void Pub::drawDbscanClusters(const std::vector<BallTrackerClusterInput> &clusters) {
+    for (const auto &cluster : clusters) {
+        if (!cluster.points.empty()) {
+            gui.AddClusterView(cluster.points);
+        }
+    }
+}
+
 void Pub::resetTracks() {
     tracker.Reset();
     paused_reader_tracking_cache_.reset();
     paused_reader_tracking_time_seconds_ = -1.0;
     paused_reader_tracking_window_seconds_ = -1.0;
+    paused_reader_tracking_signature_.clear();
     gui.ClearImageTrajectory2D();
     gui.ClearTrajectory3D();
     gui.ClearTrace3D();

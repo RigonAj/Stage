@@ -31,6 +31,12 @@ class Observation:
     matched_count: int
     event_count: int
     created_at: str
+    pattern_id: str
+    pattern_type: str
+    pattern_label: str
+    pattern_rows: int
+    pattern_cols: int
+    expected_dots: int
 
 
 def load_observation(path: Path, min_points: int) -> Optional[Observation]:
@@ -50,6 +56,29 @@ def load_observation(path: Path, min_points: int) -> Optional[Observation]:
     if len(matches) < min_points:
         print(f"[skip] {path}: only {len(matches)} matches", file=sys.stderr)
         return None
+
+    mire = data.get("mire", {})
+    if not isinstance(mire, dict):
+        mire = {}
+    layout = mire.get("layout", {})
+    if not isinstance(layout, dict):
+        layout = {}
+
+    pattern_id = str(mire.get("pattern") or layout.get("pattern") or "mire")
+    pattern_type = str(mire.get("pattern_type") or layout.get("pattern_type") or "dot_grid")
+    pattern_label = str(
+        mire.get("pattern_label")
+        or layout.get("pattern_label")
+        or pattern_id
+    )
+    pattern_rows = int(mire.get("rows") or layout.get("rows") or 0)
+    pattern_cols = int(mire.get("cols") or layout.get("cols") or 0)
+    expected_dots = int(
+        mire.get("expected_dots")
+        or layout.get("expected_dots")
+        or detection.get("expected_dots")
+        or len(matches)
+    )
 
     def match_key(match: Dict[str, object]) -> Tuple[int, int]:
         return int(match.get("row", 0)), int(match.get("col", 0))
@@ -76,6 +105,12 @@ def load_observation(path: Path, min_points: int) -> Optional[Observation]:
         matched_count=len(matches),
         event_count=int(camera.get("events_accumulated", 0)),
         created_at=str(data.get("created_at", "")),
+        pattern_id=pattern_id,
+        pattern_type=pattern_type,
+        pattern_label=pattern_label,
+        pattern_rows=pattern_rows,
+        pattern_cols=pattern_cols,
+        expected_dots=expected_dots,
     )
 
 
@@ -86,6 +121,13 @@ def collect_observations(args: argparse.Namespace) -> List[Observation]:
     for path in paths:
         observation = load_observation(path, args.min_points)
         if observation is not None:
+            if args.pattern != "all" and observation.pattern_id != args.pattern:
+                print(
+                    f"[skip] {path}: pattern {observation.pattern_id!r} "
+                    f"does not match --pattern {args.pattern!r}",
+                    file=sys.stderr,
+                )
+                continue
             observations.append(observation)
     return observations
 
@@ -108,7 +150,53 @@ def validate_observations(observations: Sequence[Observation], min_views: int) -
             file=sys.stderr,
         )
 
+    pattern_ids = {obs.pattern_id for obs in observations}
+    if len(pattern_ids) > 1:
+        print(
+            f"[warn] observations mix target patterns: {sorted(pattern_ids)}",
+            file=sys.stderr,
+        )
+
     return observations[0].image_size
+
+
+def summarize_patterns(observations: Sequence[Observation]) -> Dict[str, object]:
+    summaries: Dict[str, Dict[str, object]] = {}
+    for obs in observations:
+        key = obs.pattern_id
+        summary = summaries.setdefault(
+            key,
+            {
+                "pattern_id": obs.pattern_id,
+                "pattern_type": obs.pattern_type,
+                "pattern_label": obs.pattern_label,
+                "rows": obs.pattern_rows,
+                "cols": obs.pattern_cols,
+                "expected_dots": obs.expected_dots,
+                "observation_count": 0,
+                "matched_point_counts": [],
+                "files": [],
+            },
+        )
+        summary["observation_count"] = int(summary["observation_count"]) + 1
+        matched_counts = summary["matched_point_counts"]
+        files = summary["files"]
+        assert isinstance(matched_counts, list)
+        assert isinstance(files, list)
+        matched_counts.append(int(obs.matched_count))
+        files.append(str(obs.path))
+
+    patterns = list(summaries.values())
+    for summary in patterns:
+        matched_counts = summary["matched_point_counts"]
+        assert isinstance(matched_counts, list)
+        summary["matched_point_counts"] = sorted(set(int(count) for count in matched_counts))
+
+    return {
+        "mixed": len(patterns) > 1,
+        "patterns": patterns,
+        "primary": patterns[0] if len(patterns) == 1 else None,
+    }
 
 
 def view_geometry(observation: Observation) -> Dict[str, float]:
@@ -429,6 +517,7 @@ def write_opencv_xml(
     camera_matrix: np.ndarray,
     dist_coeffs: np.ndarray,
     rms: float,
+    pattern_summary: Dict[str, object],
     args: argparse.Namespace,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -447,16 +536,36 @@ def write_opencv_xml(
 
     fs.write("use_fisheye_model", 0)
     fs.write("type", "camera")
-    fs.write("pattern_width", 5)
-    fs.write("pattern_height", 4)
-    fs.write("pattern_type", "blinking_mire")
-    fs.write("board_width", 5)
-    fs.write("board_height", 4)
+    primary = pattern_summary.get("primary")
+    if isinstance(primary, dict):
+        pattern_width = int(primary.get("cols", 0) or 0)
+        pattern_height = int(primary.get("rows", 0) or 0)
+        pattern_type = str(primary.get("pattern_type", "dot_grid"))
+        pattern_id = str(primary.get("pattern_id", "mire"))
+        pattern_label = str(primary.get("pattern_label", pattern_id))
+        pattern_expected = int(primary.get("expected_dots", 0) or 0)
+    else:
+        pattern_width = 0
+        pattern_height = 0
+        pattern_type = "mixed_blinking_dot_grid"
+        pattern_id = "mixed"
+        pattern_label = "mixed"
+        pattern_expected = 0
+
+    fs.write("pattern_width", pattern_width)
+    fs.write("pattern_height", pattern_height)
+    fs.write("pattern_type", pattern_type)
+    fs.write("pattern_id", pattern_id)
+    fs.write("pattern_label", pattern_label)
+    fs.write("pattern_expected_dots", pattern_expected)
+    fs.write("board_width", pattern_width)
+    fs.write("board_height", pattern_height)
     fs.write("square_size", 0.0)
     fs.write("calibration_error", float(rms))
     fs.write("calibration_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     fs.write("source", "scripts/calibrate_intrinsics_from_mire.py")
     fs.write("input_dir", str(args.input_dir))
+    fs.write("input_pattern_filter", str(args.pattern))
     fs.release()
 
 
@@ -472,6 +581,7 @@ def write_report_json(
     view_reports: Sequence[Dict[str, object]],
     mean_error: float,
     max_error: float,
+    pattern_summary: Dict[str, object],
     diversity: Sequence[Dict[str, float]],
     warnings: Sequence[str],
     robust_info: Dict[str, object],
@@ -482,7 +592,9 @@ def write_report_json(
         "created_at": datetime.now().isoformat(timespec="milliseconds"),
         "input_dir": str(args.input_dir),
         "glob": args.glob,
+        "pattern_filter": args.pattern,
         "observation_count": len(observations),
+        "patterns": pattern_summary,
         "image_size": {"width": image_size[0], "height": image_size[1]},
         "rms_px": float(rms),
         "mean_reprojection_error_px": mean_error,
@@ -517,10 +629,23 @@ def print_summary(
     mean_error: float,
     max_error: float,
     view_reports: Sequence[Dict[str, object]],
+    pattern_summary: Dict[str, object],
     warnings: Sequence[str],
 ) -> None:
     print(f"Observations used: {len(observations)}")
     print(f"Image size: {observations[0].image_size[0]}x{observations[0].image_size[1]}")
+    patterns = pattern_summary.get("patterns", [])
+    if isinstance(patterns, list):
+        for pattern in patterns:
+            if not isinstance(pattern, dict):
+                continue
+            print(
+                "Pattern: "
+                f"{pattern.get('pattern_id')} "
+                f"({pattern.get('pattern_label')}) - "
+                f"{pattern.get('observation_count')} views, "
+                f"counts {pattern.get('matched_point_counts')}"
+            )
     print(f"RMS reprojection error: {rms:.4f} px")
     print(f"Mean / max reprojection error: {mean_error:.4f} / {max_error:.4f} px")
     print("Camera matrix:")
@@ -538,6 +663,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", default=DEFAULT_INPUT_DIR, help="Directory containing mire_observation_*.json files.")
     parser.add_argument("--glob", default="mire_observation_*.json", help="Input JSON glob relative to input-dir.")
+    parser.add_argument(
+        "--pattern",
+        default="all",
+        help="Use only observations with this mire pattern id (default: all).",
+    )
     parser.add_argument("--output-xml", default=DEFAULT_OUTPUT_XML, help="OpenCV XML calibration output.")
     parser.add_argument("--output-json", default=DEFAULT_OUTPUT_JSON, help="Human-readable JSON report output.")
     parser.add_argument("--camera-name", default="DVXplorer_mire", help="Top-level camera node name in the OpenCV XML.")
@@ -585,6 +715,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
     warnings, diversity = diversity_warnings(observations)
+    pattern_summary = summarize_patterns(observations)
 
     flags = calibration_flags(args)
     result = run_calibration(
@@ -619,6 +750,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         camera_matrix,
         dist_coeffs,
         float(rms),
+        pattern_summary,
         args,
     )
     write_report_json(
@@ -633,6 +765,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         view_reports,
         mean_error,
         max_error,
+        pattern_summary,
         diversity,
         warnings,
         robust_info,
@@ -647,6 +780,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         mean_error,
         max_error,
         view_reports,
+        pattern_summary,
         warnings,
     )
     print(f"OpenCV XML written: {args.output_xml}")

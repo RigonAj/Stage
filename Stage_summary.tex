@@ -13,29 +13,111 @@
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,calc,decorations.pathreplacing}
 \usepackage[hidelinks,unicode]{hyperref}
+\Urlmuskip=0mu plus 1mu
+\newcommand{\figref}[1]{\hyperref[#1]{figure~\ref*{#1}}}
 
 \geometry{margin=2.5cm}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.75em}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\renewcommand{\bibname}{Bibliographie et webographie}
 
 \title{Rapport de stage\\\large Détection et estimation 3D d'une balle rapide par caméra événementielle}
 \author{Rigon Ajvazi}
-\date{Mai 2026}
+\date{Juillet 2026}
 
 \begin{document}
 
-\maketitle
+\pagenumbering{gobble}
+
+\begin{titlepage}
+  \centering
+  \includegraphics[width=0.42\textwidth]{images/logo_UCA_Long_300dpi.png}\par
+  \vspace{1.2cm}
+  {\Large UNIVERSITÉ CLERMONT AUVERGNE\par}
+  {\large Clermont-Ferrand\par}
+  \vspace{0.4cm}
+  \rule{0.35\textwidth}{0.4pt}\par
+  \vspace{0.4cm}
+  {\large École Universitaire de Physique et d'Ingénierie\par}
+  \vspace{0.4cm}
+  \rule{0.35\textwidth}{0.4pt}\par
+  \vspace{1.2cm}
+  {\Large\bfseries RAPPORT DE STAGE\par}
+  \vspace{0.3cm}
+  {\large 1\textsuperscript{ère} année de Master\par}
+  {\large Spécialité: Mécatronique\par}
+  \vfill
+  {\large Rigon Ajvazi\par}
+  \vspace{0.9cm}
+  {\LARGE\bfseries Détection et estimation 3D d'une balle rapide par caméra événementielle\par}
+  \vfill
+  \begin{tabular}{L{0.42\textwidth}L{0.45\textwidth}}
+    Période de stage & du 1\textsuperscript{er} avril 2026 au 25 juillet 2026 \\
+    Organisme d'accueil & Institut Pascal, Université Clermont Auvergne / CNRS \\
+    Soutien financier & Bourse CIR ITPS, International Research Centre on Innovative Transportation and Production Systems, I-SITE CAP 20-25 \\
+    Tuteur de stage & Sébastien Lengagne \\
+    Tuteur académique & Benoit Thuilot \\
+    Date de soutenance & à compléter \\
+  \end{tabular}
+  \vfill
+  {\small Soutien financier\par}
+  \vspace{0.25cm}
+  \begin{minipage}{0.54\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/logos/cir_itps.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.36\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/logos/isite_cap_20_25.png}
+  \end{minipage}
+  \vfill
+  {\large Année universitaire 2025--2026\par}
+\end{titlepage}
+
+\clearpage
+\pagenumbering{roman}
+
+\chapter*{Remerciements}
+\phantomsection
+\addcontentsline{toc}{chapter}{Remerciements}
+
+Je tiens tout d'abord à remercier mon tuteur de stage, Sébastien Lengagne, ainsi que Céline Teulière, pour leur encadrement, leur disponibilité, leur aide et les échanges qui ont orienté mon travail tout au long du stage. Leur accompagnement m'a permis de mieux comprendre les enjeux de la perception robotique rapide et de situer mon travail dans un contexte de recherche appliquée.
+
+Je remercie également mon tuteur académique, Benoit Thuilot, pour le suivi du stage et pour les conseils apportés dans la structuration du travail. Je remercie plus largement les membres de l'Institut Pascal et les personnes avec lesquelles j'ai pu échanger au cours du stage, pour leur accueil.
+
+Enfin, je remercie l'Université Clermont Auvergne et l'Institut Pascal de m'avoir permis de réaliser ce stage dans un cadre associant robotique, vision événementielle et apprentissage par renforcement.
+
+Ce travail a bénéficié du soutien du Centre International de Recherche \emph{Innovative Transportation and Production Systems} (CIR ITPS) de l'I-SITE CAP 20-25, par l'attribution d'une bourse CIR ITPS.
+
+\clearpage
+
+\chapter*{Résumé du sujet de stage}
+\phantomsection
+\addcontentsline{toc}{chapter}{Résumé du sujet de stage}
+
+Ce rapport présente le travail réalisé pendant un stage effectué du 1\textsuperscript{er} avril 2026 au 25 juillet 2026 à l'Institut Pascal, unité mixte de recherche de l'Université Clermont Auvergne et du CNRS. Le sujet porte sur la détection et l'estimation 3D d'une balle rapide à partir d'une caméra événementielle DVXplorer \cite{inivation-dvxplorer}, dans la perspective d'une tâche robotique d'interception.
+
+L'objectif du stage est de construire une chaîne de perception capable de fournir une position de balle exploitable par un système robotique. Deux approches sont étudiées: une première méthode par ajustement de cercle, adaptée lorsque la balle produit une projection circulaire nette, puis une méthode fondée sur l'analyse de la trace événementielle, plus robuste lorsque le mouvement rapide allonge le signal dans l'image. Le rapport présente le contexte de l'organisme d'accueil, l'environnement de travail, les choix algorithmiques, les étapes de calibration, les résultats obtenus en simulation et les perspectives d'intégration avec une commande robotique sous Isaac Lab \cite{nvidia-isaac-lab} et PPO \cite{schulman-ppo}.
+
+\textbf{Mots clés:} caméra événementielle, robotique, estimation 3D, détection de balle, ROS 2, Isaac Lab, apprentissage par renforcement.
+
+\clearpage
+
 \tableofcontents
 \clearpage
+\pagenumbering{arabic}
 
 \chapter{Introduction}
 
-\section{Contexte du stage}
+La robotique moderne s'appuie de plus en plus sur des systèmes capables de percevoir leur environnement, de décider rapidement et d'agir dans des situations dynamiques. Cette évolution concerne notamment les robots manipulateurs, qui ne doivent plus seulement répéter une trajectoire fixe, mais réagir à des objets en mouvement. Dans ce contexte, la perception devient un élément central: une commande robotique ne peut être efficace que si les informations utilisées sont assez rapides, assez précises et correctement exprimées dans le repère du robot.
 
-Le projet de stage s'inscrit dans le domaine de la robotique intelligente et de la perception en temps réel. L'objectif général est de permettre à un robot manipulateur d'attraper une balle lancée vers lui. Pour réaliser cette tâche, le robot doit disposer d'une estimation rapide et fiable de la position de la balle, puis utiliser cette information pour choisir une action d'interception.
+Le stage présenté dans ce rapport s'inscrit dans ce cadre. Il a été réalisé à l'Institut Pascal, au sein de l'Université Clermont Auvergne, du 1\textsuperscript{er} avril 2026 au 25 juillet 2026. Il porte sur la détection et l'estimation 3D d'une balle rapide à partir d'une caméra événementielle DVXplorer \cite{inivation-dvxplorer}. L'objectif général est de fournir à terme une information de position exploitable par un robot manipulateur pour une tâche d'interception.
 
-Le problème est fortement dynamique. Une balle lancée se déplace rapidement, sa position change en quelques millisecondes, et une erreur de profondeur peut déplacer le point d'interception de plusieurs centimètres. La perception doit donc fonctionner avec une latence faible, tout en restant robuste au bruit, aux erreurs de calibration et aux déformations produites par le mouvement rapide de la balle.
+Le problème étudié est fortement dynamique. Une balle lancée se déplace rapidement, sa position change en quelques millisecondes, et une erreur de profondeur peut déplacer le point d'interception de plusieurs centimètres. La perception doit donc fonctionner avec une latence faible, tout en restant robuste au bruit, aux erreurs de calibration et aux déformations produites par le mouvement rapide de la balle. L'objectif visé est d'obtenir une estimation de profondeur à environ \(5~\text{cm}\) près, avec un temps de cycle inférieur à \(10~\text{ms}\), afin que l'information reste exploitable pour une commande robotique rapide.
+
+La \figref{fig:event-camera} présente la caméra événementielle utilisée pendant le stage pour produire le flux d'événements exploité par les algorithmes.
 
 \begin{figure}[H]
   \centering
@@ -44,45 +126,240 @@ Le problème est fortement dynamique. Une balle lancée se déplace rapidement, 
   \label{fig:event-camera}
 \end{figure}
 
-La solution étudiée repose sur une caméra événementielle DVXplorer. Contrairement à une caméra classique, elle ne produit pas une image complète à fréquence fixe. Elle émet des événements lorsqu'un changement local de luminosité est détecté. Chaque événement contient une position dans l'image, un timestamp et une polarité. Cette représentation est très adaptée aux objets rapides, car elle fournit une information temporelle fine et ne transmet que les pixels qui changent.
-
-\section{Objectifs techniques}
+Les caméras classiques fournissent des images complètes à une fréquence donnée. Cette approche est simple à exploiter, mais elle atteint vite ses limites lorsque l'objet observé est rapide: entre deux images, la balle peut avoir déjà parcouru une distance importante, et le traitement d'une image dense ajoute de la latence. La solution étudiée repose donc sur une caméra événementielle. Contrairement à une caméra classique, elle ne produit pas une image complète à fréquence fixe. Elle émet des événements lorsqu'un changement local de luminosité est détecté. Chaque événement contient une position dans l'image, un timestamp et une polarité. Cette représentation est très adaptée aux objets rapides, car elle fournit une information temporelle fine et ne transmet que les pixels qui changent.
 
 Les objectifs du projet peuvent être résumés en quatre axes:
 \begin{itemize}
   \item détecter la balle dans un flux d'événements bruité;
   \item estimer sa position 3D à partir de la calibration caméra et du rayon connu de la balle;
   \item reconstruire une trajectoire cohérente dans le temps;
-  \item préparer l'utilisation de cette trajectoire par un robot entraîné dans Isaac Lab avec PPO.
+  \item préparer l'utilisation de cette trajectoire par un robot entraîné dans Isaac Lab \cite{nvidia-isaac-lab} avec PPO \cite{schulman-ppo}.
 \end{itemize}
 
 La première approche développée repose sur un \emph{circle fitting}: on ajuste un cercle sur les événements associés à la balle, puis on utilise le rayon apparent pour calculer la profondeur. Cette méthode fonctionne lorsque la projection de la balle reste proche d'un cercle. Cependant, pour une balle rapide, les événements forment souvent une trace allongée. Le rayon estimé devient alors instable et la profondeur calculée peut être fortement faussée.
 
 Une seconde méthode a donc été développée: l'analyse de trace. Au lieu de chercher uniquement un cercle, elle exploite la trace complète laissée par la balle dans les événements. La largeur de cette trace est mesurée à partir de nombreux points, ce qui rend l'estimation moins dépendante d'une erreur locale de quelques pixels.
 
+Ce rapport commence par présenter l'organisme d'accueil, l'Université Clermont Auvergne et l'Institut Pascal, puis l'environnement dans lequel le stage s'est déroulé. La suite décrit le poste occupé et la chaîne de traitement développée. Les chapitres suivants détaillent les deux méthodes de perception étudiées, la validation en simulation, la calibration extrinsèque envisagée et le lien avec la partie robotique. Le rapport se termine par un bilan technique et personnel du stage.
+
+\chapter{Présentation de l'organisme d'accueil}
+
+\section{Université Clermont Auvergne}
+
+L'Université Clermont Auvergne (UCA) est un établissement public expérimental d'enseignement supérieur et de recherche. La nouvelle UCA, sous ce statut, est née le 1\textsuperscript{er} janvier 2021 dans le prolongement de la structuration du site clermontois et de la démarche I-SITE CAP 20-25. Elle regroupe des activités de formation, de recherche et d'innovation sur plusieurs sites à Clermont-Ferrand et dans la région Auvergne.
+
+L'UCA indique rassembler environ 36\,000 étudiants, 350 formations et 47 structures de recherche. Elle s'organise autour de six instituts qui regroupent les composantes de formation et de recherche par grands domaines. Cette organisation permet de faire le lien entre enseignement supérieur, laboratoires, plateformes expérimentales et partenaires socio-économiques.
+
+\begin{table}[H]
+  \centering
+  \caption{Carte d'identité synthétique de l'Université Clermont Auvergne et de l'organisme d'accueil.}
+  \label{tab:identite-organisme}
+  \begin{tabular}{L{0.31\textwidth}L{0.60\textwidth}}
+    \toprule
+    Élément & Information \\
+    \midrule
+    Nom de l'établissement & Université Clermont Auvergne (UCA) \\
+    Statut & Établissement public expérimental à caractère scientifique, culturel et professionnel \\
+    Adresse du siège & 49 boulevard François-Mitterrand, CS 60032, 63001 Clermont-Ferrand Cedex 1 \\
+    Téléphone & 04 73 17 79 79 \\
+    SIRET du siège & 130 028 061 00013 \\
+    Organisme d'accueil du stage & Institut Pascal, UMR 6602 UCA/CNRS \\
+    Adresse de l'Institut Pascal & Campus universitaire des Cézeaux, 4 avenue Blaise Pascal, TSA/CS 60026, 63178 Aubière Cedex \\
+    Effectif de l'Institut Pascal & Environ 400 personnes \\
+    Activité principale & Formation, recherche et innovation, en particulier en sciences de l'ingénierie pour l'Institut Pascal \\
+    Capital social & Non applicable pour un établissement public \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Institut Pascal}
+
+L'Institut Pascal est l'unité de recherche dans laquelle le stage s'est déroulé. Il s'agit d'une unité mixte de recherche et de formation interdisciplinaire, UMR 6602, placée sous la tutelle de l'Université Clermont Auvergne et du CNRS, avec le CHU de Clermont-Ferrand comme tutelle secondaire. L'institut est également membre de Clermont Auvergne INP. Il couvre les sciences de l'ingénierie du site clermontois: génie des procédés, mécanique, robotique, physique des sciences de l'information et ingénierie de la santé.
+
+L'Institut Pascal rassemble environ 400 personnes et se positionne sur des recherches allant du développement de connaissances fondamentales jusqu'à leur intégration dans des systèmes. Ses domaines d'application principaux sont la mobilité et les transports, l'usine et l'industrie 4.0, ainsi que l'hôpital du futur. Cette orientation explique la place importante donnée aux systèmes robotiques, à la perception, à la commande et aux plateformes expérimentales.
+
+\section{Historique et implantation}
+
+La structuration de l'Institut Pascal s'est faite progressivement à partir de regroupements de laboratoires du site clermontois. L'objectif était de rassembler des compétences complémentaires dans les sciences de l'ingénierie et des systèmes, afin de favoriser des projets interdisciplinaires. Cette logique se retrouve aujourd'hui dans l'organisation de l'institut, où les axes scientifiques couvrent des domaines différents mais reliés par des problématiques communes: modéliser, percevoir, commander, fabriquer et valider expérimentalement.
+
+Le stage a eu lieu sur le campus universitaire des Cézeaux, à Aubière. Ce campus regroupe plusieurs composantes scientifiques et techniques de l'UCA, ainsi que des laboratoires et plateformes utiles aux travaux en robotique. L'implantation sur un même site facilite les échanges entre étudiants, enseignants-chercheurs, doctorants, ingénieurs et personnels techniques. La \figref{fig:implantation-uca-ip} situe schématiquement l'Institut Pascal dans cet environnement.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      site/.style={draw, rounded corners=2pt, align=center, minimum width=4.0cm, minimum height=1.15cm},
+      arrow/.style={-{Latex[length=3mm]}, thick}
+    ]
+    \node[site] (uca) {Université Clermont Auvergne\\Clermont-Ferrand};
+    \node[site, below left=1.1cm and 1.1cm of uca] (cezeaux) {Campus des Cézeaux\\Aubière};
+    \node[site, below right=1.1cm and 1.1cm of uca] (sites) {Autres sites UCA\\Auvergne};
+    \node[site, below=1.1cm of cezeaux] (ip) {Institut Pascal\\UMR 6602 UCA/CNRS};
+    \draw[arrow] (uca) -- (cezeaux);
+    \draw[arrow] (uca) -- (sites);
+    \draw[arrow] (cezeaux) -- (ip);
+  \end{tikzpicture}
+  \caption{Implantation schématique de l'organisme d'accueil dans l'environnement UCA.}
+  \label{fig:implantation-uca-ip}
+\end{figure}
+
+\section{Activités, partenaires et structure interne}
+
+L'Institut Pascal ne fonctionne pas comme une entreprise commerciale classique. Les notions de clientèle et de chiffre d'affaires sont donc à interpréter avec prudence. Ses activités concernent principalement la recherche académique, les projets collaboratifs, les contrats avec des partenaires industriels, la participation à des réseaux scientifiques et l'appui à la formation par la recherche. Les partenaires peuvent être des laboratoires, des établissements d'enseignement supérieur, des organismes publics, des collectivités ou des entreprises.
+
+L'institut est structuré autour de cinq axes de recherche:
+\begin{itemize}
+  \item Génie des Procédés, Énergétique et Biosystèmes (GePEB);
+  \item Image, Systèmes de Perception, Robotique (ISPR);
+  \item Mécanique, Génie Mécanique, Génie Civil, Génie Industriel (M3G);
+  \item Photonique, Ondes, Nanomatériaux (PHOTON);
+  \item Thérapies Guidées par l'Image (TGI).
+\end{itemize}
+
+\section{Domaines d'application et partenaires}
+
+Les activités de l'Institut Pascal peuvent être regroupées autour de trois grands domaines d'application. Le premier concerne la mobilité et les transports des biens et des personnes. Il s'agit par exemple de concevoir des systèmes plus sûrs, plus autonomes ou plus efficaces, en s'appuyant sur la mécanique, la robotique, la perception et la modélisation. Le deuxième domaine concerne l'usine et l'industrie 4.0, avec des problématiques de production, d'automatisation, de robotique collaborative, de contrôle et d'interaction humain-machine. Le troisième domaine concerne l'hôpital du futur, dans lequel l'image, les systèmes guidés et les dispositifs d'assistance jouent un rôle important.
+
+\begin{table}[H]
+  \centering
+  \caption{Lecture synthétique des domaines d'application de l'Institut Pascal.}
+  \label{tab:domaines-ip}
+  \begin{tabular}{L{0.28\textwidth}L{0.62\textwidth}}
+    \toprule
+    Domaine & Exemples d'enjeux scientifiques et techniques \\
+    \midrule
+    Mobilité et transports & Perception de l'environnement, robotique mobile, modélisation de systèmes dynamiques, sécurité et autonomie. \\
+    Usine et industrie 4.0 & Robotique collaborative, automatisation, contrôle, instrumentation, procédés et optimisation industrielle. \\
+    Hôpital du futur & Imagerie, dispositifs guidés, assistance au geste, reconstruction 3D et systèmes d'aide à la décision. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Pour un laboratoire public, la notion de clientèle ne correspond pas à celle d'une entreprise commerciale. Les bénéficiaires et partenaires sont plutôt des équipes académiques, des établissements publics, des industriels, des collectivités, des doctorants et des étudiants. Les résultats produits prennent la forme de publications scientifiques, de prototypes, de logiciels, de bancs expérimentaux, de méthodes de modélisation, de jeux de données et de transferts vers des partenaires.
+
+L'Institut Pascal participe également à des dispositifs de partenariat structurants. Il est notamment associé à des projets soutenus par des opérateurs de recherche comme l'ANR, l'Union Européenne, la Région Auvergne-Rhône-Alpes ou le programme CAP 20-25. Il est aussi impliqué dans des collaborations avec le monde industriel, par exemple autour de FactoLab, laboratoire commun lié à Michelin et orienté vers l'industrie du futur. Cette proximité avec des problématiques réelles explique que les travaux de recherche ne se limitent pas à des modèles théoriques: ils cherchent souvent à produire des solutions testables sur des plateformes expérimentales.
+
+Dans ce cadre, le Centre International de Recherche \emph{Innovative Transportation and Production Systems} (CIR ITPS) fédère des activités du site clermontois autour des systèmes innovants pour les transports et la production \cite{cir-itps}. Le stage présenté dans ce rapport a bénéficié d'une bourse CIR ITPS. La mention de ce soutien et l'utilisation des logos CIR ITPS et I-SITE CAP 20-25 répondent aux consignes officielles applicables aux rapports de stage soutenus par ce centre \cite{cir-itps-useful}.
+
+\section{Organisation interne}
+
+La structure interne de l'Institut Pascal repose sur des axes scientifiques qui correspondent à de grands ensembles de compétences. Cette organisation permet de regrouper les chercheurs et personnels techniques par disciplines, tout en favorisant des projets transversaux. Dans le cas de mon stage, la perception événementielle mobilise plusieurs notions complémentaires: géométrie 3D, traitement du signal, programmation temps réel, robotique et apprentissage. La \figref{fig:organigramme-ip-stage} donne une lecture simplifiée de cette organisation et de la place du stage.
+
+\begin{table}[H]
+  \centering
+  \caption{Axes scientifiques de l'Institut Pascal et lien avec le sujet de stage.}
+  \label{tab:axes-ip}
+  \begin{tabular}{L{0.20\textwidth}L{0.42\textwidth}L{0.27\textwidth}}
+    \toprule
+    Axe & Domaine principal & Lien possible avec le stage \\
+    \midrule
+    GePEB & Procédés, énergie, biosystèmes & Méthodes expérimentales, instrumentation et modélisation. \\
+    ISPR & Image, perception, robotique & Axe directement lié à la caméra événementielle et à l'interception robotique. \\
+    M3G & Mécanique, génie mécanique, génie civil et industriel & Modélisation de systèmes mécaniques et contraintes de mouvement. \\
+    PHOTON & Photonique, ondes et nanomatériaux & Capteurs, phénomènes physiques et acquisition de signal. \\
+    TGI & Thérapies guidées par l'image & Méthodes d'imagerie, reconstruction et assistance par vision. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      orgbig/.style={draw, rounded corners=2pt, align=center, text width=0.36\textwidth, minimum height=0.85cm},
+      orgsmall/.style={draw, rounded corners=2pt, align=center, text width=0.13\textwidth, minimum height=0.75cm, font=\small},
+      arrow/.style={-{Latex[length=2.5mm]}, thick}
+    ]
+    \node[orgbig] (tutelles) {Tutelles\\UCA / CNRS};
+    \node[orgbig, below=0.8cm of tutelles] (ip) {Institut Pascal\\UMR 6602};
+    \node[orgsmall, below=1.0cm of ip, xshift=-5.6cm] (gepeb) {GePEB};
+    \node[orgsmall, below=1.0cm of ip, xshift=-2.8cm] (ispr) {ISPR};
+    \node[orgsmall, below=1.0cm of ip] (m3g) {M3G};
+    \node[orgsmall, below=1.0cm of ip, xshift=2.8cm] (photon) {PHOTON};
+    \node[orgsmall, below=1.0cm of ip, xshift=5.6cm] (tgi) {TGI};
+    \node[orgbig, below=0.8cm of ispr, text width=0.30\textwidth] (maccs) {Équipe MACCS\\robotique et commande};
+    \draw[arrow] (tutelles) -- (ip);
+    \foreach \x in {gepeb,ispr,m3g,photon,tgi} {
+      \draw[arrow] (ip.south) -- (\x.north);
+    }
+    \draw[arrow] (ispr) -- (maccs);
+  \end{tikzpicture}
+  \caption{Organigramme simplifié situant le stage dans l'organisation scientifique de l'Institut Pascal.}
+  \label{fig:organigramme-ip-stage}
+\end{figure}
+
+\subsection*{Environnement technique}
+
+L'environnement technique du stage combine plusieurs outils matériels et logiciels. La caméra DVXplorer \cite{inivation-dvxplorer} fournit les événements utilisés par les méthodes de détection. Les données peuvent provenir de la caméra réelle ou de séquences enregistrées, ce qui permet de répéter les essais et de comparer plusieurs versions de l'algorithme dans les mêmes conditions. Le traitement est réalisé principalement en C++, car la tâche impose une vitesse de calcul élevée et une latence faible: l'information produite doit rester utilisable pour une interception rapide. ROS 2 \cite{ros2-docs} est utilisé pour publier les résultats et préparer l'intégration avec la chaîne robotique. Une interface adaptée au projet est également développée avec raylib \cite{raylib}, une bibliothèque C/C++ légère destinée aux affichages graphiques interactifs, afin de visualiser les événements, les détections et les estimations 3D pendant les essais.
+
+\begin{table}[H]
+  \centering
+  \caption{Principaux moyens techniques mobilisés pendant le stage.}
+  \label{tab:moyens-techniques}
+  \begin{tabular}{L{0.28\textwidth}L{0.62\textwidth}}
+    \toprule
+    Élément & Utilisation dans le stage \\
+    \midrule
+    Caméra événementielle DVXplorer \cite{inivation-dvxplorer} & Acquisition d'événements à faible latence pour suivre une balle rapide. \\
+    Séquences enregistrées & Relecture des essais pour tester les algorithmes de manière reproductible. \\
+    C++ et ROS 2 \cite{ros2-docs} & Traitement rapide à faible latence, publication des résultats et préparation de l'intégration robotique. \\
+    OpenCV \cite{opencv-calib3d} & Correction géométrique, calibration intrinsèque et calculs associés à la projection caméra. \\
+    raylib \cite{raylib} & Bibliothèque graphique légère utilisée pour créer une interface adaptée au projet et visualiser les résultats. \\
+    Isaac Lab \cite{nvidia-isaac-lab} et PPO \cite{schulman-ppo} & Étude de la partie robotique et de l'apprentissage d'une politique d'interception. \\
+    Visualisations 2D/3D & Diagnostic des clusters, des trajectoires et des erreurs de profondeur. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Cette combinaison d'outils impose de garder une cohérence entre plusieurs repères et plusieurs échelles de temps. Les événements ont leurs propres timestamps, les estimations 3D sont exprimées dans le repère caméra, le robot travaille dans son repère de base, et la simulation utilise encore ses propres conventions. Une partie importante du travail consiste donc à vérifier que les informations produites par la perception pourront être utilisées sans ambiguïté dans la suite de la chaîne.
+
+\subsection*{Positionnement du sujet dans l'organisme}
+
+Le sujet de stage se situe au croisement de plusieurs objectifs de l'Institut Pascal: développer des méthodes de perception, les tester sur des systèmes rapides, et préparer leur utilisation dans un contexte robotique. Il ne s'agit pas uniquement de détecter une balle dans une image. Il faut produire une estimation 3D robuste, temporellement cohérente, suffisamment rapide et compatible avec une commande robotique.
+
+Ce positionnement justifie l'utilisation d'une caméra événementielle. Pour une tâche d'interception, une caméra classique peut fournir trop peu d'informations temporelles ou introduire une latence trop importante. La caméra événementielle répond à cette difficulté en transmettant uniquement les variations de luminosité, avec une résolution temporelle plus fine. En revanche, elle impose de changer les méthodes de traitement: on ne travaille plus sur une image dense, mais sur un nuage d'événements irrégulier, bruité et dépendant du mouvement.
+
+Le stage contribue donc à une étape intermédiaire essentielle entre la perception brute et la robotique. Les méthodes développées doivent transformer un flux d'événements en une trajectoire exploitable. Cette trajectoire pourra ensuite être calibrée dans le repère du robot, filtrée, prédite et utilisée par une politique d'interception ou un contrôleur. Le sujet est ainsi représentatif d'une problématique de mécatronique: le résultat dépend à la fois du capteur, de l'algorithme, du modèle géométrique, du logiciel temps réel et du système robotique.
+
 \chapter{Architecture générale du projet}
+
+\section{Poste occupé et étude confiée}
+
+Pendant le stage, j'ai occupé une fonction de développement et d'expérimentation autour d'une chaîne de perception robotique. Le travail confié consistait à étudier comment détecter une balle rapide dans un flux événementiel, estimer sa position 3D, analyser les limites des méthodes mises en place et préparer l'utilisation de cette information par une partie robotique.
+
+La tâche finale à réaliser est de permettre à un robot à 6 degrés de liberté, ici un UR3e, d'attraper une balle lancée vers lui. Pour détecter la balle avec une latence suffisamment faible, le système s'appuie sur une caméra événementielle, dont les données doivent être transformées en une information de position exploitable par le robot.
+
+Les tâches principales ont été les suivantes:
+\begin{itemize}
+  \item comprendre le fonctionnement de la caméra événementielle et le format des données produites;
+  \item développer une chaîne C++/ROS 2 \cite{ros2-docs} de filtrage, regroupement et estimation de la balle;
+  \item comparer une méthode par ajustement de cercle avec une méthode par analyse de trace;
+  \item utiliser des séquences simulées pour disposer d'une vérité terrain et analyser les erreurs;
+  \item identifier les besoins de calibration entre la caméra et le robot;
+  \item préparer le lien avec une politique d'interception apprise en simulation.
+\end{itemize}
+
+Le reste du rapport présente l'étude de manière structurée: analyse de l'existant, choix techniques, solutions proposées, essais, limites observées et bilan.
 
 \section{Chaîne de traitement}
 
-Le projet principal est un package C++/ROS 2. Il peut fonctionner avec la caméra DVXplorer réelle ou avec des fichiers d'événements enregistrés au format H5. La chaîne de traitement utilisée pendant le stage est la suivante:
+La chaîne de traitement transforme le flux brut d'événements en une position 3D exploitable par la partie robotique. Les événements proviennent soit de la caméra DVXplorer \cite{inivation-dvxplorer}, soit de séquences enregistrées pour répéter les essais. Ils sont d'abord filtrés, corrigés avec la calibration de la caméra, conservés dans une fenêtre temporelle courte puis échantillonnés afin de limiter la charge de calcul. Les points restants sont ensuite regroupés spatialement pour isoler la balle, puis analysés par une méthode d'estimation 2D, par cercle ou par trace. Cette estimation est convertie en trajectoire 3D, visualisée dans l'interface et publiée dans ROS 2 \cite{ros2-docs} pour pouvoir être utilisée par une commande d'interception.
 
-\begin{enumerate}
-  \item acquisition des événements depuis la caméra ou lecture depuis un fichier;
-  \item filtrage du bruit de fond;
-  \item correction géométrique des points par la calibration OpenCV;
-  \item conservation d'une fenêtre temporelle récente;
-  \item échantillonnage pour limiter la charge de calcul;
-  \item regroupement spatial des événements en clusters;
-  \item estimation de la balle par cercle ou par trace;
-  \item reconstruction d'une trajectoire 3D;
-  \item visualisation et publication ROS 2 de la position estimée.
-\end{enumerate}
-
-L'approche évite de traiter directement toute l'image comme une image dense. Il conserve la logique événementielle: seuls les événements utiles sont filtrés, regroupés puis analysés. Cela permet de garder un temps de calcul faible, compatible avec une boucle de traitement très rapide.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{\detokenize{images/Chaîne_de_traitement.png}}
+  \caption{Chaîne de traitement C++/ROS 2 \cite{ros2-docs} utilisée pour l'estimation 3D de la balle.}
+  \label{fig:chaine-traitement}
+\end{figure}
 
 \section{Calibration et repère 3D}
 
-La calibration de la caméra réelle est chargée depuis un fichier OpenCV. Elle contient notamment les paramètres intrinsèques:
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{images/Calibration/Calibration.png}
+  \caption{Calibration intrinsèque de la caméra événementielle.}
+  \label{fig:calibration-intrinseque}
+\end{figure}
+
+La première calibration intrinsèque de la caméra réelle donne les paramètres suivants:
 
 \[
 f_x \approx 761~\text{px}, \quad
@@ -91,26 +368,51 @@ c_x \approx 305~\text{px}, \quad
 c_y \approx 196~\text{px}.
 \]
 
-Cette calibration constitue une première estimation approximative pour la caméra événementielle. Le flux utilisé pour détecter l'échiquier contient beaucoup de bruit, ce qui rend la localisation des coins moins stable qu'avec une caméra classique. L'erreur de calibration indiquée dans le fichier XML est d'environ \(0.486~\text{px}\).
+Cette première calibration a été réalisée avec les outils officiels d'iniVation \cite{inivation-docs}. Comme la caméra événementielle ne fournit pas directement une image complète, il a fallu bouger constamment la mire d'échiquier devant la caméra afin de générer assez d'événements pour reconstruire une image exploitable. L'erreur de calibration obtenue est d'environ \(0.486~\text{px}\).
+
+Le bruit observé avec cette méthode a ensuite motivé la création d'un nouvel outil Python, avec un principe de calibration pensé directement pour une caméra événementielle. Au lieu de chercher les coins d'un échiquier dans une image reconstruite, la méthode utilise une mire affichée sur un écran, qui produit volontairement des variations de luminosité. Les disques lumineux clignotent sur fond noir, ce qui génère des événements nets aux positions utiles. Cette approche est aussi plus simple à mettre en œuvre et moins contraignante expérimentalement, car elle évite de devoir déplacer continuellement une mire physique pour produire suffisamment d'événements. Elle a également réduit de manière importante le temps nécessaire pour réaliser une calibration exploitable.
+
+Le principe est séparé en deux étapes. Le premier programme Python affiche une mire de \(4 \times 5\) disques, avec un disque manquant et un disque plus grand servant d'ancre. Cela donne \(19\) points détectables et limite les ambiguïtés d'orientation. Pendant une courte fenêtre temporelle, les événements positifs et négatifs sont accumulés dans une image d'activité. Les zones actives sont ensuite seuillées, regroupées en composantes connexes, puis chaque centre de disque est estimé par barycentre pondéré de l'activité. Comme la taille physique de l'écran est connue, chaque disque possède aussi une coordonnée 3D connue dans le plan de la mire, exprimée en millimètres. Chaque acquisition fournit alors les correspondances entre les points de la mire \((X,Y,0)\) et leurs centres image \((u,v)\).
+
+Le second programme Python regroupe ces observations et lance la calibration OpenCV \cite{opencv-calib3d}. Il estime la matrice intrinsèque, les coefficients de distorsion et l'erreur de reprojection. Une sélection robuste peut être activée: plusieurs sous-ensembles d'observations sont testés, les vues cohérentes sont conservées, puis la calibration finale est relancée sur les vues retenues. Cette étape permet d'écarter automatiquement des captures où l'association de points est moins fiable.
+
+Dans l'essai conservé, la calibration robuste utilise \(32\) observations de mire sur une image \(640 \times 480\), avec une erreur RMS d'environ \(0.189~\text{px}\). Elle produit notamment:
+
+\[
+f_x \approx 526.3~\text{px}, \quad
+f_y \approx 525.6~\text{px}, \quad
+c_x \approx 330.9~\text{px}, \quad
+c_y \approx 242.2~\text{px}.
+\]
+
+Ces valeurs ne doivent pas être comparées directement à celles de la calibration par échiquier présentée plus haut. Entre les deux essais, la monture de la caméra a été touchée, ce qui a pu modifier le réglage mécanique et donc les paramètres observés. L'écart entre les deux calibrations ne permet donc pas, à lui seul, de conclure qu'une méthode est meilleure que l'autre; il montre surtout que les deux acquisitions ne correspondent pas exactement au même état matériel.
+
+Les coefficients de distorsion radiale estimés sont environ \(k_1=-0.403\) et \(k_2=0.167\), avec une distorsion tangentielle fixée à zéro et \(k_3\) fixé à zéro. Le résultat est ensuite sauvegardé dans un format compatible avec la chaîne de suivi de balle.
+
+Un test complémentaire a été ajouté pour vérifier que cette calibration ne fonctionne pas seulement sur la mire utilisée pour l'estimation. Une cible carrée à quatre points est affichée dans plusieurs positions et tailles, puis les distances reconstruites sont comparées aux dimensions réelles de l'écran. Sur l'exemple retenu, les quatre carrés sont validés, avec une erreur RMS d'environ \(0.13~\text{px}\) et une erreur moyenne d'espacement d'environ \(0.16~\text{mm}\). La \figref{fig:intrinsic-mire-script} montre le montage utilisé et une sortie de validation.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.82\textwidth]{images/Calibration.png}
-  \caption{Première calibration approximative de la caméra événementielle DVXplorer.}
-  \label{fig:calibration-dvxplorer}
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Calibration/Calibration_setup_ecran.jpeg}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Calibration/square_test_20260611_110401_090251.png}
+  \end{minipage}
+  \caption{Calibration intrinsèque par mire événementielle. À gauche, la caméra observe une mire clignotante affichée sur écran; à droite, le test carré vérifie la cohérence de la calibration obtenue.}
+  \label{fig:intrinsic-mire-script}
 \end{figure}
 
-Les séquences simulées utilisent une calibration différente, fournie dans les fichiers de séquence:
+Pour les essais en simulation, la caméra virtuelle est définie avec une calibration synthétique différente:
 
 \[
 f_x = f_y = 520~\text{px}, \quad
 c_x = 320~\text{px}, \quad
 c_y = 240~\text{px}.
 \]
-
-\section{Visualisation}
-
-L'application fournit plusieurs vues: une vue 2D, une vue 3D, une vue de dessus, une vue de qualité RMSE et une vue Trace. Ces vues servent surtout au diagnostic. Elles permettent de vérifier si les clusters sont cohérents, si le cercle ajusté suit la balle, si la trajectoire 3D est plausible et si la trace événementielle est correctement exploitée.
 
 \chapter{Première méthode: détection par circle fitting}
 
@@ -128,7 +430,7 @@ Ce fonctionnement est particulièrement intéressant pour une balle rapide. La c
 
 \section{Pipeline de l'algorithme}
 
-La méthode par \emph{circle fitting} considère que la balle est une sphère dont la projection dans l'image peut être approchée par un cercle. L'idée est de détecter les événements appartenant probablement à la balle, d'ajuster un cercle sur ces points, puis d'utiliser le rayon apparent pour calculer la profondeur.
+La méthode par \emph{circle fitting} considère que la balle est une sphère dont la projection dans l'image peut être approchée par un cercle. L'idée est de détecter les événements appartenant probablement à la balle, d'ajuster un cercle sur ces points, puis d'utiliser le rayon apparent pour calculer la profondeur. La \figref{fig:algo-fitting-circle} résume les étapes principales de cette chaîne de traitement.
 
 \begin{figure}[H]
   \centering
@@ -141,18 +443,18 @@ Le premier choix important est l'utilisation d'une fenêtre temporelle récente.
 
 Après ce fenêtrage, les événements sont échantillonnés. Cette étape ne change pas le modèle géométrique, mais elle est importante pour les performances. DBSCAN doit comparer les points entre eux pour former des groupes denses: si trop d'événements sont conservés, le temps de calcul augmente rapidement. L'échantillonnage garde un sous-ensemble représentatif du flux, ce qui permet de conserver une boucle rapide tout en laissant assez de points pour reconnaître la balle.
 
-L'étape suivante est l'\emph{undistortion}. Les coordonnées image sont corrigées avec la calibration OpenCV afin de compenser la distorsion optique de la caméra. Cette correction est nécessaire avant le clustering final et surtout avant la pose 3D, car le calcul de profondeur suppose que les points suivent le modèle de projection calibré. Dans le pipeline utilisé, l'undistortion est appliquée après l'échantillonnage afin de corriger moins de points et donc de réduire le coût de calcul.
+L'étape suivante est l'\emph{undistortion}. Les coordonnées image sont corrigées avec la calibration OpenCV \cite{opencv-calib3d} afin de compenser la distorsion optique de la caméra. Cette correction est nécessaire avant le clustering final et surtout avant la pose 3D, car le calcul de profondeur suppose que les points suivent le modèle de projection calibré. Dans le pipeline utilisé, l'undistortion est appliquée après l'échantillonnage afin de corriger moins de points et donc de réduire le coût de calcul.
 
 DBSCAN est ensuite utilisé pour regrouper les événements en clusters. Ce choix est adapté au problème car le nombre d'objets visibles n'est pas connu à l'avance et le flux contient du bruit. DBSCAN cherche des zones denses dans l'image, rejette les points isolés, et fournit plusieurs clusters candidats. Chaque cluster peut correspondre à la balle, à une partie de la scène en mouvement, ou à un bruit structuré; l'étape de circle fitting sert ensuite à sélectionner le candidat le plus cohérent.
 
 \section{Sous-tranches temporelles}
 
-Lorsqu'un cluster contient des événements répartis sur une durée trop longue, il peut représenter plusieurs positions successives de la balle. Pour limiter cet effet, l'algorithme peut découper le cluster en sous-tranches. Ces sous-tranches peuvent être définies par fenêtre temporelle ou par nombre d'événements. L'objectif est de retrouver une forme plus proche d'un cercle instantané, au lieu d'ajuster un cercle sur toute la trace.
+Lorsqu'un cluster contient des événements répartis sur une durée trop longue, il peut représenter plusieurs positions successives de la balle. Pour limiter cet effet, l'algorithme peut découper le cluster en sous-tranches. Ces sous-tranches peuvent être définies par fenêtre temporelle ou par nombre d'événements. L'objectif est de retrouver une forme plus proche d'un cercle instantané, au lieu d'ajuster un cercle sur toute la trace. La \figref{fig:evenements-recents-circle} illustre une sortie 2D utilisée pour contrôler ce choix.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.86\textwidth]{\detokenize{images/Algo_Cricle_Fitting/Evenement_Recent.png}}
-  \caption{Exemple d'événements récents utilisés pour isoler une portion plus cohérente du mouvement de la balle.}
+  \includegraphics[width=0.86\textwidth]{images/Algo_Cricle_Fitting/ball_tracking_2d.png}
+  \caption{Exemple de visualisation 2D utilisée pour contrôler les événements conservés, le cercle détecté et la trajectoire estimée.}
   \label{fig:evenements-recents-circle}
 \end{figure}
 
@@ -203,16 +505,16 @@ La séparation entre ces deux directions doit être proche de \(\pi\), c'est-à-
 \left||\theta_+ - \theta_-| - \pi\right| < \varepsilon.
 \]
 
-Cette étape ne donne pas encore la pose 3D finale, mais elle permet d'écarter tôt les clusters qui ne possèdent pas la structure attendue d'une balle en mouvement. Elle rend donc le choix du cluster plus robuste avant le filtrage des points aberrants et le second ajustement de cercle.
+Cette étape ne donne pas encore la pose 3D finale, mais elle permet d'écarter tôt les clusters qui ne possèdent pas la structure attendue d'une balle en mouvement. Elle rend donc le choix du cluster plus robuste avant le filtrage des points aberrants et le second ajustement de cercle. La \figref{fig:symetrie-polarites-circle}, issue du rapport de stage d'Antonio~\cite{antonio-stage}, sert ici de schéma explicatif pour visualiser cette séparation des polarités.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.56\textwidth]{\detokenize{images/Algo_Cricle_Fitting/Symetrie_Graph_Event.png}}
-  \caption{Principe de validation par symétrie des polarités: les événements positifs et négatifs doivent former deux directions moyennes opposées autour du centre du cercle candidat.}
+  \caption{Schéma explicatif issu du rapport de stage d'Antonio~\cite{antonio-stage}: les événements positifs et négatifs doivent former deux directions moyennes opposées autour du centre du cercle candidat.}
   \label{fig:symetrie-polarites-circle}
 \end{figure}
 
-Le second cercle est recalculé après ce nettoyage. Cette deuxième régression est plus fiable car elle s'appuie sur un nuage de points déjà filtré. Le but n'est pas de complexifier inutilement l'algorithme, mais d'éviter qu'un petit nombre de points isolés élargisse artificiellement le rayon. Cette précaution est importante, car la profondeur dépend directement de ce rayon apparent.
+Le second cercle est recalculé après ce nettoyage. Cette deuxième régression est plus fiable car elle s'appuie sur un nuage de points déjà filtré. Le but n'est pas de complexifier inutilement l'algorithme, mais d'éviter qu'un petit nombre de points isolés élargisse artificiellement le rayon. Cette précaution est importante, car la profondeur dépend directement de ce rayon apparent. La \figref{fig:sortie-algo-2d} montre la sortie 2D de l'algorithme après clustering, validation et estimation du cercle.
 
 \begin{figure}[H]
   \centering
@@ -239,7 +541,7 @@ Y = \frac{v - c_y}{f_y} Z.
 
 Dans le projet, la balle utilisée dans les séquences simulées possède un rayon de \(20~\text{mm}\). Le même ordre de grandeur est utilisé pour l'estimation réelle. La pose obtenue est exprimée en millimètres dans le repère caméra, puis convertie en mètres pour l'affichage 3D.
 
-La trajectoire représentée sur la figure suivante correspond à de bonnes conditions de détection: le cluster de la balle est bien isolé, le cercle ajusté reste cohérent avec la projection de la balle et le rayon apparent n'est pas trop perturbé par une traînée événementielle. Elle illustre donc le comportement attendu de la méthode lorsque le signal respecte bien l'hypothèse circulaire.
+La trajectoire représentée sur la \figref{fig:circle-3d-estimation} correspond à de bonnes conditions de détection: le cluster de la balle est bien isolé, le cercle ajusté reste cohérent avec la projection de la balle et le rayon apparent n'est pas trop perturbé par une traînée événementielle. Elle illustre donc le comportement attendu de la méthode lorsque le signal respecte bien l'hypothèse circulaire.
 
 \begin{figure}[H]
   \centering
@@ -314,7 +616,7 @@ Une version pondérée peut aussi être activée. Elle garde les mêmes modèles
 
 \[
 w_i =
-\exp\left(-3\,\text{clamp}\left(\frac{t_{\max}-t_i}{t_{\max}-t_{\min}},0,1\right)\right)
+\exp\left(-3\,\frac{t_{\max}-t_i}{t_{\max}-t_{\min}}\right)
 \cdot
 \frac{1}{1+\left(\frac{r_i}{s}\right)^2},
 \]
@@ -325,7 +627,7 @@ Ce choix correspond au mouvement attendu d'un projectile: deux axes sont modéli
 
 La méthode n'utilise pas une résolution matricielle générale pour ces régressions à chaque boucle. Elle accumule directement les sommes nécessaires aux modèles linéaire et quadratique. Ce choix est volontaire: la boucle doit rester rapide, et ces modèles simples peuvent être mis à jour avec peu d'opérations. Construire et résoudre une matrice complète à chaque itération serait plus général, mais moins adapté à une application temps réel où la forme du modèle est déjà connue.
 
-La position de la balle est envoyée en boucle sur le topic ROS 2 à partir des poses 3D validées. La trajectoire 3D sert donc principalement à lisser et filtrer la perception, plutôt qu'à remplacer la mesure instantanée par une prédiction longue.
+La position de la balle est envoyée en boucle sur le topic ROS 2 \cite{ros2-docs} à partir des poses 3D validées. La trajectoire 3D sert donc principalement à lisser et filtrer la perception, plutôt qu'à remplacer la mesure instantanée par une prédiction longue.
 
 \section{Limite principale: sensibilité du rayon}
 
@@ -367,7 +669,7 @@ En pratique, la caméra événementielle ne voit pas toujours un contour circula
 
 \section{Décalage du plan estimé à haute vitesse}
 
-Un effet visible apparaît lorsque l'on lance une balle de ping-pong dans un plan bien défini devant la caméra. Physiquement, la trajectoire devrait appartenir à un plan réaliste, approximativement perpendiculaire au sol. En vue de dessus, ce plan peut être représenté par une droite. Or les estimations 3D issues du circle fitting ne restent pas toujours sur cette droite: elles peuvent être décalées vers une profondeur plus faible.
+Un effet visible apparaît lorsque l'on lance une balle de ping-pong dans un plan bien défini devant la caméra. Physiquement, la trajectoire devrait appartenir à un plan réaliste, approximativement perpendiculaire au sol. En vue de dessus, ce plan peut être représenté par une droite. Or les estimations 3D issues du circle fitting ne restent pas toujours sur cette droite: elles peuvent être décalées vers une profondeur plus faible. La \figref{fig:circle-fitting-3d-plane-bias} donne deux exemples de ce décalage.
 
 \begin{figure}[H]
   \centering
@@ -412,7 +714,7 @@ La distance \(d_i\) est alors tracée en fonction de \(v_{XZ}(t_i)\), puis une r
 d \approx \alpha v_{XZ} + \beta.
 \]
 
-Si une proportionnalité apparaît, cela indique que le biais de profondeur dépend de la vitesse. Cette relation pourrait ensuite servir à corriger soit le rayon estimé, soit directement la profondeur, par exemple en ajoutant une correction dépendante de la vitesse.
+Si une proportionnalité apparaît, cela indique que le biais de profondeur dépend de la vitesse. Cette relation pourrait ensuite servir à corriger soit le rayon estimé, soit directement la profondeur, par exemple en ajoutant une correction dépendante de la vitesse. La \figref{fig:circle-fitting-speed-depth-bias} présente cette analyse dans l'outil de visualisation.
 
 \begin{figure}[H]
   \centering
@@ -460,7 +762,7 @@ Il est donc plus intéressant de chercher une méthode moins sensible à une err
 
 La méthode par trace part d'une observation simple: pour une balle rapide, l'information utile n'est pas seulement contenue dans un cercle instantané. Elle est répartie dans toute la trace événementielle produite pendant le déplacement de la balle. Cette trace contient beaucoup plus de points qu'un seul contour local, et elle correspond mieux à ce que la caméra événementielle observe réellement lorsque la balle traverse vite le champ de vision.
 
-L'idée est donc de mesurer la largeur réelle de la trace, puis d'utiliser cette largeur comme diamètre apparent de la balle. La profondeur n'est plus déduite d'un rayon de cercle ajusté sur quelques événements, mais d'un ruban estimé à partir de nombreuses coupes locales. Cette approche est plus robuste face aux points isolés, aux contours incomplets et aux déformations créées par la vitesse.
+L'idée est donc de mesurer la largeur réelle de la trace, puis d'utiliser cette largeur comme diamètre apparent de la balle. La profondeur n'est plus déduite d'un rayon de cercle ajusté sur quelques événements, mais d'un ruban estimé à partir de nombreuses coupes locales. Cette approche est plus robuste face aux points isolés, aux contours incomplets et aux déformations créées par la vitesse. La \figref{fig:trace-test} montre la trace test utilisée pour valider ce principe.
 
 \begin{figure}[H]
   \centering
@@ -489,12 +791,12 @@ h = (p - c) \cdot n,
 
 où \(p\) est un événement image et \(n=(-d_y,d_x)\) est la normale à la trace. La coordonnée \(s\) donne la position le long de la trajectoire, tandis que \(h\) donne la position dans l'épaisseur du ruban. Cette transformation convertit un problème 2D difficile en une série de problèmes 1D: pour chaque petite zone découpée le long de \(s\), il faut trouver les deux bords sur l'axe \(h\).
 
-Il faut distinguer deux notions qui peuvent facilement être confondues. Les sous-parties temporelles utilisées pendant l'estimation de l'orientation servent à stabiliser la direction principale \(d\) lorsque la trace est courbe. Elles ne correspondent pas directement aux mesures de largeur. Une fois le repère \((s,h)\) construit, la méthode travaille surtout avec des \emph{bins spatiaux} le long de \(s\). Chaque bin spatial regroupe les événements qui se trouvent dans une petite portion de la trace, puis produit une estimation locale du bord bas, du bord haut et de la ligne médiane.
+Il faut distinguer deux notions qui peuvent facilement être confondues. Les sous-parties temporelles utilisées pendant l'estimation de l'orientation servent à stabiliser la direction principale \(d\) lorsque la trace est courbe. Elles ne correspondent pas directement aux mesures de largeur. Une fois le repère \((s,h)\) construit, la méthode travaille surtout avec des \emph{bins spatiaux} le long de \(s\). Chaque bin spatial regroupe les événements qui se trouvent dans une petite portion de la trace, puis produit une estimation locale du bord bas, du bord haut et de la ligne médiane. La \figref{fig:trace-ribbon} montre cette reconstruction dans l'interface.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.78\textwidth]{\detokenize{images/Algo_Trace/Screenshot from 2026-06-04 17-32-17.png}}
-  \caption{Vue Trace dans l'interface. Les événements récents sont colorés selon le temps, puis le ruban est reconstruit avec un bord haut, une ligne médiane, un bord bas et plusieurs mesures de largeur.}
+  \caption{Vue Trace dans l'interface pour une balle lancée vers la caméra. Les événements récents sont colorés selon le temps, puis le ruban est reconstruit avec un bord haut, une ligne médiane, un bord bas et plusieurs mesures de largeur.}
   \label{fig:trace-ribbon}
 \end{figure}
 
@@ -587,7 +889,7 @@ h_{\text{haut}}
 \geq \text{localSupport}.
 \]
 
-La figure suivante illustre cette logique. Les points isolés aux extrémités peuvent avoir une valeur \(h\) plus faible ou plus forte que les autres, mais ils ne sont pas retenus comme bords s'ils ne possèdent pas assez de voisins proches.
+La \figref{fig:trace-support-edges} illustre cette logique. Les points isolés aux extrémités peuvent avoir une valeur \(h\) plus faible ou plus forte que les autres, mais ils ne sont pas retenus comme bords s'ils ne possèdent pas assez de voisins proches.
 
 
 \begin{figure}[H]
@@ -663,7 +965,7 @@ La même logique est appliquée au bord bas, à la ligne médiane et au bord hau
 |h_{\text{haut},j}-\hat{h}_{\text{haut},j}| > \tau_{\text{haut}}.
 \]
 
-Les seuils dépendent de la largeur médiane du ruban et de la dispersion locale, souvent estimée par une MAD. L'intérêt de cette étape est d'éviter deux erreurs opposées. Premièrement, elle évite de garder un bin totalement incohérent qui ferait exploser la largeur et donc fausserait la profondeur. Deuxièmement, elle évite de supprimer un bin simplement parce qu'il n'est pas exactement égal à la moyenne globale: il est supprimé seulement s'il est incohérent avec son voisinage.
+Les seuils dépendent de la largeur médiane du ruban et de la dispersion locale, souvent estimée par une MAD. L'intérêt de cette étape est d'éviter deux erreurs opposées. Premièrement, elle évite de garder un bin totalement incohérent qui ferait exploser la largeur et donc fausserait la profondeur. Deuxièmement, elle évite de supprimer un bin simplement parce qu'il n'est pas exactement égal à la moyenne globale: il est supprimé seulement s'il est incohérent avec son voisinage. La \figref{fig:trace-local-neighbour-filter} résume ce filtrage local.
 
 \begin{figure}[H]
   \centering
@@ -739,7 +1041,7 @@ Pour tracer une courbe complète, plusieurs positions \(s_0\) sont échantillonn
 p(s_0) = c_{\text{trace}} + s_0 d + h(s_0)n,
 \]
 
-où \(c_{\text{trace}}\) est le centre du ruban, \(d\) sa direction principale et \(n\) sa normale. Cette opération est faite pour la ligne médiane, le bord bas et le bord haut.
+où \(c_{\text{trace}}\) est le centre du ruban, \(d\) sa direction principale et \(n\) sa normale. Cette opération est faite pour la ligne médiane, le bord bas et le bord haut. La \figref{fig:trace-local-fit-curves} illustre l'ajustement local des trois courbes du ruban.
 
 \begin{figure}[H]
   \centering
@@ -840,11 +1142,18 @@ La méthode Trace est plus prometteuse que le circle fitting pour les tirs rapid
 
 \section{Séquences simulées}
 
-Pour tester l'algorithme dans un cadre contrôlé, des séquences simulées ont été générées avec Isaac Sim. Une balle est lancée devant une caméra virtuelle dont les paramètres intrinsèques sont les mêmes que ceux utilisés par l'algorithme. La sortie vidéo de cette caméra est ensuite convertie en événements avec \texttt{v2e}, afin d'obtenir un flux proche de celui fourni par une caméra événementielle. En parallèle, Isaac Sim fournit la position réelle de la balle à chaque instant.
+Pour tester l'algorithme dans un cadre contrôlé, des séquences simulées ont été générées avec Isaac Sim \cite{nvidia-isaac-sim}. Une balle est lancée devant une caméra virtuelle dont les paramètres intrinsèques sont les mêmes que ceux utilisés par l'algorithme. La sortie vidéo de cette caméra est ensuite convertie en événements avec \texttt{v2e} \cite{v2e-github,v2e-paper}, afin d'obtenir un flux proche de celui fourni par une caméra événementielle. En parallèle, Isaac Sim \cite{nvidia-isaac-sim} fournit la position réelle de la balle à chaque instant.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{images/V2e.png}
+  \caption{Passage d'une vidéo générée en simulation vers un flux événementiel avec \texttt{v2e} \cite{v2e-github,v2e-paper}.}
+  \label{fig:v2e-conversion}
+\end{figure}
 
 Cette organisation permet de comparer directement les positions estimées par l'algorithme avec une vérité terrain. Dans les figures 3D de ce chapitre, chaque carré de la grille représente \(25~\text{cm}\). Les estimations de l'algorithme sont affichées en bleu, tandis que les positions réelles de référence sont affichées en rouge.
 
-Les séquences locales utilisées dans le projet ont les caractéristiques suivantes:
+Les essais simulés ont été réalisés avec les paramètres suivants:
 
 \begin{itemize}
   \item résolution vidéo: \(640 \times 480\);
@@ -857,7 +1166,7 @@ Les séquences locales utilisées dans le projet ont les caractéristiques suiva
 
 \begin{table}[H]
   \centering
-  \caption{Séquences simulées disponibles localement.}
+  \caption{Caractéristiques des séquences simulées utilisées pour la validation.}
   \label{tab:simulated-sequences}
   \begin{tabular}{lrrr}
     \toprule
@@ -874,7 +1183,7 @@ La vérité terrain contient la position réelle de la balle dans le repère cam
 
 \section{Résultats 3D de la méthode Trace}
 
-Les figures suivantes montrent les sorties 3D obtenues avec la méthode Trace sur une séquence simulée. Les points bleus clairs correspondent aux mesures de largeur converties en positions 3D. La courbe bleue est la trajectoire estimée à partir de ces points. Les points rouges représentent la trajectoire réelle fournie par Isaac Sim.
+La \figref{fig:trace-3d-outputs} montre les sorties 3D obtenues avec la méthode Trace sur une séquence simulée. Les points bleus clairs correspondent aux mesures de largeur converties en positions 3D. La courbe bleue est la trajectoire estimée à partir de ces points. Les points rouges représentent la trajectoire réelle fournie par Isaac Sim \cite{nvidia-isaac-sim}.
 
 \begin{figure}[H]
   \centering
@@ -890,9 +1199,11 @@ Les figures suivantes montrent les sorties 3D obtenues avec la méthode Trace su
     \centering
     \includegraphics[width=\linewidth]{images/Algo_Trace/Courbe1_3D_3.png}
   \end{minipage}
-  \caption{Sorties 3D obtenues avec la méthode Trace. Chaque carré de la grille correspond à \(25~\text{cm}\). Les points bleus sont les estimations de l'algorithme et les points rouges sont les positions réelles issues d'Isaac Sim.}
+  \caption{Sorties 3D obtenues avec la méthode Trace. Chaque carré de la grille correspond à \(25~\text{cm}\). Les points bleus sont les estimations de l'algorithme et les points rouges sont les positions réelles issues d'Isaac Sim \cite{nvidia-isaac-sim}.}
   \label{fig:trace-3d-outputs}
 \end{figure}
+
+La \figref{fig:trace-3d-time} détaille l'évolution de cette trajectoire lorsque de nouvelles estimations sont ajoutées au fil du temps.
 
 \begin{figure}[H]
   \centering
@@ -909,7 +1220,7 @@ Les figures suivantes montrent les sorties 3D obtenues avec la méthode Trace su
 
 \section{Effet de la régression pondérée}
 
-La régression pondérée est évaluée sur la même sortie 3D. Sans poids ajustés, la trajectoire bleue peut être attirée par des points anciens ou par des estimations moins fiables. Avec les poids de récence et de robustesse, la courbe tient davantage compte des points récents et réduit l'influence des mesures aberrantes. L'objectif n'est pas de changer le modèle de trajectoire, mais de rendre son estimation plus exploitable en temps réel.
+La régression pondérée est évaluée sur la même sortie 3D. Sans poids ajustés, la trajectoire bleue peut être attirée par des points anciens ou par des estimations moins fiables. Avec les poids de récence et de robustesse, la courbe tient davantage compte des points récents et réduit l'influence des mesures aberrantes. L'objectif n'est pas de changer le modèle de trajectoire, mais de rendre son estimation plus exploitable en temps réel. La \figref{fig:trace-weighted} compare visuellement ces deux réglages.
 
 \begin{figure}[H]
   \centering
@@ -922,7 +1233,7 @@ La régression pondérée est évaluée sur la même sortie 3D. Sans poids ajust
     \centering
     \includegraphics[width=\linewidth]{images/Algo_Trace/Weigth_on.png}
   \end{minipage}
-  \caption{Comparaison entre la régression Trace sans poids ajustés à gauche et avec poids ajustés à droite. La pondération récente et robuste aligne mieux la courbe bleue sur les estimations utiles de la trajectoire.}
+  \caption{Comparaison entre la régression Trace sans poids ajustés à gauche et avec poids ajustés à droite, pour une balle lancée vers la caméra. La pondération récente et robuste aligne mieux la courbe bleue sur les estimations utiles de la trajectoire.}
   \label{fig:trace-weighted}
 \end{figure}
 
@@ -948,12 +1259,12 @@ Les méthodes de perception précédentes estiment la balle dans le repère de l
 {}^{B}T_{C}.
 \]
 
-Le principe retenu est d'utiliser le robot lui-même comme système de déplacement connu. Une mire dynamique est affichée sur un écran fixé au bout du bras robotique. Comme l'écran est solidaire de l'effecteur, sa pose dans la base du robot peut être calculée à partir de la cinématique directe et de la géométrie du support mécanique. La caméra événementielle observe cette mire pour plusieurs poses du robot. Chaque observation donne une contrainte géométrique, et l'ensemble des poses permet d'estimer la transformation fixe entre la caméra et le robot.
+Le principe retenu est d'utiliser le robot lui-même comme système de déplacement connu. Une mire dynamique est affichée sur un écran fixé au bout du bras robotique. Comme l'écran est solidaire de l'effecteur, sa pose dans la base du robot peut être calculée à partir de la cinématique directe et de la géométrie du support mécanique. La caméra événementielle observe cette mire pour plusieurs poses du robot. Chaque observation donne une contrainte géométrique, et l'ensemble des poses permet d'estimer la transformation fixe entre la caméra et le robot. La \figref{fig:calibration-mire-concept} présente une première idée de mire dynamique.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.82\textwidth]{images/Calibration/mire_concept.png}
-  \caption{Mire conceptuelle affichée sur un écran. Les disques lumineux peuvent clignoter pour générer une activité événementielle exploitable par la caméra DVXplorer.}
+  \caption{Mire conceptuelle affichée sur un écran. Les disques lumineux peuvent clignoter pour générer une activité événementielle exploitable par la caméra DVXplorer \cite{inivation-dvxplorer}.}
   \label{fig:calibration-mire-concept}
 \end{figure}
 
@@ -964,11 +1275,26 @@ Cette approche est intéressante car elle ne demande pas de déplacer manuelleme
 Le montage repose sur quatre éléments principaux:
 
 \begin{itemize}
-  \item une caméra événementielle DVXplorer fixe par rapport à l'environnement;
+  \item une caméra événementielle DVXplorer \cite{inivation-dvxplorer} fixe par rapport à l'environnement;
   \item un robot 6 DOF dont la cinématique directe fournit la pose de l'effecteur;
   \item un support imprimé en 3D reliant l'effecteur à un écran;
   \item une mire lumineuse affichée sur cet écran.
 \end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Calibration/Smartphone_Sur_Support.jpeg}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{images/Calibration/Smartphone_Sur_Support_vue_coté.jpeg}}
+  \end{minipage}
+  \caption{Smartphone installé sur le support utilisé pour afficher la mire dynamique. À gauche, vue de face du montage; à droite, vue de côté montrant le placement du téléphone sur le support.}
+  \label{fig:smartphone-support}
+\end{figure}
 
 L'écran peut être un smartphone, une tablette légère ou un petit écran dédié. Un écran trop lourd est à éviter, car il peut provoquer une flexion du support ou de l'effecteur et fausser la pose réelle de la mire. La rigidité mécanique est donc aussi importante que la précision algorithmique: si la transformation entre l'effecteur et l'écran varie pendant le mouvement, la calibration cherchera à expliquer une erreur qui ne vient pas de la caméra.
 
@@ -983,7 +1309,32 @@ On utilise les repères suivants:
   \item \(C\): repère de la caméra événementielle.
 \end{itemize}
 
-Pour une pose robot \(i\), la cinématique directe donne la transformation \({}^{B}T_{E,i}\). La transformation \({}^{E}T_S\) décrit le placement mécanique de la mire par rapport à l'effecteur. Elle peut provenir de la CAO du support, de mesures mécaniques ou d'une calibration fine du support écran.
+Pour une pose robot \(i\), la cinématique directe donne la transformation \({}^{B}T_{E,i}\). La transformation \({}^{E}T_S\) décrit le placement mécanique de la mire par rapport à l'effecteur. Dans le montage envisagé, elle provient uniquement de la CAO du support imprimé en 3D. Le support est conçu de telle sorte que le smartphone soit maintenu sans jeu et que sa position par rapport à l'effecteur reste fixe pendant les acquisitions.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{images/Calibration/Calibration3DCAO.png}
+  \caption{Modèle CAO du support utilisé pour définir la position de la mire par rapport à l'effecteur.}
+  \label{fig:calibration-3d-cao}
+\end{figure}
+
+La position réelle de l'écran dans le téléphone doit aussi être prise en compte, car la mire n'occupe pas toute la surface physique du smartphone. Cette position est estimée à partir d'une image du téléphone: on mesure en pixels l'épaisseur des bords entre le contour du téléphone et la zone active de l'écran, puis on convertit ces valeurs en millimètres par proportionnalité, en utilisant les dimensions réelles du téléphone comme référence. Cette méthode revient à appliquer une règle de trois entre les dimensions mesurées sur l'image et les dimensions physiques.
+
+\begin{table}[H]
+  \centering
+  \caption{Estimation des bords entre le téléphone et la zone active de l'écran.}
+  \label{tab:smartphone-screen-offsets}
+  \begin{tabular}{lcc}
+    \toprule
+    Élément & En pixels & En millimètres estimés \\
+    \midrule
+    Bord gauche & \(\approx 23~\text{px}\) & \(\approx 2{,}92~\text{mm}\) \\
+    Bord droit & \(\approx 21\) à \(22~\text{px}\) & \(\approx 2{,}67\) à \(2{,}80~\text{mm}\) \\
+    Bord haut & \(\approx 23~\text{px}\) & \(\approx 2{,}93~\text{mm}\) \\
+    Bord bas & \(\approx 26~\text{px}\) & \(\approx 3{,}31~\text{mm}\) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 La pose de la mire dans la base du robot est alors:
 
@@ -1003,19 +1354,13 @@ Une seule pose reste cependant fragile: une erreur de détection, un mauvais ang
 
 La mire envisagée est composée de disques lumineux sur fond noir. Les disques alternent entre un état visible et un état invisible, ou entre deux niveaux de luminosité, afin de générer des événements dans la caméra. Pour une caméra événementielle, l'intérêt n'est pas seulement la forme visible à l'oeil, mais surtout la variation temporelle de luminosité produite par la mire.
 
-Les disques peuvent être pleins ou utiliser un gradient radial, avec un centre plus lumineux et des bords plus progressifs. Le gradient peut produire un signal événementiel moins brutal et potentiellement plus stable, mais il peut aussi rendre le seuil de détection moins net. Une comparaison expérimentale entre disques pleins, disques avec gradient et anneaux serait donc utile.
+Ce choix est directement lié à la méthode utilisée dans le script Python. Celui-ci ne cherche pas des coins comme avec un échiquier classique: il construit une image d'activité, applique un léger flou, réalise un seuillage, puis regroupe les pixels actifs en composantes connexes. Chaque composante est alors considérée comme un \emph{blob}. Le centre de chaque blob est ensuite estimé par barycentre pondéré de l'activité. La mire doit donc produire des zones actives compactes, séparées et faciles à associer à des points physiques connus.
 
-La mire ne doit pas être parfaitement ambiguë. Une grille régulière de disques identiques peut être difficile à orienter si plusieurs associations 2D/3D sont possibles. Pour lever cette ambiguïté, plusieurs choix sont possibles:
+Les disques sont adaptés à cette détection par blobs, car leur projection donne une composante compacte avec un centre bien défini. Un gradient radial peut aussi être utilisé: le centre du disque reste plus lumineux, tandis que les bords deviennent plus progressifs. Cette forme peut rendre l'activité moins brutale et aider le barycentre à être moins dépendant d'un pixel isolé. En revanche, un gradient trop doux peut rendre le seuil de détection moins net, car les bords du blob deviennent plus diffus. Le réglage du gradient doit donc rester un compromis entre stabilité du centre et séparation claire des blobs.
 
-\begin{itemize}
-  \item utiliser une grille asymétrique;
-  \item supprimer un disque à une position connue;
-  \item rendre un disque plus grand que les autres;
-  \item décaler certaines rangées;
-  \item coder temporellement certains disques avec une fréquence ou une phase différente.
-\end{itemize}
+La mire ne doit pas être parfaitement ambiguë. Une grille régulière de disques identiques peut être difficile à orienter si plusieurs associations 2D/3D sont possibles. Le design retenu utilise donc une grille asymétrique, avec un disque manquant et un disque plus grand servant d'ancre. Le disque plus grand produit généralement un blob plus fort, ce qui aide le script à identifier l'orientation de la mire et à associer les blobs détectés aux points attendus.
 
-La figure \ref{fig:calibration-mire-concept} illustre une première idée de mire: un fond noir, des disques lumineux et un disque plus grand permettant d'aider l'identification de l'orientation.
+La \figref{fig:calibration-mire-concept} illustre cette idée de mire: un fond noir, des disques lumineux, un disque manquant et un disque plus grand permettant d'aider l'identification de l'orientation.
 
 \section{Extraction des points dans les événements}
 
@@ -1034,6 +1379,21 @@ A(u,v) = \sum_{k \in \mathcal{W}} \mathbf{1}\left[(u_k,v_k)=(u,v)\right],
 \]
 
 avec \(\mathcal{W}\) la fenêtre temporelle utilisée. Les zones où l'activité est forte correspondent aux disques qui viennent de changer de luminosité. Après seuillage et regroupement spatial, chaque composante détectée peut être associée à un disque de la mire.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{recordings/mire_calibration/mire_overlay_20260609_111927_373588.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Calibration/ZoomCalibration.png}
+  \end{minipage}
+  \caption{Exemple de sortie de l'algorithme de détection de la mire événementielle. L'écran est décalé et n'est pas face à la caméra; à droite, la vue zoomée met mieux en évidence les événements. La couleur des événements correspond à un choix provisoire de visualisation qui n'a pas été modifié ensuite.}
+  \label{fig:mire-blob-output}
+\end{figure}
 
 Le centre d'un disque peut être estimé par barycentre pondéré:
 
@@ -1065,7 +1425,7 @@ X_{ij} = \left(i-\frac{\text{cols}-1}{2}\right)s_x,
 Y_{ij} = \left(j-\frac{\text{rows}-1}{2}\right)s_y.
 \]
 
-Ces points 3D sont mis en correspondance avec les centres image \((u_{ij},v_{ij})\). La pose \({}^{C}T_{S,i}\) peut alors être estimée avec une méthode de type solvePnP, en utilisant les paramètres intrinsèques de la caméra événementielle et, si nécessaire, les coefficients de distorsion. Une bonne calibration intrinsèque est donc un prérequis: une erreur dans les paramètres caméra se propagera directement dans la transformation extrinsèque.
+Ces points 3D sont mis en correspondance avec les centres image \((u_{ij},v_{ij})\). La pose \({}^{C}T_{S,i}\) peut alors être estimée avec une méthode de type solvePnP \cite{opencv-calib3d}, en utilisant les paramètres intrinsèques de la caméra événementielle et, si nécessaire, les coefficients de distorsion. Une bonne calibration intrinsèque est donc un prérequis: une erreur dans les paramètres caméra se propagera directement dans la transformation extrinsèque.
 
 \section{Calibration multi-poses}
 
@@ -1095,7 +1455,7 @@ où \(\pi\) représente la projection caméra. Cette formulation est plus robust
 
 \section{Paramètres physiques de l'écran}
 
-La mire affichée sur l'écran doit être connue en dimensions réelles. Si l'on utilise une mire générée par une page HTML ou une interface graphique, la taille en pixels ne suffit pas: il faut connaître la taille physique de la zone active affichée. La densité en pixels par millimètre peut être estimée par:
+La mire affichée sur l'écran doit être connue en dimensions réelles. Dans l'outil Python développé, cette étape est automatisée: le programme récupère la résolution de l'écran ainsi que sa taille physique, puis en déduit directement le facteur de conversion entre pixels et millimètres. Aucune mesure manuelle de l'écran n'est donc nécessaire pour générer la mire avec les bonnes dimensions. La densité en pixels par millimètre est calculée par:
 
 \[
 \text{px/mm}_x = \frac{\text{largeur en pixels}}{\text{largeur en mm}},
@@ -1103,13 +1463,36 @@ La mire affichée sur l'écran doit être connue en dimensions réelles. Si l'on
 \text{px/mm}_y = \frac{\text{hauteur en pixels}}{\text{hauteur en mm}}.
 \]
 
-Cette mesure doit porter sur la zone réellement utilisée par la mire, et non sur la taille extérieure du téléphone ou de la tablette. Les navigateurs et les systèmes d'exploitation ne fournissent pas toujours une taille physique fiable, surtout avec le \emph{device pixel ratio}. Une mesure manuelle au pied à coulisse ou avec une règle reste donc nécessaire pour définir correctement le diamètre des disques, leur espacement et l'origine du repère \(S\).
+Le script utilise ces valeurs pour définir automatiquement le diamètre des disques, leur espacement et l'origine du repère \(S\). Cela évite d'introduire une erreur supplémentaire liée à une mesure faite à la main, tout en gardant une correspondance directe entre les coordonnées pixels de la mire et ses coordonnées physiques en millimètres.
 
-\section{Précision attendue et points critiques}
+\section{Tests de précision et points critiques}
 
-La précision finale dépend à la fois de la géométrie, de la détection événementielle et du montage mécanique. Avec un montage rapide imprimé en 3D et une mesure approximative de l'écran, on peut s'attendre à une erreur de l'ordre de quelques centimètres et quelques degrés. Avec un support rigide, une mire bien mesurée, une bonne calibration intrinsèque et plusieurs dizaines de poses variées, l'objectif devient plutôt une précision de quelques millimètres à quelques centimètres, avec une erreur angulaire inférieure au degré dans de bonnes conditions.
+Des tests ont été réalisés avec l'outil Python afin de vérifier que la pose estimée à partir de la mire permet bien de prédire d'autres points affichés sur le même écran. Le test se déroule en deux phases. Dans un premier temps, la mire complète à \(19\) points est affichée et détectée, puis une pose de l'écran est calculée avec \texttt{solvePnP} \cite{opencv-calib3d}. Dans un second temps, le programme affiche une série de cibles carrées à quatre points, avec des positions et des tailles différentes. Les quatre coins attendus sont projetés dans l'image à partir de la pose estimée, puis comparés aux blobs réellement détectés.
 
-L'erreur angulaire est particulièrement importante. Une erreur d'orientation de \(1^\circ\) représente environ \(17~\text{mm}\) d'erreur latérale à \(1~\text{m}\), et environ \(35~\text{mm}\) à \(2~\text{m}\). Pour une tâche d'interception de balle, cette erreur peut devenir aussi critique qu'une erreur directe sur la profondeur.
+Deux erreurs différentes sont alors calculées. La première est l'erreur de reprojection en pixels: chaque coin réel du carré est projeté dans l'image, puis comparé au centre du blob détecté correspondant. Le score affiché est un RMS sur ces distances image:
+
+\[
+e_{\mathrm{repr}} =
+\sqrt{\frac{1}{N}\sum_i \left\|\hat{\mathbf{u}}_i-\mathbf{u}_i\right\|^2}.
+\]
+
+La seconde erreur est calculée en millimètres. Les quatre coins détectés sont reprojetés sur le plan estimé de l'écran, ce qui permet de reconstruire les quatre longueurs du carré. Ces longueurs mesurées sont ensuite comparées aux longueurs réelles connues:
+
+\[
+e_{\mathrm{cote}} =
+\frac{1}{4}\sum_{k=1}^{4}\left|L_k^{\mathrm{mesure}}-L_k^{\mathrm{reel}}\right|.
+\]
+
+La \figref{fig:square-test-validation} montre une sortie de ce test. Sur cet essai, les quatre carrés de validation sont acceptés. L'erreur de reprojection globale est d'environ \(0{,}13~\text{px}\), tandis que l'erreur moyenne sur les longueurs reconstruites des côtés est d'environ \(0{,}16~\text{mm}\). La pose utilisée pour cette validation place l'écran à environ \(634~\text{mm}\) de la caméra, avec une inclinaison d'environ \(20^\circ\). Ces valeurs ne constituent pas encore une précision finale de calibration robot-caméra, mais elles montrent que la chaîne de détection, d'association, de projection et de reconstruction métrique est cohérente sur le plan de l'écran.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\textwidth]{recordings/mire_calibration/square_test_20260611_110401_090251.png}
+  \caption{Sortie du test carré utilisé pour valider la cohérence géométrique de la mire événementielle. Les carrés projetés à partir de la pose estimée sont comparés aux blobs détectés dans les événements.}
+  \label{fig:square-test-validation}
+\end{figure}
+
+La précision finale de la calibration extrinsèque dépendra ensuite à la fois de cette détection événementielle, de la géométrie du montage mécanique et de la diversité des poses robot utilisées. L'erreur angulaire reste particulièrement importante: une erreur d'orientation de \(1^\circ\) représente environ \(17~\text{mm}\) d'erreur latérale à \(1~\text{m}\), et environ \(35~\text{mm}\) à \(2~\text{m}\). Pour une tâche d'interception de balle, cette erreur peut devenir aussi critique qu'une erreur directe sur la profondeur.
 
 Le protocole expérimental devra donc privilégier:
 
@@ -1136,9 +1519,9 @@ La trajectoire obtenue par la méthode Trace peut alors être exprimée dans le 
 
 \section{Objectif de la partie robot}
 
-La perception seule ne suffit pas pour attraper la balle. Elle doit être intégrée à une commande robotique capable de déplacer l'effecteur vers une position d'interception. Cette partie a été étudiée dans Isaac Lab avec un apprentissage par renforcement de type PPO, pour \emph{Proximal Policy Optimization}.
+La perception seule ne suffit pas pour attraper la balle. Elle doit être intégrée à une commande robotique capable de déplacer l'effecteur vers une position d'interception. Cette partie a été étudiée dans Isaac Lab \cite{nvidia-isaac-lab} avec un apprentissage par renforcement de type PPO \cite{schulman-ppo}, pour \emph{Proximal Policy Optimization}.
 
-L'objectif de PPO est d'apprendre une politique de commande. À partir de l'état courant du robot et de la balle, la politique choisit une action qui rapproche le robot d'une situation favorable pour intercepter la balle. La simulation permet de répéter un grand nombre d'essais sans risque pour le matériel réel.
+L'objectif de PPO \cite{schulman-ppo} est d'apprendre une politique de commande. À partir de l'état courant du robot et de la balle, la politique choisit une action qui rapproche le robot d'une situation favorable pour intercepter la balle. La simulation permet de répéter un grand nombre d'essais sans risque pour le matériel réel. La \figref{fig:robot-setup} montre le montage réel considéré pour relier la perception à la robotique.
 
 \begin{figure}[H]
   \centering
@@ -1169,7 +1552,7 @@ Ces chiffres montrent que la simulation permet d'entraîner rapidement un compor
     \toprule
     Défi & Impact attendu \\
     \midrule
-    Latence perception-commande & Une estimation correcte mais trop tardive peut déplacer le point d'interception. Il faut mesurer le temps entre acquisition, traitement, publication ROS 2 et action robot. \\
+    Latence perception-commande & Une estimation correcte mais trop tardive peut déplacer le point d'interception. Il faut mesurer le temps entre acquisition, traitement, publication ROS 2 \cite{ros2-docs} et action robot. \\
     Synchronisation temporelle & La trajectoire doit être associée à des timestamps fiables. Sans synchronisation, le robot peut suivre une balle déjà passée. \\
     Calibration caméra-robot & La position 3D estimée dans le repère caméra doit être transformée dans le repère du robot avec une extrinsèque précise. \\
     Espace atteignable & Toutes les trajectoires de balle ne sont pas interceptables. Il faut vérifier la zone de travail, les limites articulaires et la vitesse maximale du robot. \\
@@ -1182,12 +1565,75 @@ Ces chiffres montrent que la simulation permet d'entraîner rapidement un compor
 
 La suite logique du projet consiste donc à connecter la perception Trace à la partie robotique. La position de balle estimée doit être convertie dans le repère du robot, filtrée, prédite, puis utilisée comme entrée de la politique de commande ou d'un contrôleur d'interception.
 
-\chapter{Bilan provisoire}
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{Bibliographie et webographie}
+\begin{thebibliography}{99}
 
-Le travail réalisé a permis de construire une chaîne complète de perception événementielle pour une balle rapide. La première méthode, fondée sur le circle fitting, donne une base simple et efficace lorsque la balle produit un contour circulaire propre. Elle montre toutefois une limite forte: la profondeur dépend directement du rayon apparent, et une erreur d'un pixel peut représenter plusieurs centimètres, voire davantage lorsque la balle est loin.
+\bibitem{antonio-stage}
+Antonio Claudio De Sousa Dos Santos Filho,
+\emph{Computer Vision, Reinforcement Learning and Skill Transfer in Robotic: Application to a Dynamic Task}, rapport de stage, document fourni.
 
-La méthode Trace répond à cette difficulté en exploitant la forme réellement produite par une balle rapide dans une caméra événementielle. Au lieu de forcer un cercle sur une trace allongée, elle mesure une largeur cohérente à partir de nombreux événements. Cette approche est plus logique pour le signal disponible et réduit la sensibilité aux points isolés.
+\bibitem{cir-itps}
+CAP 20-25,
+\emph{Le Centre International de Recherche ``Innovative Transportation and Production Systems'' - CIR ITPS}.
+\url{https://cap2025.fr/fr/challenge2}
 
-Les séquences simulées issues de vidéos MP4 converties en événements permettent de tester l'algorithme avec une vérité terrain. Elles constituent une étape importante avant l'intégration complète avec le robot. Enfin, les essais PPO dans Isaac Lab montrent que la partie robotique peut apprendre un comportement d'interception, mais l'intégration réelle devra traiter avec soin la latence, la calibration et la robustesse de la trajectoire.
+\bibitem{cir-itps-useful}
+CAP 20-25,
+\emph{Useful information of CIR ITPS}.
+\href{https://cap2025.fr/en/research/scientific-challenges/international-research-centre-on-innovative-transportation-and-production-systems/useful-information-of-cir-itps}{https://cap2025.fr/.../useful-information-of-cir-itps}
+
+\bibitem{inivation-dvxplorer}
+iniVation,
+\emph{DVXplorer -- Hardware documentation}, documentation officielle.
+\url{https://docs.inivation.com/hardware/current-products/dvxplorer.html}
+
+\bibitem{inivation-docs}
+iniVation,
+\emph{Documentation officielle iniVation}.
+\url{https://docs.inivation.com/}
+
+\bibitem{ros2-docs}
+Open Robotics,
+\emph{ROS 2 Documentation}, documentation officielle.
+\url{https://docs.ros.org/}
+
+\bibitem{opencv-calib3d}
+OpenCV,
+\emph{Camera Calibration and 3D Reconstruction -- calib3d module}, documentation officielle.
+\url{https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html}
+
+\bibitem{raylib}
+raylib,
+\emph{raylib -- A simple and easy-to-use library to enjoy videogames programming}, site officiel.
+\url{https://www.raylib.com/}
+
+\bibitem{nvidia-isaac-sim}
+NVIDIA,
+\emph{Isaac Sim -- Robotics Simulation and Synthetic Data Generation}, site officiel.
+\url{https://developer.nvidia.com/isaac/sim}
+
+\bibitem{nvidia-isaac-lab}
+NVIDIA,
+\emph{Isaac Lab -- Robot Learning Framework}, site officiel.
+\url{https://developer.nvidia.com/isaac/lab}
+
+\bibitem{v2e-github}
+SensorsINI,
+\emph{v2e: From video frames to DVS events}, dépôt GitHub.
+\url{https://github.com/SensorsINI/v2e}
+
+\bibitem{v2e-paper}
+Hu, Y., Liu, S.-C. et Delbruck, T.,
+\emph{v2e: From Video Frames to Realistic DVS Events}, CVPR Workshops, 2021.
+\url{https://openaccess.thecvf.com/content/CVPR2021W/EventVision/html/Hu_v2e_From_Video_Frames_to_Realistic_DVS_Events_CVPRW_2021_paper.html}
+
+\bibitem{schulman-ppo}
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A. et Klimov, O.,
+\emph{Proximal Policy Optimization Algorithms}, arXiv, 2017.
+\url{https://arxiv.org/abs/1707.06347}
+
+\end{thebibliography}
 
 \end{document}

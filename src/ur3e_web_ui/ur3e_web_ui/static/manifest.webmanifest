@@ -1,0 +1,18 @@
+{
+  "name": "UR3e Control",
+  "short_name": "UR3e",
+  "description": "Browser UI for UR3e driver status, jog, TCP targets, calibration and rollout replay.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/static/icons/ur3e-web-ui.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

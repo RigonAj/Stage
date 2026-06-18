@@ -1,0 +1,1081 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UR3e Ball-Catch - Architecture ROS 2 live</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8f5;
+      --paper: #ffffff;
+      --ink: #20231f;
+      --muted: #5f675e;
+      --line: #dfe5dc;
+      --soft: #eef3ed;
+      --soft-2: #fff7df;
+      --accent: #167c80;
+      --accent-2: #a15c00;
+      --code-bg: #161a1d;
+      --code-ink: #f1f5f2;
+      --radius: 8px;
+      --shadow: 0 16px 42px rgba(32, 35, 31, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.62;
+      letter-spacing: 0;
+    }
+
+    a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: #0b5558; }
+
+    .page {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      background: #fbfcf9;
+      padding: 28px 22px;
+    }
+
+    .brand {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 22px;
+    }
+
+    .kicker {
+      color: var(--accent-2);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .brand strong {
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .source-link {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 9px;
+      background: var(--paper);
+      color: var(--ink);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    nav { display: grid; gap: 2px; }
+    nav a {
+      border-radius: 6px;
+      color: #3e473d;
+      font-size: 13px;
+      line-height: 1.3;
+      padding: 6px 8px;
+      text-decoration: none;
+    }
+    nav a:hover { background: var(--soft); color: var(--ink); }
+    .toc-h3 { padding-left: 20px; color: var(--muted); }
+
+    main {
+      width: min(100%, 1120px);
+      padding: 42px clamp(22px, 5vw, 76px) 72px;
+    }
+
+    article {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: clamp(24px, 4vw, 58px);
+    }
+
+    h1, h2, h3, h4 {
+      line-height: 1.16;
+      letter-spacing: 0;
+      color: #151815;
+      scroll-margin-top: 24px;
+    }
+
+    h1 {
+      max-width: 860px;
+      margin: 0 0 18px;
+      font-size: 44px;
+    }
+
+    h2 {
+      margin: 44px 0 14px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 30px;
+    }
+
+    h3 { margin: 32px 0 12px; font-size: 23px; }
+    h4 { margin: 24px 0 10px; font-size: 18px; }
+
+    h1 .anchor, h2 .anchor, h3 .anchor, h4 .anchor {
+      margin-left: 10px;
+      opacity: 0;
+      color: var(--muted);
+      font-size: 0.75em;
+      text-decoration: none;
+    }
+    h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor { opacity: 1; }
+
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0 18px; padding-left: 24px; }
+    li { margin: 7px 0; }
+    li > ul, li > ol { margin-top: 6px; margin-bottom: 8px; }
+
+    blockquote {
+      margin: 22px 0;
+      border-left: 5px solid var(--accent-2);
+      background: var(--soft-2);
+      padding: 12px 18px;
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+    blockquote p { margin: 0; }
+
+    code {
+      border: 1px solid #d7ded5;
+      border-radius: 5px;
+      background: #f1f5ef;
+      padding: 0.12em 0.32em;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow: auto;
+      margin: 18px 0;
+      border-radius: var(--radius);
+      background: var(--code-bg);
+      color: var(--code-ink);
+      padding: 18px;
+      line-height: 1.45;
+    }
+    pre code {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      font-size: 13px;
+    }
+
+    .term { font-weight: 650; }
+
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      margin: 18px 0 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      min-width: 680px;
+      border-collapse: collapse;
+      background: #fff;
+      font-size: 14px;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: var(--soft);
+      color: #283028;
+      font-weight: 800;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+    .num { text-align: right; white-space: nowrap; }
+
+    .arch-diagram {
+      margin: 22px 0 28px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 1px 1px, #dfe6dd 1px, transparent 0) 0 0 / 20px 20px,
+        #ffffff;
+      overflow-x: auto;
+    }
+
+    .arch-diagram svg {
+      display: block;
+      width: 100%;
+      min-width: 980px;
+      height: auto;
+    }
+
+    .arch-flow,
+    .arch-flow-soft {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .arch-flow {
+      stroke: #617083;
+      stroke-width: 3;
+    }
+
+    .arch-flow-soft {
+      stroke: #8a98aa;
+      stroke-width: 2.4;
+      stroke-dasharray: 9 8;
+    }
+
+    .arch-process-box {
+      fill: rgba(238, 243, 237, 0.74);
+      stroke: #879583;
+      stroke-width: 2.2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .arch-node rect {
+      rx: 8;
+      stroke-width: 2.2;
+      vector-effect: non-scaling-stroke;
+      filter: drop-shadow(0 6px 9px rgba(32, 35, 31, 0.10));
+    }
+
+    .arch-source rect { fill: #e7f5ef; stroke: #21845d; }
+    .arch-test rect { fill: #fff4dd; stroke: #bd7919; }
+    .arch-state rect { fill: #eaf1ff; stroke: #356eb5; }
+    .arch-tf rect { fill: #f3ecff; stroke: #755bbd; }
+    .arch-hot rect { fill: #e9f7f8; stroke: #238b92; }
+    .arch-policy rect { fill: #f1edff; stroke: #6f58bd; }
+    .arch-safe rect { fill: #ffecee; stroke: #c9485b; }
+    .arch-out rect { fill: #eef1f6; stroke: #657386; }
+    .arch-ui rect { fill: #f0f7e7; stroke: #6f943f; }
+
+    .arch-title {
+      fill: #1d241f;
+      font-size: 26px;
+      font-weight: 850;
+      text-anchor: middle;
+    }
+
+    .arch-subtitle,
+    .arch-line-label {
+      fill: var(--muted);
+      font-size: 15px;
+      text-anchor: middle;
+    }
+
+    .arch-group-title {
+      fill: #2b352f;
+      font-size: 18px;
+      font-weight: 850;
+      text-anchor: middle;
+    }
+
+    .arch-node-title {
+      fill: #17201a;
+      font-size: 18px;
+      font-weight: 850;
+      text-anchor: middle;
+    }
+
+    .arch-node-detail {
+      fill: #556154;
+      font-size: 13px;
+      text-anchor: middle;
+    }
+
+    .arch-code-tag {
+      fill: #334155;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      text-anchor: middle;
+    }
+
+    .arch-badge {
+      fill: #f8fafc;
+      stroke: #cbd5e1;
+      stroke-width: 1.4;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .arch-badge-text {
+      fill: #384454;
+      font-size: 13px;
+      font-weight: 750;
+      text-anchor: middle;
+    }
+
+    .arch-note {
+      fill: #f8fafc;
+      stroke: #cbd5e1;
+      stroke-width: 1.4;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .arch-legend {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, auto));
+      gap: 10px 18px;
+      align-items: center;
+      margin: -12px 0 24px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .arch-legend span {
+      display: inline-flex;
+      gap: 7px;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .arch-chip {
+      width: 14px;
+      height: 14px;
+      border: 2px solid currentColor;
+      border-radius: 4px;
+      background: #ffffff;
+    }
+
+    .arch-chip.source { color: #21845d; background: #e7f5ef; }
+    .arch-chip.hot { color: #238b92; background: #e9f7f8; }
+    .arch-chip.policy { color: #6f58bd; background: #f1edff; }
+    .arch-chip.safe { color: #c9485b; background: #ffecee; }
+    .arch-chip.out { color: #657386; background: #eef1f6; }
+
+    hr {
+      border: 0;
+      border-top: 1px solid var(--line);
+      margin: 32px 0;
+    }
+
+    @media (max-width: 900px) {
+      .page { display: block; }
+      aside {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 18px 20px;
+      }
+      nav { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+      .toc-h3 { padding-left: 8px; }
+      main { padding: 22px 14px 44px; }
+      article { padding: 22px 18px; }
+      h1 { font-size: 30px; }
+      h2 { font-size: 24px; }
+      .arch-legend { grid-template-columns: repeat(2, minmax(0, auto)); }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .page { display: block; }
+      aside { display: none; }
+      main { width: auto; padding: 0; }
+      article { border: 0; box-shadow: none; padding: 0; }
+      a { color: #000; }
+      pre, .table-wrap { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside>
+      <div class="brand">
+        <span class="kicker">Architecture</span>
+        <strong>UR3e Ball-Catch<br>ROS 2 live closed-loop</strong>
+        <a class="source-link" href="ur3e_live_catch_architecture.md">Source Markdown</a>
+      </div>
+      <nav aria-label="Table des matieres">
+        <a class="toc-h2" href="#1-vue-d-ensemble-et-contraintes-directrices">1. Vue d'ensemble et contraintes directrices</a>
+<a class="toc-h2" href="#2-architecture-retenue-composition-mono-processus">2. Architecture retenue : composition mono-processus</a>
+<a class="toc-h3" href="#nuance-rclpy-a-connaitre">Nuance rclpy (à connaître)</a>
+<a class="toc-h2" href="#3-paquets-ros-2-et-placement">3. Paquets <span class="term">ROS 2</span> et placement</a>
+<a class="toc-h2" href="#4-specification-des-nuds-et-processus">4. Spécification des nœuds et processus</a>
+<a class="toc-h3" href="#4-1-ball-tracking-cpp-perception-existant-dv-rosws-a-adapter">4.1 ball_tracking_cpp — perception (existant, Dv-Rosws, à adapter)</a>
+<a class="toc-h3" href="#4-2-test-ball-node-source-de-balle-artificielle-nouveau">4.2 test_ball_node — source de balle artificielle (nouveau)</a>
+<a class="toc-h3" href="#4-3-ur3e-live-catch-la-boucle-live-un-nud-modules-internes">4.3 ur3e_live_catch — la boucle live (un nœud, modules internes)</a>
+<a class="toc-h3" href="#4-4-ur-robot-driver-forward-position-controller-existant-a-configurer">4.4 ur_robot_driver + forward_position_controller (existant, à configurer)</a>
+<a class="toc-h3" href="#4-5-ur3e-web-ui-visualisation-existant-a-etendre">4.5 ur3e_web_ui — visualisation (existant, à étendre)</a>
+<a class="toc-h2" href="#5-contrat-de-messages-ur3e-catch-msgs">5. Contrat de messages (ur3e_catch_msgs)</a>
+<a class="toc-h2" href="#6-reconstruction-de-l-observation-33-d">6. Reconstruction de l'observation 33-D</a>
+<a class="toc-h2" href="#7-coherence-des-reperes-piege-majeur">7. Cohérence des repères (piège majeur)</a>
+<a class="toc-h2" href="#8-interface-de-commande-et-bascule-de-controleur">8. Interface de commande et bascule de contrôleur</a>
+<a class="toc-h2" href="#9-couche-de-securite-obligatoire">9. Couche de sécurité (obligatoire)</a>
+<a class="toc-h2" href="#10-budget-de-latence-et-synchronisation">10. Budget de latence et synchronisation</a>
+<a class="toc-h2" href="#11-feuille-de-route-d-implementation-par-etapes">11. Feuille de route d'implémentation (par étapes)</a>
+<a class="toc-h2" href="#12-verification">12. Vérification</a>
+<a class="toc-h2" href="#13-alternatives-d-architecture">13. Alternatives d'architecture</a>
+<a class="toc-h2" href="#14-recapitulatif-reutilisation-de-l-existant">14. Récapitulatif — réutilisation de l'existant</a>
+      </nav>
+    </aside>
+    <main>
+      <article>
+        <h1 id="ur3e-ball-catch-architecture-des-nuds-ros-2-boucle-live-closed-loop"><span class="term">UR3e</span> Ball-Catch — Architecture des nœuds <span class="term">ROS 2</span> (boucle live closed-loop)<a class="anchor" href="#ur3e-ball-catch-architecture-des-nuds-ros-2-boucle-live-closed-loop" aria-label="Lien vers cette section">#</a></h1>
+
+<p>Ce document est le <strong>plan d'architecture</strong> des nœuds <span class="term">ROS 2</span> à construire pour connecter la perception (caméra événementielle <span class="term">DVXplorer</span>) à la commande du <span class="term">UR3e</span>, afin d'<strong>attraper une balle lancée</strong> avec la politique <span class="term">PPO</span> entraînée en simulation. Il détaille chaque nœud/module, les interfaces (topics, messages, repères, taux), les contraintes techniques, une feuille de route d'implémentation, la vérification, et des architectures alternatives.</p>
+
+<blockquote><p>Statut (2026-06-17) : <strong>design, pas encore implémenté.</strong> Les paquets <code>ur3e_catch_msgs</code> et <code>ur3e_live_catch</code> n'existent pas encore. Ce document est la référence d'exécution.</p></blockquote>
+
+<p>Documents liés :</p>
+
+<ul>
+<li><code>ur3e_ball_catch_sim_to_real.md</code> — contraintes sim/entraînement/inférence (ce document implémente concrètement son §5 « inférence closed-loop »).</li>
+<li><code>ur3e_robot_control_architecture.md</code> — stack de contrôle existante (web UI, bridge, replay).</li>
+<li><code>ur3e_real_robot_replay.md</code> — replay open-loop (validation, complémentaire).</li>
+<li><code>ur3e_camera_base_calibration.md</code> — hand-eye <code>{}^{B}T_C</code> (balle repère caméra → repère <code>base</code>).</li>
+<li>Perception : <code>Dv-Rosws/Stage_summary.tex</code> (méthode Trace, régression, calibration extrinsèque).</li>
+</ul>
+
+<hr>
+
+<h2 id="1-vue-d-ensemble-et-contraintes-directrices">1. Vue d'ensemble et contraintes directrices<a class="anchor" href="#1-vue-d-ensemble-et-contraintes-directrices" aria-label="Lien vers cette section">#</a></h2>
+
+<p>L'objectif est une <strong>boucle fermée temps réel</strong> : la caméra estime la balle en 3D, le système la transforme dans le repère robot, reconstruit l'observation attendue par la politique, infère une action, la convertit en cible articulaire sûre, et la stream au robot — le tout assez vite pour intercepter la balle.</p>
+
+<p>Quatre contraintes dominent toute la conception :</p>
+
+<ol>
+<li><strong>Latence perception→commande = risque n°1.</strong> Soulignée à la fois par le sim-to-real (§1, §5.6) et le Stage_summary (table « Défis pour l'intégration perception-robot »). Une bonne estimation <strong>trop tardive</strong> déplace le point d'interception. Conséquence directe sur l'architecture (cf. §2) : <strong>minimiser les sauts inter-process sur le chemin chaud</strong>.</li>
+<li><strong>Fréquence de contrôle = 60 Hz</strong> (<code>dt_step = 1/60</code>, aligné sur la simulation). L'interface de commande bas-niveau tourne plus vite (125/500 Hz) → <strong>interpolation</strong> nécessaire (§8).</li>
+<li><strong>Cohérence des repères.</strong> La position balle doit arriver dans le <strong>repère <code>base</code></strong> du robot, axes z-up, mètres, <strong>exactement</strong> comme le « local » de la simulation (<code>monde − env_origins</code>). Piège <code>base</code> vs <code>base_link</code> (rotation π autour Z) déjà documenté.</li>
+<li><strong>Sécurité d'un robot réactif.</strong> Cibles bornées (clip + rate-limit), watchdog/dead-man, vitesse réduite, <span class="term">E-stop</span>. La politique sort des cibles agressives (cf. sim-to-real §1) : la sécurité est une <strong>défense en profondeur indépendante de la sim</strong>.</li>
+</ol>
+
+<hr>
+
+<h2 id="2-architecture-retenue-composition-mono-processus">2. Architecture retenue : composition mono-processus<a class="anchor" href="#2-architecture-retenue-composition-mono-processus" aria-label="Lien vers cette section">#</a></h2>
+
+<p>La boucle chaude <code>observation → inférence → action</code> tourne dans <strong>un seul processus</strong>. Les blocs fonctionnels du schéma initial (Observation convertisseur, Inférence, Convertisseur Action) deviennent des <strong>modules Python wirés par appels directs</strong> — aucun topic ROS, donc aucune sérialisation ni saut <span class="term">DDS</span>, sur le chemin critique 60 Hz. Les topics ROS ne servent qu'aux <strong>frontières</strong> (balle en entrée, <code>/joint_states</code> en entrée, commande en sortie) et à la <strong>télémétrie/debug</strong> (hors chemin chaud).</p>
+
+<section class="arch-diagram" aria-label="Schéma de l'architecture des nœuds ROS 2 live catch">
+  <svg viewBox="0 0 1500 930" role="img" aria-labelledby="arch-title arch-desc">
+    <title id="arch-title">Architecture des nœuds ROS 2 pour le catch live</title>
+    <desc id="arch-desc">Schéma des sources de balle, de la boucle mono-processus ur3e_live_catch, des transformations TF, de la politique PPO et de la commande envoyée au forward position controller.</desc>
+
+    <defs>
+      <marker id="arch-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#617083"></path>
+      </marker>
+      <marker id="arch-soft-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a98aa"></path>
+      </marker>
+    </defs>
+
+    <text x="750" y="46" class="arch-title">Architecture live closed-loop des nœuds ROS 2</text>
+    <text x="750" y="72" class="arch-subtitle">Chemin chaud 60 Hz en appels directs, topics ROS uniquement aux frontières et pour le debug.</text>
+
+    <g>
+      <rect x="330" y="110" width="810" height="720" rx="8" class="arch-process-box"></rect>
+      <text x="735" y="146" class="arch-group-title">ur3e_live_catch — 1 processus rclpy</text>
+      <rect x="585" y="160" width="300" height="30" rx="15" class="arch-badge"></rect>
+      <text x="735" y="181" class="arch-badge-text">modules Python appelés directement</text>
+    </g>
+
+    <g class="arch-node arch-source">
+      <rect x="40" y="145" width="240" height="112"></rect>
+      <text x="160" y="178" class="arch-node-title">ball_tracking_cpp</text>
+      <text x="160" y="204" class="arch-node-detail">DVXplorer + Trace</text>
+      <text x="160" y="224" class="arch-node-detail">position balle caméra</text>
+      <text x="160" y="244" class="arch-code-tag">Dv-Rosws / BallState</text>
+    </g>
+
+    <g class="arch-node arch-test">
+      <rect x="40" y="300" width="240" height="112"></rect>
+      <text x="160" y="333" class="arch-node-title">test_ball_node</text>
+      <text x="160" y="359" class="arch-node-detail">trajectoires scriptées</text>
+      <text x="160" y="379" class="arch-node-detail">repère cam ou base</text>
+      <text x="160" y="399" class="arch-code-tag">BallState (cam|base)</text>
+    </g>
+
+    <g class="arch-node arch-state">
+      <rect x="40" y="505" width="240" height="112"></rect>
+      <text x="160" y="538" class="arch-node-title">/joint_states</text>
+      <text x="160" y="564" class="arch-node-detail">positions + vitesses</text>
+      <text x="160" y="584" class="arch-node-detail">ordre canonique UR3e</text>
+      <text x="160" y="604" class="arch-code-tag">q, qdot</text>
+    </g>
+
+    <g class="arch-node arch-tf">
+      <rect x="40" y="700" width="240" height="112"></rect>
+      <text x="160" y="733" class="arch-node-title">TF statiques</text>
+      <text x="160" y="759" class="arch-node-detail">base → camera</text>
+      <text x="160" y="779" class="arch-node-detail">wrist_3 → hoop</text>
+      <text x="160" y="799" class="arch-code-tag">hand-eye + montage</text>
+    </g>
+
+    <g class="arch-node arch-hot">
+      <rect x="370" y="220" width="220" height="120"></rect>
+      <text x="480" y="253" class="arch-node-title">BallFrame</text>
+      <text x="480" y="279" class="arch-node-detail">frame_id → base</text>
+      <text x="480" y="299" class="arch-node-detail">filtre vitesse balle</text>
+      <text x="480" y="320" class="arch-code-tag">ball_frame.py</text>
+    </g>
+
+    <g class="arch-node arch-hot">
+      <rect x="650" y="210" width="245" height="120"></rect>
+      <text x="772.5" y="243" class="arch-node-title">ObservationBuilder</text>
+      <text x="772.5" y="269" class="arch-node-detail">observation 33-D</text>
+      <text x="772.5" y="289" class="arch-node-detail">q, balle, disque, action-1</text>
+      <text x="772.5" y="310" class="arch-code-tag">observation.py</text>
+    </g>
+
+    <g class="arch-node arch-policy">
+      <rect x="650" y="360" width="245" height="120"></rect>
+      <text x="772.5" y="393" class="arch-node-title">PolicyRunner</text>
+      <text x="772.5" y="419" class="arch-node-detail">TorchScript + scaler</text>
+      <text x="772.5" y="439" class="arch-node-detail">inférence PPO déterministe</text>
+      <text x="772.5" y="460" class="arch-code-tag">policy_runtime.py</text>
+    </g>
+
+    <g class="arch-node arch-policy">
+      <rect x="650" y="510" width="245" height="110"></rect>
+      <text x="772.5" y="542" class="arch-node-title">ActionMapper</text>
+      <text x="772.5" y="567" class="arch-node-detail">action brute × 0.5</text>
+      <text x="772.5" y="587" class="arch-node-detail">cible articulaire</text>
+      <text x="772.5" y="607" class="arch-code-tag">action.py</text>
+    </g>
+
+    <g class="arch-node arch-safe">
+      <rect x="650" y="650" width="245" height="110"></rect>
+      <text x="772.5" y="682" class="arch-node-title">SafetyLimiter</text>
+      <text x="772.5" y="707" class="arch-node-detail">clip + rate-limit</text>
+      <text x="772.5" y="727" class="arch-node-detail">watchdog / dead-man</text>
+      <text x="772.5" y="747" class="arch-code-tag">safety.py</text>
+    </g>
+
+    <g class="arch-node arch-hot">
+      <rect x="940" y="650" width="170" height="110"></rect>
+      <text x="1025" y="682" class="arch-node-title">Streaming</text>
+      <text x="1025" y="707" class="arch-node-detail">60 Hz → driver</text>
+      <text x="1025" y="727" class="arch-node-detail">interpolation</text>
+      <text x="1025" y="747" class="arch-code-tag">streaming.py</text>
+    </g>
+
+    <g class="arch-node arch-ui">
+      <rect x="1200" y="270" width="260" height="122"></rect>
+      <text x="1330" y="304" class="arch-node-title">ur3e_web_ui</text>
+      <text x="1330" y="330" class="arch-node-detail">visualisation balle + robot</text>
+      <text x="1330" y="350" class="arch-node-detail">obs, action, cible</text>
+      <text x="1330" y="372" class="arch-code-tag">WebSocket / three.js</text>
+    </g>
+
+    <g class="arch-node arch-out">
+      <rect x="1200" y="585" width="260" height="122"></rect>
+      <text x="1330" y="619" class="arch-node-title">forward_position_controller</text>
+      <text x="1330" y="645" class="arch-node-detail">commande position</text>
+      <text x="1330" y="665" class="arch-node-detail">125/500 Hz côté driver</text>
+      <text x="1330" y="687" class="arch-code-tag">/commands</text>
+    </g>
+
+    <g class="arch-node arch-out">
+      <rect x="1200" y="765" width="260" height="92"></rect>
+      <text x="1330" y="798" class="arch-node-title">UR3e réel / URSim</text>
+      <text x="1330" y="824" class="arch-node-detail">External Control actif</text>
+      <text x="1330" y="844" class="arch-code-tag">ur_robot_driver</text>
+    </g>
+
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M280 201 H324 V280 H370"></path>
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M280 356 H324 V280 H370"></path>
+    <text x="316" y="252" class="arch-line-label">BallState</text>
+
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M590 280 H650"></path>
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M772.5 330 V360"></path>
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M772.5 480 V510"></path>
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M772.5 620 V650"></path>
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M895 705 H940"></path>
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M1110 705 H1160 V646 H1200"></path>
+    <path class="arch-flow" marker-end="url(#arch-arrow)" d="M1330 707 V765"></path>
+
+    <path class="arch-flow-soft" marker-end="url(#arch-soft-arrow)" d="M280 561 H615 V235 H650"></path>
+    <text x="365" y="548" class="arch-line-label">q, qdot</text>
+
+    <path class="arch-flow-soft" marker-end="url(#arch-soft-arrow)" d="M280 756 H322 V306 H370"></path>
+    <path class="arch-flow-soft" marker-end="url(#arch-soft-arrow)" d="M280 756 H620 V270 H650"></path>
+    <text x="392" y="790" class="arch-line-label">repères base, caméra, hoop_center</text>
+
+    <path class="arch-flow-soft" marker-end="url(#arch-soft-arrow)" d="M650 565 H604 V270 H650"></path>
+    <text x="560" y="426" class="arch-line-label">action brute précédente</text>
+
+    <path class="arch-flow-soft" marker-end="url(#arch-soft-arrow)" d="M895 420 H1045 V331 H1200"></path>
+    <text x="1082" y="356" class="arch-line-label">télémétrie debug</text>
+
+    <g>
+      <rect x="365" y="846" width="760" height="62" rx="8" class="arch-note"></rect>
+      <text x="745" y="873" class="arch-badge-text">Chemin critique : BallFrame → ObservationBuilder → PolicyRunner → ActionMapper</text>
+      <text x="745" y="893" class="arch-badge-text">→ SafetyLimiter → Streaming, sans saut DDS interne.</text>
+    </g>
+  </svg>
+</section>
+
+<div class="arch-legend" aria-label="Légende du schéma d'architecture">
+  <span><i class="arch-chip source"></i>Entrées ROS</span>
+  <span><i class="arch-chip hot"></i>Chemin chaud</span>
+  <span><i class="arch-chip policy"></i>Politique / action</span>
+  <span><i class="arch-chip safe"></i>Sécurité</span>
+  <span><i class="arch-chip out"></i>Commande / debug</span>
+</div>
+
+<p><strong>Le retour « Observation » du schéma initial</strong> se réalise sans topic :</p>
+
+<ul>
+<li>(a) l'état articulaire via l'abonnement <code>/joint_states</code> (callback qui met à jour un cache) ;</li>
+<li>(b) l'<strong>action brute précédente</strong>, stockée comme attribut du nœud (c'est la composante 9 de l'observation, cf. §6) et réinjectée à l'itération suivante.</li>
+</ul>
+
+<h3 id="nuance-rclpy-a-connaitre">Nuance rclpy (à connaître)<a class="anchor" href="#nuance-rclpy-a-connaitre" aria-label="Lien vers cette section">#</a></h3>
+
+<p>La vraie composition <strong>intra-process zéro-copie</strong> est une fonctionnalité <strong>rclcpp</strong> (C++). Comme l'inférence est PyTorch/Python, on ne peut pas l'obtenir telle quelle. On réalise donc la « composition » par <strong>un nœud rclpy unique</strong> dont les sous-blocs sont des classes appelées directement dans le même processus (mémoire partagée, pas de <span class="term">DDS</span>). On garde le <strong>bénéfice latence</strong> et une <strong>structure modulaire</strong> (un module = un fichier = une responsabilité). Les signaux intermédiaires (obs, action brute, cible) restent <strong>inspectables</strong> via des topics de <strong>debug en best-effort, hors chemin critique</strong>. Une vraie composition rclcpp est listée comme option future en §13.</p>
+
+<hr>
+
+<h2 id="3-paquets-ros-2-et-placement">3. Paquets <span class="term">ROS 2</span> et placement<a class="anchor" href="#3-paquets-ros-2-et-placement" aria-label="Lien vers cette section">#</a></h2>
+
+<p>Deux nouveaux paquets a creer plus tard dans <code>$DV_ROSWS_ROOT/src/</code> :</p>
+
+<div class="table-wrap"><table>
+<thead><tr>
+<th>Paquet</th>
+<th>Type</th>
+<th>Rôle</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code>ur3e_catch_msgs</code></td>
+<td>rosidl (<code>ament_cmake</code>)</td>
+<td>Messages typés et <strong>horodatés</strong> du contrat de catch (§5)</td>
+</tr>
+<tr>
+<td><code>ur3e_live_catch</code></td>
+<td><code>ament_python</code></td>
+<td>Nœud live mono-processus, nœud de test, launch, sécurité, runtime politique</td>
+</tr>
+</tbody></table></div>
+
+<p><strong>Workspace ROS unique.</strong> Le tracker <code>ball_tracking_cpp</code>, les paquets robot existants (<code>ur3e_web_ui</code>, <code>ur3e_rollout_replay</code>) et les futurs paquets live doivent être buildés dans <code>Dv-Rosws</code>. Cela évite de devoir sourcer deux overlays et rend <code>ur3e_catch_msgs</code> visible à la fois par le tracker C++ qui publiera <code>BallState</code> et par le nœud live qui le consommera.</p>
+
+<p>Le code Isaac/training peut rester hors du workspace ROS, mais les paquets ROS et les exports nécessaires au rejeu doivent rester dans <code>Dv-Rosws</code>. L'ancien <code>ros2_ws/src/</code> du dépôt Isaac n'est plus un emplacement cible.</p>
+
+<hr>
+
+<h2 id="4-specification-des-nuds-et-processus">4. Spécification des nœuds et processus<a class="anchor" href="#4-specification-des-nuds-et-processus" aria-label="Lien vers cette section">#</a></h2>
+
+<h3 id="4-1-ball-tracking-cpp-perception-existant-dv-rosws-a-adapter">4.1 <code>ball_tracking_cpp</code> — perception (existant, <code>Dv-Rosws</code>, à adapter)<a class="anchor" href="#4-1-ball-tracking-cpp-perception-existant-dv-rosws-a-adapter" aria-label="Lien vers cette section">#</a></h3>
+
+<ul>
+<li><strong>Rôle.</strong> Estimer la position 3D de la balle dans le flux événementiel (méthode <strong>Trace</strong> : largeur de traînée → profondeur monoculaire <code>Z = f_eff·D / w_px</code>), puis ajuster une trajectoire (régression pondérée <code>x,y</code> linéaires, <code>z</code> quadratique).</li>
+<li><strong>État actuel.</strong> <code>Dv-Rosws/src/Ball_Tracking_Cpp/src/publisher_member_function.cpp</code> crée un publisher <code>ball_position_3d_mm</code> (<code>std_msgs/Float32MultiArray</code>, repère caméra, <strong>mm</strong>) mais <strong>ne le peuple pas</strong> (<code>publishBallPose()</code> laisse <code>msg.data</code> vide). Première chose à corriger.</li>
+<li><strong>Cible.</strong> Publier <code>ur3e_catch_msgs/BallState</code> :
+<ul>
+<li><strong>horodaté au temps d'événement</strong> (pas au temps de réception) — crucial pour la synchronisation et le calcul de latence ;</li>
+<li>dans un <strong>repère caméra nommé</strong> fixe (<code>frame_id</code>), en <strong>mètres</strong> ;</li>
+<li>convention d'axes <strong>figée</strong> = celle que résout le hand-eye. Aujourd'hui le code convertit caméra(mm)→monde(m) via <code>util.hpp::ToMeters</code> : <code>world = (x, z, −y)·10⁻³</code>. Il faut que la transformée <code>{}^{B}T_C</code> (§7) soit résolue <strong>pour ce même repère</strong> : un seul repère, partout.</li>
+</ul>
+</li>
+<li><strong>Entrée :</strong> caméra <span class="term">DVXplorer</span> (<code>dv-processing</code>) ou séquences enregistrées. <strong>Sortie :</strong> <code>BallState</code> (~30 Hz, cadence perception).</li>
+<li><strong>Intérim (feuille de route).</strong> Pour démarrer sans toucher au build C++, un <strong>adaptateur Python</strong> (dans <code>ur3e_live_catch</code>) abonne <code>ball_position_3d_mm</code> et republie <code>BallState</code> (stamp = réception, repère = constante). On migre ensuite vers la publication native horodatée.</li>
+</ul>
+
+<h3 id="4-2-test-ball-node-source-de-balle-artificielle-nouveau">4.2 <code>test_ball_node</code> — source de balle artificielle (nouveau)<a class="anchor" href="#4-2-test-ball-node-source-de-balle-artificielle-nouveau" aria-label="Lien vers cette section">#</a></h3>
+
+<p>C'est le « Nœud Test position Ball » du schéma : il <strong>remplace la perception</strong> pour tester toute la chaîne <strong>sans caméra ni lancer réel</strong>.</p>
+
+<ul>
+<li><strong>Rôle.</strong> Publier des trajectoires de balle <strong>scriptées ou rejouées</strong>, dans le <strong>même contrat <code>BallState</code></strong> que le tracker réel (horodatage + champ <code>frame_id</code> toujours renseigné).</li>
+<li><strong>Repère de publication sélectionnable (paramètre <code>publish_frame</code>).</strong> Le nœud peut publier la position balle <strong>soit dans le repère caméra <code>&lt;camera_frame&gt;</code></strong> (chemin réaliste, identique au tracker : oblige à traverser le hand-eye <code>{}^{B}T_C</code>), <strong>soit directement dans le repère <code>base</code></strong> du robot (court-circuite l'extrinsèque). Dans <strong>les deux cas</strong>, le <code>header.frame_id</code> du <code>BallState</code> <strong>déclare</strong> le repère effectif — c'est ce champ, et lui seul, qui dit au consommateur (<code>ball_frame</code>, §4.3.1) comment transformer. Intérêt :
+<ul>
+<li>publier en <code>base</code> <strong>isole les erreurs politique/obs des erreurs de calibration extrinsèque</strong> : si la chaîne marche en <code>base</code> mais pas en <code>&lt;camera_frame&gt;</code>, le hand-eye <code>{}^{B}T_C</code> est en cause ;</li>
+<li>publier en <code>&lt;camera_frame&gt;</code> <strong>valide la transformée complète</strong> (TF statique + conversion d'axes/unités) de bout en bout, comme en conditions réelles ;</li>
+<li>en mode <code>base</code>, les sources analytiques (parabole, vérité terrain) sont naturellement déjà en coordonnées monde z-up : aucune conversion d'axes <code>util.hpp::ToMeters</code> n'est nécessaire.</li>
+</ul>
+</li>
+<li><strong>Sources possibles.</strong> (a) parabole analytique paramétrable (position/vitesse de lancer, gravité) ; (b) vérité terrain simulée <code>Dv-Rosws/sequences/&lt;seq&gt;/labels/ground_truth.csv</code> ; (c) rejeu d'un enregistrement.</li>
+<li><strong>Paramètres.</strong> cadence (~30 Hz), bruit gaussien injectable (pour stresser le filtrage et la robustesse, cohérent avec le bruit d'obs randomisé à l'entraînement), trous/latence simulés.</li>
+<li><strong>Intérêt.</strong> Permet de valider obs→inférence→action→robot avec <code>use_fake_hardware</code>/<span class="term">URSim</span> avant toute caméra. Évalue aussi la robustesse au bruit/latence en amont.</li>
+</ul>
+
+<h3 id="4-3-ur3e-live-catch-la-boucle-live-un-nud-modules-internes">4.3 <code>ur3e_live_catch</code> — la boucle live (un nœud, modules internes)<a class="anchor" href="#4-3-ur3e-live-catch-la-boucle-live-un-nud-modules-internes" aria-label="Lien vers cette section">#</a></h3>
+
+<p>Un <strong>seul nœud rclpy</strong>, boucle pilotée à <strong>60 Hz</strong> (timer, ou déclenchée par <code>/joint_states</code>). Modules (classes appelées directement) :</p>
+
+<h4 id="4-3-1-ball-frame-py-repere-filtrage-vitesse">4.3.1 <code>ball_frame.py</code> — repère + filtrage vitesse<a class="anchor" href="#4-3-1-ball-frame-py-repere-filtrage-vitesse" aria-label="Lien vers cette section">#</a></h4>
+
+<ul>
+<li><strong>Conscient du repère : ne suppose jamais la caméra.</strong> Le module lit le <code>header.frame_id</code> du <code>BallState</code> reçu et transforme <strong>vers le repère <code>base</code></strong> par un lookup <span class="term">TF</span> générique <code>header.frame_id → base</code> (<code>P^B = {}^{B}T_{frame} · P^{frame}</code>) :
+<ul>
+<li><code>frame_id == &lt;camera_frame&gt;</code> → applique le hand-eye <code>{}^{B}T_C</code> (§7) ;</li>
+<li><code>frame_id == base</code> → transformée <strong>identité</strong>, balle déjà en <code>base</code> (cas <code>test_ball_node</code> <code>publish_frame=base</code>) : <strong>aucune</strong> transformation appliquée ;</li>
+<li>tout autre <code>frame_id</code> présent dans l'arbre <span class="term">TF</span> est accepté (lookup tf2 standard) ;</li>
+<li><code>frame_id</code> <strong>vide ou inconnu de TF</strong> ⇒ <strong>rejet</strong> + drapeau watchdog (§9) : jamais d'hypothèse silencieuse de repère, qui enverrait la balle au mauvais endroit.</li>
+</ul>
+Gère mm→m si nécessaire.</li>
+<li><strong>Filtre de vitesse balle</strong> (Kalman, ou EMA sur différence finie) sur les positions <code>base</code> → <code>ball_vel</code>. Aucune mesure directe de vitesse n'existe : c'est le maillon bruité (cf. sim-to-real §5.2).</li>
+<li><strong>Gestion de la péremption</strong> (staleness) : si plus de détection depuis <code>T_stale</code>, geler ou extrapoler brièvement, et lever un <strong>drapeau watchdog</strong> (§9).</li>
+</ul>
+
+<h4 id="4-3-2-observation-py-observationbuilder-observation-33-d">4.3.2 <code>observation.py</code> (ObservationBuilder) — observation 33-D<a class="anchor" href="#4-3-2-observation-py-observationbuilder-observation-33-d" aria-label="Lien vers cette section">#</a></h4>
+
+<p>Reconstruit l'observation <strong>dans l'ordre et les unités exacts</strong> de <code>firsttraining_env.py:197-208</code> (détail complet en §6). Miroir strict de <code>_get_observations</code>, <code>_update_local_pose_tensors</code> et <code>detect_pass_through</code>. <strong>Aucun degré</strong>, tout en rad/rad/s/m/m·s⁻¹.</p>
+
+<h4 id="4-3-3-policy-runtime-py-policyrunner-inference">4.3.3 <code>policy_runtime.py</code> (PolicyRunner) — inférence<a class="anchor" href="#4-3-3-policy-runtime-py-policyrunner-inference" aria-label="Lien vers cette section">#</a></h4>
+
+<ul>
+<li>Charge l'export déterministe <code>$DV_ROSWS_ROOT/data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts</code> (+ <code>policy_metadata.json</code> ; <code>.onnx</code> disponible en alternative runtime).</li>
+<li><strong>Risque de correction critique — le scaler.</strong> Le <span class="term">PPO</span> SKRL utilise un <code>RunningStandardScaler</code> sur les observations. Il faut <strong>vérifier si l'export embarque le scaler</strong> ou s'il faut appliquer <code>mean</code>/<code>var</code> sauvegardés <strong>avant</strong> le réseau. Inspecter le script d'export du dépôt Isaac (<code>&lt;ISAAC_REPO&gt;/scripts/skrl/play.py</code>) et <code>policy_metadata.json</code>. Alimenter le réseau brut avec une observation non normalisée serait une source majeure de divergence sim-to-real.</li>
+<li><strong>Sortie = action brute (6)</strong> (avant <code>action_scale</code>). C'est aussi ce qui est mémorisé pour la composante 9 de l'obs suivante.</li>
+</ul>
+
+<h4 id="4-3-4-action-py-actionmapper-cible-articulaire">4.3.4 <code>action.py</code> (ActionMapper) — cible articulaire<a class="anchor" href="#4-3-4-action-py-actionmapper-cible-articulaire" aria-label="Lien vers cette section">#</a></h4>
+
+<ul>
+<li><code>joint_target = action_brute × action_scale</code>, avec <code>action_scale = 0.5</code> (<code>_pre_physics_step</code>, env.py:182). <strong>Cible de position absolue</strong> (pas vitesse/couple).</li>
+<li>Mémorise l'action <strong>brute</strong> pour l'obs suivante.</li>
+</ul>
+
+<h4 id="4-3-5-safety-py-safetylimiter-watchdog-defense-en-profondeur">4.3.5 <code>safety.py</code> (SafetyLimiter + watchdog) — défense en profondeur<a class="anchor" href="#4-3-5-safety-py-safetylimiter-watchdog-defense-en-profondeur" aria-label="Lien vers cette section">#</a></h4>
+
+<ul>
+<li><strong>Clip</strong> aux bornes articulaires URDF + <strong>bornes de workspace</strong> (rejet hors zone sûre).</li>
+<li><strong>Rate-limit</strong> : <code>|target − q| ≤ v_safe·dt_step</code> et accélération <code>≤ a_safe</code>, avec <code>v_safe = URDF × 0.5</code> → base/épaule/coude <strong>1.571 rad/s</strong> (90 °/s), poignets <strong>3.142 rad/s</strong> (180 °/s). Identique au clamp côté sim (sim-to-real §2.2) : même borne des deux côtés.</li>
+<li><strong>Watchdog/dead-man</strong> : arrêt contrôlé si perception périmée, dépassement du budget temps de boucle, ou écart commande/réalisé trop grand. Réutilise les <strong>gates</strong> existants de <code>app.py</code> (External Control actif, speed scaling &gt; 0, contrôleur actif).</li>
+</ul>
+
+<h4 id="4-3-6-streaming-py-sortie-vers-le-controleur">4.3.6 <code>streaming.py</code> — sortie vers le contrôleur<a class="anchor" href="#4-3-6-streaming-py-sortie-vers-le-controleur" aria-label="Lien vers cette section">#</a></h4>
+
+<ul>
+<li><strong>Interpole</strong> la cible 60 Hz vers le taux du <code>forward_position_controller</code> et publie sur <code>/forward_position_controller/commands</code> (<code>std_msgs/Float64MultiArray</code>, 6 valeurs dans le <strong>joint order</strong> canonique). Démarrer avec des réglages conservateurs.</li>
+</ul>
+
+<p><strong>Joint order canonique</strong> (réutilisé partout, <code>replay_core.py:14</code>) : <code>shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3</code>.</p>
+
+<h3 id="4-4-ur-robot-driver-forward-position-controller-existant-a-configurer">4.4 <code>ur_robot_driver</code> + <code>forward_position_controller</code> (existant, à configurer)<a class="anchor" href="#4-4-ur-robot-driver-forward-position-controller-existant-a-configurer" aria-label="Lien vers cette section">#</a></h3>
+
+<ul>
+<li>La commande live passe par le <strong>streaming controller</strong> <code>forward_position_controller</code> (ros2_control), <strong>pas</strong> <code>scaled_joint_trajectory_controller</code> (qui bufferise des trajectoires — inadapté au réactif, cf. sim-to-real §5.4).</li>
+<li>Les deux contrôleurs revendiquent les <strong>mêmes interfaces</strong> → mutuellement exclusifs. La gestion de la <strong>bascule</strong> est en §8.</li>
+</ul>
+
+<h3 id="4-5-ur3e-web-ui-visualisation-existant-a-etendre">4.5 <code>ur3e_web_ui</code> — visualisation (existant, à étendre)<a class="anchor" href="#4-5-ur3e-web-ui-visualisation-existant-a-etendre" aria-label="Lien vers cette section">#</a></h3>
+
+<p>C'est la boîte « Visualisation Robot et Ball et autre information utile ».</p>
+
+<ul>
+<li>Abonner le bridge (<code>ros_interface.py</code>) à <code>BallState</code> (repère <code>base</code>) + topics de télémétrie (<code>CatchTelemetry</code>), ajouter un payload WebSocket, et un <strong>marqueur balle + trajectoire prédite</strong> dans <code>viewer3d.js</code>. Réutilise le viewer three.js et le bridge existants.</li>
+<li><strong>Hors chemin critique</strong> : pure télémétrie, jamais sur la boucle 60 Hz.</li>
+</ul>
+
+<hr>
+
+<h2 id="5-contrat-de-messages-ur3e-catch-msgs">5. Contrat de messages (<code>ur3e_catch_msgs</code>)<a class="anchor" href="#5-contrat-de-messages-ur3e-catch-msgs" aria-label="Lien vers cette section">#</a></h2>
+
+<pre><code># BallState.msg — pose balle horodatée, partagée perception ↔ commande
+std_msgs/Header   header        # stamp = temps d'événement ; frame_id = repère DÉCLARÉ de la
+                                #   position : &lt;camera_frame&gt; (tracker), ou &lt;camera_frame&gt; OU base
+                                #   (test_ball_node). Le consommateur transforme selon ce champ.
+geometry_msgs/Point    position # mètres
+geometry_msgs/Vector3  velocity # m/s (optionnel ; sinon recalculée côté ball_frame)
+bool   valid                    # estimation exploitable ?
+float32 confidence              # qualité (résidu/visibilité)</code></pre>
+
+<pre><code># CatchTelemetry.msg — debug/visualisation (hors chemin critique)
+float32[]  observation   # 33
+float32[]  raw_action    # 6
+float32[]  joint_target  # 6 (après clip + rate-limit)
+geometry_msgs/Point ball_base   # balle dans le repère base</code></pre>
+
+<blockquote><p>Alternative rapide pour le debug : <code>std_msgs/Float32MultiArray</code>. Mais pour <code>BallState</code> on garde un type <strong>stampé</strong> : la synchronisation temporelle est explicitement citée comme un défi (Stage_summary), et un timestamp d'événement fiable est indispensable au budget de latence.</p></blockquote>
+
+<hr>
+
+<h2 id="6-reconstruction-de-l-observation-33-d">6. Reconstruction de l'observation 33-D<a class="anchor" href="#6-reconstruction-de-l-observation-33-d" aria-label="Lien vers cette section">#</a></h2>
+
+<p>Ordre <strong>exact</strong> (somme = 6+6+3+3+3+1+3+1+6+1 = <strong>33</strong>), miroir de <code>firsttraining_env.py:197-208</code> :</p>
+
+<div class="table-wrap"><table>
+<thead><tr>
+<th>#</th>
+<th>Composante</th>
+<th class="num">Dim</th>
+<th>Source live</th>
+<th>Difficulté</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>joint_pos</code></td>
+<td class="num">6</td>
+<td><code>/joint_states</code> réordonné (joint order §4.3)</td>
+<td>facile</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>joint_vel</code></td>
+<td class="num">6</td>
+<td><code>/joint_states</code></td>
+<td>facile</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>disk_pos_local</code></td>
+<td class="num">3</td>
+<td>FK <code>base → hoop_center</code> (<span class="term">TF</span> statique <code>wrist_3_link → hoop</code>)</td>
+<td>calibrage montage</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>ball_pos_local</code></td>
+<td class="num">3</td>
+<td>balle en <code>base</code> (module <code>ball_frame</code>)</td>
+<td><strong>critique</strong> (perception+extrinsèque)</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>direction</code></td>
+<td class="num">3</td>
+<td><code>ball_pos_local − disk_pos_local</code></td>
+<td>dérivé</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>distance</code></td>
+<td class="num">1</td>
+<td><code>‖direction‖</code></td>
+<td>dérivé</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>ball_vel_w</code></td>
+<td class="num">3</td>
+<td>vitesse balle <strong>filtrée</strong></td>
+<td><strong>critique</strong> (bruit)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>flag <code>prev_disk_signed_dist &gt; 0</code></td>
+<td class="num">1</td>
+<td>recalculé (projection balle sur normale disque)</td>
+<td>moyen</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>actions</code> (action <strong>brute</strong> précédente)</td>
+<td class="num">6</td>
+<td>attribut mémorisé (pré-<code>action_scale</code>)</td>
+<td>facile</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>pass_through_count</code></td>
+<td class="num">1</td>
+<td>recalculé (<code>detect_pass_through</code>, env.py:327)</td>
+<td>moyen</td>
+</tr>
+</tbody></table></div>
+
+<p>Points d'attention :</p>
+
+<ul>
+<li><strong><code>ball_vel_w</code> est une vitesse « monde ».</strong> Comme le passage en <code>base</code> n'est qu'une translation constante (origine d'environnement), la <strong>vitesse est invariante</strong> : la différence finie filtrée des positions <code>base</code> donne directement <code>ball_vel_w</code>.</li>
+<li><strong>Composante 9 = action brute</strong>, pas la cible mise à l'échelle. C'est le retour interne décrit en §2.</li>
+<li><strong>Composantes 8 et 10</strong> dépendent de la <strong>géométrie disque/balle</strong> (centre + normale du hoop). Elles doivent reproduire <code>detect_pass_through</code> et le signe de <code>(balle − disque)·normale</code>.</li>
+<li><strong>Unités strictes</strong> : rad, rad/s, m, m/s. Aucune conversion en degrés ne doit traîner.</li>
+</ul>
+
+<p>Source de vérité : <code>&lt;ISAAC_REPO&gt;/source/FirstTraining/FirstTraining/tasks/direct/firsttraining/firsttraining_env.py</code> (<code>_get_observations</code>, <code>_update_local_pose_tensors</code>, <code>_read_disk_pose_in_body_frame</code>, <code>detect_pass_through</code>) et <code>firsttraining_env_cfg.py</code> (<code>action_scale</code>, géométrie disque).</p>
+
+<hr>
+
+<h2 id="7-coherence-des-reperes-piege-majeur">7. Cohérence des repères (piège majeur)<a class="anchor" href="#7-coherence-des-reperes-piege-majeur" aria-label="Lien vers cette section">#</a></h2>
+
+<p>Graphe <span class="term">TF</span> cible :</p>
+
+<pre><code>base ──(driver/URDF: chaîne cinématique)── base_link, ..., wrist_3_link ──(TF statique montage)── hoop_center
+  │
+  └──(TF statique hand-eye {}^B T_C)── &lt;camera_frame&gt;
+        ▲
+        └── BallState publiée dans &lt;camera_frame&gt;, transformée vers base par ball_frame</code></pre>
+
+<ul>
+<li><strong>Un seul <code>&lt;camera_frame&gt;</code>.</strong> Le tracker publie dedans ; le hand-eye résout <code>base → &lt;camera_frame&gt;</code> ; on publie cette transformée en <strong><span class="term">TF</span> statique</strong> (depuis <code>handeye_result.yaml</code>, via <code>static_transform_publisher</code> ou un petit nœud). Vérifier <strong>signe et ordre des axes</strong> avant tout test (cohérence avec <code>util.hpp::ToMeters</code>).</li>
+<li><strong>Transformation pilotée par le <code>frame_id</code>.</strong> Le consommateur (<code>ball_frame</code>, §4.3.1) ne code jamais en dur « caméra » : il transforme <code>header.frame_id → base</code> via <span class="term">TF</span>. Une <code>BallState</code> déclarée en <code>base</code> (test_ball_node) <strong>court-circuite proprement le hand-eye</strong> (transformée identité), ce qui permet de tester la boucle indépendamment de l'extrinsèque.</li>
+<li><strong>Calibration extrinsèque.</strong> Rappel (Stage_summary) : <code>{}^{B}T_{S,i} = {}^{B}T_{E,i}·{}^{E}T_S</code>, <code>{}^{B}T_{C,i} = {}^{B}T_{S,i}·({}^{C}T_{S,i})^{-1}</code>, puis estimation multi-poses d'un unique <code>{}^{B}T_C</code>. La qualité de cette extrinsèque conditionne directement la précision : quelques cm d'erreur suffisent à rater la balle.</li>
+<li><strong><code>hoop_center</code> (disque).</strong> <span class="term">TF</span> statique <code>wrist_3_link → hoop_center</code> (offset + normale) mesurée sur le <strong>montage imprimé</strong> : miroir réel de <code>_read_disk_pose_in_body_frame</code> (qui lit la géométrie dans le USD en sim).</li>
+<li><strong><code>base</code> vs <code>base_link</code>.</strong> Rotation π autour de Z (déjà documenté dans <code>ur3e_robot_control_architecture.md</code>). Le « local » de la sim = <code>monde − env_origins</code> = repère <strong><code>base</code></strong> du robot. Vérifier qu'on construit l'obs dans <code>base</code>, pas <code>base_link</code>.</li>
+</ul>
+
+<hr>
+
+<h2 id="8-interface-de-commande-et-bascule-de-controleur">8. Interface de commande et bascule de contrôleur<a class="anchor" href="#8-interface-de-commande-et-bascule-de-controleur" aria-label="Lien vers cette section">#</a></h2>
+
+<p><code>forward_position_controller</code> et <code>scaled_joint_trajectory_controller</code> revendiquent les <strong>mêmes interfaces de commande</strong> → ils ne peuvent pas être actifs ensemble. Séquence de bring-up :</p>
+
+<ol>
+<li><strong>Approche</strong> vers la pose de départ avec le <code>scaled_joint_trajectory_controller</code> (outils existants : web UI / <code>ur3e_rollout_replay</code>), qui est déjà sûr et retimé.</li>
+<li><strong>Bascule</strong> : désactiver le trajectory controller, activer <code>forward_position_controller</code> via <code>controller_manager/switch_controller</code> (plomberie <strong>déjà présente</strong> dans <code>ros_interface.py</code>).</li>
+<li><strong>Catch</strong> : la boucle live stream les cibles (interpolées) sur <code>/forward_position_controller/commands</code>.</li>
+<li><strong>Re-bascule</strong> vers le trajectory controller après la séquence (hold/retour).</li>
+</ol>
+
+<p>Vérifications : <code>forward_position_controller</code> doit être <strong>spawné</strong> (au moins inactif) — <code>ros2 control list_controllers</code>. S'il est absent, l'ajouter au <code>controllers.yaml</code> du driver. Les modes « live catch » (streaming) et jog/home/replay (trajectoire) sont <strong>mutuellement exclusifs</strong> ; l'exposer clairement dans l'UI/launch.</p>
+
+<hr>
+
+<h2 id="9-couche-de-securite-obligatoire">9. Couche de sécurité (obligatoire)<a class="anchor" href="#9-couche-de-securite-obligatoire" aria-label="Lien vers cette section">#</a></h2>
+
+<ul>
+<li><strong>Clip + rate-limit</strong> (<code>v_safe</code>, <code>a_safe</code>) appliqués <strong>côté robot</strong> aussi (indépendamment de la sim) — la politique sort des cibles agressives (sim-to-real §1).</li>
+<li><strong>Bornes</strong> : positions URDF + workspace (rejet hors zone sûre).</li>
+<li><strong>Watchdog/dead-man</strong> : perception périmée, boucle qui dépasse son budget, ou écart commande/réalisé trop grand → <strong>arrêt contrôlé</strong>.</li>
+<li><strong>Gates réutilisés</strong> (<code>app.py</code>) : External Control en lecture, speed scaling &gt; 0, contrôleur actif.</li>
+<li><strong>Procédure</strong> : vitesse réduite, opérateur à l'<span class="term">E-stop</span>, <strong>pas de vraie balle</strong> aux premiers essais, montée en vitesse progressive.</li>
+</ul>
+
+<hr>
+
+<h2 id="10-budget-de-latence-et-synchronisation">10. Budget de latence et synchronisation<a class="anchor" href="#10-budget-de-latence-et-synchronisation" aria-label="Lien vers cette section">#</a></h2>
+
+<ul>
+<li><strong>Horodater</strong> chaque message (<code>BallState</code> au temps d'événement). Mesurer la latence bout-en-bout : capture → détection → obs → policy → commande → début de mouvement (timestamps ROS). Fournir un petit outil de rapport de latence.</li>
+<li><strong>Contrainte</strong> (sim-to-real §5.6) : latence réelle mesurée <strong>≤</strong> latence modélisée à l'entraînement (§2.4 du sim-to-real, <code>L_a</code>, <code>L_o</code>). Sinon, élargir la randomisation de latence et <strong>ré-entraîner</strong>.</li>
+<li>L'architecture mono-processus (§2) sert directement cet objectif en supprimant les sauts <span class="term">DDS</span> internes.</li>
+</ul>
+
+<hr>
+
+<h2 id="11-feuille-de-route-d-implementation-par-etapes">11. Feuille de route d'implémentation (par étapes)<a class="anchor" href="#11-feuille-de-route-d-implementation-par-etapes" aria-label="Lien vers cette section">#</a></h2>
+
+<ol>
+<li><strong><code>ur3e_catch_msgs</code></strong> (<code>BallState</code>, <code>CatchTelemetry</code>) ; buildable et visible dans le workspace ROS unique.</li>
+<li><strong><code>test_ball_node</code></strong> (param <code>publish_frame</code> : <code>base</code> <strong>ou</strong> <code>&lt;camera_frame&gt;</code>) + <strong>adaptateur</strong> <code>Float32MultiArray → BallState</code> → chaîne testable sans caméra. Commencer en <code>publish_frame=base</code> (sans dépendre du hand-eye), puis passer en <code>&lt;camera_frame&gt;</code>.</li>
+<li><strong><code>ball_frame</code></strong> <strong>conscient du repère</strong> (transforme selon <code>header.frame_id</code>) + <span class="term">TF</span> statiques (<code>base → &lt;camera_frame&gt;</code>, <code>wrist_3_link → hoop_center</code>) → <code>ball_pos_local</code> validé (echo + visualisation), vérifié en parité base/caméra (§12).</li>
+<li><strong><code>ObservationBuilder</code></strong> 33-D + <strong>test d'équivalence</strong> : rejouer un épisode <code>rollouts_10_episodes.json</code>, reconstruire l'obs, comparer bit-à-bit à l'obs sim.</li>
+<li><strong><code>PolicyRunner</code></strong> (trancher la question du scaler) → action brute en <strong>dry-run</strong> (logs, aucune commande robot).</li>
+<li><strong><code>ActionMapper</code> + <code>safety</code> + <code>streaming</code></strong> vers <code>forward_position_controller</code> sur <strong>fake hardware/<span class="term">URSim</span></strong>.</li>
+<li><strong>Bascule de contrôleur</strong> + mode « live catch » dans le web UI + <strong>visualisation balle</strong>.</li>
+<li><strong>Mesure de latence</strong> bout-en-bout ; vérifier ≤ latence modélisée.</li>
+<li><strong>Bring-up robot par étapes</strong> : perception seule → dry-run → balle lente <span class="term">E-stop</span> en main → montée en vitesse de balle.</li>
+</ol>
+
+<hr>
+
+<h2 id="12-verification">12. Vérification<a class="anchor" href="#12-verification" aria-label="Lien vers cette section">#</a></h2>
+
+<ul>
+<li><strong>Équivalence d'observation</strong> : obs reconstruite par le nœud vs obs sim (ordre, dims, unités, <strong>scaler</strong>, repères) sur un épisode rejoué — tolérance serrée.</li>
+<li><strong>Bornes physiques</strong> : <code>vitesse réalisée ≤ v_safe</code> par joint (réutiliser l'analyse de vitesse du sim-to-real §1).</li>
+<li><strong>Dry-run</strong> : enregistrer obs/actions sans envoi robot ; inspecter <code>BallState</code> (base) via la visualisation et <code>ros2 topic echo</code>.</li>
+<li><strong>Parité de repère</strong> : rejouer la <strong>même</strong> trajectoire avec <code>test_ball_node</code> en <code>publish_frame=base</code> puis en <code>publish_frame=&lt;camera_frame&gt;</code> (la version caméra étant la version <code>base</code> passée par <code>({}^{B}T_C)^{-1}</code>). Le <code>ball_pos_local</code> reconstruit doit <strong>coïncider</strong> (à l'erreur hand-eye près) : confirme que <code>ball_frame</code> est bien conscient du repère, et isole une erreur extrinsèque d'une erreur de chaîne.</li>
+<li><strong>Fake hardware / <span class="term">URSim</span> d'abord</strong> ; <code>forward_position_controller</code> actif vérifié ; <strong>watchdog testé</strong> (couper la perception → arrêt contrôlé).</li>
+<li><strong>Latence</strong> mesurée et tracée ; vitesse réduite + <span class="term">E-stop</span> pour les premiers essais réels.</li>
+</ul>
+
+<hr>
+
+<h2 id="13-alternatives-d-architecture">13. Alternatives d'architecture<a class="anchor" href="#13-alternatives-d-architecture" aria-label="Lien vers cette section">#</a></h2>
+
+<div class="table-wrap"><table>
+<thead><tr>
+<th>Variante</th>
+<th>Avantages</th>
+<th>Inconvénients</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><strong>Composition mono-processus</strong> (retenue)</td>
+<td>Latence minimale (aucun saut <span class="term">DDS</span> chaud) ; code modulaire ; signaux exposables en debug</td>
+<td>« Composition » Python = un nœud rclpy (pas de vrai intra-process zéro-copie rclcpp)</td>
+</tr>
+<tr>
+<td><strong>Multi-nœuds séparés</strong> (schéma initial)</td>
+<td>Modularité maximale ; chaque étape inspectable par topic</td>
+<td>N sauts <span class="term">DDS</span> sur le chemin 60 Hz (sérialisation + jitter d'ordonnancement) → latence</td>
+</tr>
+<tr>
+<td><strong>Nœud politique unique pur</strong></td>
+<td>Le plus simple à raisonner ; le moins de code</td>
+<td>Moins de signaux intermédiaires observables (compensable par topics de debug)</td>
+</tr>
+<tr>
+<td><strong><span class="term">RTDE</span> <code>servoj</code></strong> (au lieu de <code>forward_position_controller</code>)</td>
+<td>Latence potentiellement plus basse</td>
+<td>Hors ros2_control ; interface séparée ; plus délicat à stabiliser/sécuriser</td>
+</tr>
+<tr>
+<td><strong>Composition rclcpp réelle</strong></td>
+<td>Vrai intra-process zéro-copie</td>
+<td>Exige une inférence <strong>C++</strong> (TorchScript C++) — option future si Python devient limitant</td>
+</tr>
+</tbody></table></div>
+
+<p>Recommandation : <strong>mono-processus + <code>forward_position_controller</code></strong> maintenant ; garder <code>servoj</code> et la composition rclcpp en réserve si la latence mesurée (§10) l'exige.</p>
+
+<hr>
+
+<h2 id="14-recapitulatif-reutilisation-de-l-existant">14. Récapitulatif — réutilisation de l'existant<a class="anchor" href="#14-recapitulatif-reutilisation-de-l-existant" aria-label="Lien vers cette section">#</a></h2>
+
+<div class="table-wrap"><table>
+<thead><tr>
+<th>Besoin</th>
+<th>Réutiliser</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Action ROS, joint order, build trajectoire</td>
+<td><code>Dv-Rosws/src/ur3e_rollout_replay/</code> (<code>replay_core.py</code>, <code>send.py:build_joint_trajectory</code>)</td>
+</tr>
+<tr>
+<td>Bridge rclpy, gates sécurité, <code>switch_controller</code>, <span class="term">TF</span>, WebSocket, viewer</td>
+<td><code>Dv-Rosws/src/ur3e_web_ui/ur3e_web_ui/</code> (<code>ros_interface.py</code>, <code>app.py</code>, <code>motion.py</code>, <code>static/js/viewer3d.js</code>)</td>
+</tr>
+<tr>
+<td>Sémantique obs/action (source de vérité)</td>
+<td><code>&lt;ISAAC_REPO&gt;/source/FirstTraining/.../firsttraining/firsttraining_env.py</code>, <code>firsttraining_env_cfg.py</code>, <code>ur_gripper.py</code>, <code>agents/skrl_ppo_cfg.yaml</code>, <code>&lt;ISAAC_REPO&gt;/scripts/skrl/play.py</code></td>
+</tr>
+<tr>
+<td>Export politique</td>
+<td><code>$DV_ROSWS_ROOT/data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/</code> (<code>policy_deterministic.ts</code>/<code>.onnx</code>, <code>policy_metadata.json</code>)</td>
+</tr>
+<tr>
+<td>Perception (Trace, régression, conversion 3D)</td>
+<td><code>Dv-Rosws/src/Ball_Tracking_Cpp/</code> (<code>Gui.cpp</code>, <code>BallTracker.cpp</code>, <code>RegressionAccumulator.hpp</code>, <code>util.hpp::ToMeters</code>)</td>
+</tr>
+<tr>
+<td>Calibration caméra + extrinsèque</td>
+<td><code>Dv-Rosws/calibration_camera_DVXplorer_*.xml</code>, <code>Dv-Rosws/scripts/solve_handeye.py</code>, <code>ur3e_camera_base_calibration.md</code>, <code>handeye_result.yaml</code></td>
+</tr>
+</tbody></table></div>
+
+<blockquote><p>Source de vérité des limites de vitesse : <code>ur_description/config/ur3e/joint_limits.yaml</code> du driver réellement lancé ; <code>v_safe = limite × 0.5</code> (cf. sim-to-real §1, §2.1).</p></blockquote>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

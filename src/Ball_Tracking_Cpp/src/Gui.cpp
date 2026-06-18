@@ -1711,8 +1711,13 @@ Vector2 Gui::CamToScreen(float x, float y) {
 
 void Gui::DrawOverlays() {
     for (auto &c : overlay_circles) {
-        Vector2 sc = CamToScreen(c.center.x, c.center.y);
-        DrawCircleLinesV(sc, c.radius * scale, c.color);
+        Vector2 right = CamToScreen(c.center.x, c.center.y);
+        Vector2 left = {
+            offset.x + c.center.x * scale,
+            offset.y + c.center.y * scale
+        };
+        DrawCircleLinesV(left, c.radius * scale, c.color);
+        DrawCircleLinesV(right, c.radius * scale, c.color);
     }
     for (auto &a : overlay_arrows) {
         Vector2 s = CamToScreen(a.from.x, a.from.y);

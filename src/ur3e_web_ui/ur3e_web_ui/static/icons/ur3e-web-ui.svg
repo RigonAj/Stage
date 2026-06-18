@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="UR3e Control">
+  <rect width="512" height="512" rx="96" fill="#111827"/>
+  <circle cx="136" cy="136" r="42" fill="#38bdf8"/>
+  <circle cx="376" cy="152" r="42" fill="#22c55e"/>
+  <circle cx="262" cy="360" r="50" fill="#f8fafc"/>
+  <path d="M170 150l164 5M354 188l-80 130M151 174l89 148" fill="none" stroke="#e5e7eb" stroke-width="34" stroke-linecap="round"/>
+  <path d="M108 412h308" stroke="#64748b" stroke-width="28" stroke-linecap="round"/>
+  <text x="256" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="54" font-weight="700" fill="#f8fafc">UR3e</text>
+</svg>

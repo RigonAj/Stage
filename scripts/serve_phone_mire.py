@@ -13,7 +13,7 @@ Usage:
     python3 scripts/serve_phone_mire.py --host 0.0.0.0 --port 8081
     # on the phone (same network): http://<PC_IP>:8081/
 
-Checklist phone side (AMOLED, see docs/ur3e_camera_base_calibration.md §2-3):
+Checklist phone side (AMOLED, see docs/Robot_Control/ur3e_camera_base_calibration.md §2-3):
 - brightness 100% (or DC dimming), auto-brightness off, refresh rate fixed,
   screen timeout "never", notifications off, real fullscreen.
 - verify the printed expected dot spacing with a caliper (mode "measure").

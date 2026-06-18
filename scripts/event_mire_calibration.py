@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -31,11 +31,65 @@ MISSING_DOT = (1, 2)
 ANCHOR_DOT = (0, 0)
 EXPECTED_DOTS = ROWS * COLS - 1
 SQUARE_EXPECTED_DOTS = 4
+
+
+@dataclass(frozen=True)
+class DotGridPattern:
+    pattern_id: str
+    label: str
+    rows: int
+    cols: int
+    missing_dot: Optional[Tuple[int, int]]
+    anchor_dot: Tuple[int, int]
+
+    @property
+    def expected_dots(self) -> int:
+        missing = 1 if self.missing_dot is not None else 0
+        return self.rows * self.cols - missing
+
+    def to_json(self) -> Dict[str, object]:
+        return {
+            "id": self.pattern_id,
+            "label": self.label,
+            "type": "dot_grid",
+            "rows": self.rows,
+            "cols": self.cols,
+            "expected_dots": self.expected_dots,
+            "missing_dot": (
+                {"row": self.missing_dot[0], "col": self.missing_dot[1]}
+                if self.missing_dot is not None
+                else None
+            ),
+            "anchor_dot": {"row": self.anchor_dot[0], "col": self.anchor_dot[1]},
+        }
+
+
+DOT_GRID_PATTERNS: List[DotGridPattern] = [
+    DotGridPattern("mire", "Asymetrique 5x4 - 19 points", ROWS, COLS, MISSING_DOT, ANCHOR_DOT),
+    DotGridPattern("grid_5x4", "Grille complete 5x4 - 20 points", 4, 5, None, (0, 0)),
+    DotGridPattern("grid_7x5", "Grille complete 7x5 - 35 points", 5, 7, None, (0, 0)),
+    DotGridPattern("grid_9x6", "Grille complete 9x6 - 54 points", 6, 9, None, (0, 0)),
+]
+DOT_GRID_PATTERN_BY_ID = {pattern.pattern_id: pattern for pattern in DOT_GRID_PATTERNS}
+DEFAULT_PATTERN_ID = "mire"
 SQUARE_SEQUENCE = [
     {"id": "center_large", "label": "centre grand", "offset_x": 0.0, "offset_y": 0.0, "side_scale": 2.0},
     {"id": "upper_left_medium", "label": "haut gauche moyen", "offset_x": -0.65, "offset_y": -0.45, "side_scale": 1.35},
     {"id": "upper_right_small", "label": "haut droite petit", "offset_x": 0.75, "offset_y": -0.25, "side_scale": 1.10},
     {"id": "lower_center_medium", "label": "bas centre moyen", "offset_x": 0.20, "offset_y": 0.65, "side_scale": 1.55},
+]
+
+PRESET_COLORS: List[Tuple[str, Tuple[int, int, int]]] = [
+    ("Noir", (0, 0, 0)),
+    ("Blanc", (255, 255, 255)),
+    ("Vert", (0, 255, 0)),
+    ("Rouge", (0, 0, 255)),
+    ("Bleu", (255, 0, 0)),
+    ("Jaune", (0, 255, 255)),
+    ("Cyan", (255, 255, 0)),
+    ("Magenta", (255, 0, 255)),
+    ("Orange", (0, 165, 255)),
+    ("Gris clair", (200, 200, 200)),
 ]
 
 
@@ -136,11 +190,15 @@ class Blob:
     weight: float
     peak: float
     bbox: Tuple[int, int, int, int]
+    center_method: str = "unknown"
+    center_agreement_px: Optional[float] = None
 
     def to_json(self) -> Dict[str, object]:
         return {
             "index": self.index,
             "center_px": {"x": self.x, "y": self.y},
+            "center_method": self.center_method,
+            "center_agreement_px": self.center_agreement_px,
             "area_px": self.area_px,
             "activity_sum": self.weight,
             "peak": self.peak,
@@ -179,6 +237,46 @@ class Match:
             "activity_sum": self.blob.weight,
             "reprojection_error_px": self.reproj_error_px,
         }
+
+
+@dataclass
+class EventFilterSnapshot:
+    enabled: bool
+    name: str
+    support_duration_us: int
+    cutoff_hz: float
+    incoming_events: int
+    outgoing_events: int
+    error: Optional[str] = None
+
+    @property
+    def reduction_factor(self) -> float:
+        if self.incoming_events <= 0:
+            return 0.0
+        discarded = max(0, self.incoming_events - self.outgoing_events)
+        return discarded / float(self.incoming_events)
+
+    def to_json(self) -> Dict[str, object]:
+        return {
+            "enabled": self.enabled,
+            "name": self.name,
+            "support_duration_us": self.support_duration_us,
+            "cutoff_hz": self.cutoff_hz,
+            "incoming_events": self.incoming_events,
+            "outgoing_events": self.outgoing_events,
+            "reduction_factor": self.reduction_factor,
+            "error": self.error,
+        }
+
+    def summary(self) -> str:
+        if not self.enabled:
+            return "filtre bruit off"
+        if self.incoming_events <= 0:
+            return "filtre bruit 0 event"
+        return (
+            f"filtre bruit {self.outgoing_events}/{self.incoming_events} events "
+            f"(-{100.0 * self.reduction_factor:.1f}%)"
+        )
 
 
 def parse_xrandr_monitors() -> Dict[str, MonitorInfo]:
@@ -297,26 +395,34 @@ def select_monitor(monitors: Sequence[MonitorInfo], requested: Optional[str]) ->
     return 0
 
 
-def build_mire_layout(
+def pattern_by_id(pattern_id: str) -> DotGridPattern:
+    return DOT_GRID_PATTERN_BY_ID.get(pattern_id, DOT_GRID_PATTERN_BY_ID[DEFAULT_PATTERN_ID])
+
+
+def build_dot_grid_layout(
     width_px: int,
     height_px: int,
     mm_per_px_x: float,
     mm_per_px_y: float,
-) -> Tuple[List[ScreenDot], Dict[str, float]]:
-    spacing_px = 0.82 * min(width_px / float(COLS - 1), height_px / float(ROWS - 1))
+    pattern: DotGridPattern,
+) -> Tuple[List[ScreenDot], Dict[str, object]]:
+    spacing_px = 0.82 * min(
+        width_px / float(max(1, pattern.cols - 1)),
+        height_px / float(max(1, pattern.rows - 1)),
+    )
     center_x = width_px * 0.5
     center_y = height_px * 0.5
     small_radius = spacing_px * 0.17
     anchor_radius = spacing_px * 0.285
 
     dots: List[ScreenDot] = []
-    for row in range(ROWS):
-        for col in range(COLS):
-            if (row, col) == MISSING_DOT:
+    for row in range(pattern.rows):
+        for col in range(pattern.cols):
+            if pattern.missing_dot is not None and (row, col) == pattern.missing_dot:
                 continue
-            x = center_x + (col - (COLS - 1) * 0.5) * spacing_px
-            y = center_y + (row - (ROWS - 1) * 0.5) * spacing_px
-            anchor = (row, col) == ANCHOR_DOT
+            x = center_x + (col - (pattern.cols - 1) * 0.5) * spacing_px
+            y = center_y + (row - (pattern.rows - 1) * 0.5) * spacing_px
+            anchor = (row, col) == pattern.anchor_dot
             radius = anchor_radius if anchor else small_radius
             dots.append(
                 ScreenDot(
@@ -332,6 +438,18 @@ def build_mire_layout(
             )
 
     meta = {
+        "pattern": pattern.pattern_id,
+        "pattern_type": "dot_grid",
+        "pattern_label": pattern.label,
+        "rows": pattern.rows,
+        "cols": pattern.cols,
+        "expected_dots": pattern.expected_dots,
+        "missing_dot": (
+            {"row": pattern.missing_dot[0], "col": pattern.missing_dot[1]}
+            if pattern.missing_dot is not None
+            else None
+        ),
+        "anchor_dot": {"row": pattern.anchor_dot[0], "col": pattern.anchor_dot[1]},
         "spacing_px": spacing_px,
         "spacing_x_mm": spacing_px * mm_per_px_x,
         "spacing_y_mm": spacing_px * mm_per_px_y,
@@ -341,6 +459,22 @@ def build_mire_layout(
         "anchor_radius_px": anchor_radius,
     }
     return dots, meta
+
+
+def build_mire_layout(
+    width_px: int,
+    height_px: int,
+    mm_per_px_x: float,
+    mm_per_px_y: float,
+    pattern_id: str = DEFAULT_PATTERN_ID,
+) -> Tuple[List[ScreenDot], Dict[str, object]]:
+    return build_dot_grid_layout(
+        width_px,
+        height_px,
+        mm_per_px_x,
+        mm_per_px_y,
+        pattern_by_id(pattern_id),
+    )
 
 
 def build_square_layout(
@@ -353,7 +487,7 @@ def build_square_layout(
     side_scale: float = 2.0,
     variant_id: str = "center_large",
     variant_label: str = "centre grand",
-) -> Tuple[List[ScreenDot], Dict[str, float]]:
+) -> Tuple[List[ScreenDot], Dict[str, object]]:
     _, mire_meta = build_mire_layout(width_px, height_px, mm_per_px_x, mm_per_px_y)
     screen_center_x = width_px * 0.5
     screen_center_y = height_px * 0.5
@@ -422,6 +556,115 @@ def split_sorted_into_groups(values: np.ndarray, groups: int) -> Optional[List[n
     return group_indices
 
 
+def robust_weighted_center(
+    yy: np.ndarray,
+    xx: np.ndarray,
+    weights: np.ndarray,
+    origin_x: int,
+    origin_y: int,
+    fallback: Tuple[float, float],
+) -> Tuple[Tuple[float, float], bool]:
+    if weights.size == 0:
+        return fallback, False
+
+    weights_f = weights.astype(np.float64, copy=False)
+    floor = float(np.percentile(weights_f, 20))
+    ceiling = float(np.percentile(weights_f, 95))
+    robust = np.clip(weights_f - floor, 0.0, max(ceiling - floor, 1e-6))
+    total = float(np.sum(robust))
+    if total <= 1e-6:
+        total = float(np.sum(weights_f))
+        if total <= 1e-6:
+            return fallback, False
+        robust = weights_f
+
+    cx = float(np.sum((xx + origin_x) * robust) / total)
+    cy = float(np.sum((yy + origin_y) * robust) / total)
+    return (cx, cy), True
+
+
+def shape_center_from_mask(
+    mask: np.ndarray,
+    origin_x: int,
+    origin_y: int,
+    fallback: Tuple[float, float],
+) -> Tuple[Tuple[float, float], str]:
+    mask_u8 = mask.astype(np.uint8, copy=False)
+    contours, _ = cv.findContours(mask_u8 * 255, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    if contours:
+        contour = max(contours, key=cv.contourArea)
+        if len(contour) >= 5 and cv.contourArea(contour) >= 3.0:
+            try:
+                (cx, cy), _, _ = cv.fitEllipse(contour)
+                center = (float(cx + origin_x), float(cy + origin_y))
+                if all(math.isfinite(value) for value in center):
+                    return center, "ellipse"
+            except cv.error:
+                pass
+
+        moments = cv.moments(contour)
+        if abs(moments["m00"]) > 1e-6:
+            return (
+                (
+                    float(moments["m10"] / moments["m00"] + origin_x),
+                    float(moments["m01"] / moments["m00"] + origin_y),
+                ),
+                "contour_moments",
+            )
+
+    moments = cv.moments(mask_u8)
+    if abs(moments["m00"]) > 1e-6:
+        return (
+            (
+                float(moments["m10"] / moments["m00"] + origin_x),
+                float(moments["m01"] / moments["m00"] + origin_y),
+            ),
+            "binary_moments",
+        )
+    return fallback, "component_centroid"
+
+
+def estimate_blob_center(
+    mask: np.ndarray,
+    activity_roi: np.ndarray,
+    component_centroid: Tuple[float, float],
+    origin_x: int,
+    origin_y: int,
+) -> Tuple[float, float, str, Optional[float]]:
+    yy, xx = np.nonzero(mask)
+    weights = activity_roi[mask]
+    weighted_center, has_weighted = robust_weighted_center(
+        yy,
+        xx,
+        weights,
+        origin_x,
+        origin_y,
+        component_centroid,
+    )
+    shape_center, shape_method = shape_center_from_mask(
+        mask,
+        origin_x,
+        origin_y,
+        component_centroid,
+    )
+
+    if not has_weighted:
+        return shape_center[0], shape_center[1], shape_method, None
+
+    agreement = float(np.linalg.norm(np.subtract(shape_center, weighted_center)))
+    max_reasonable_delta = max(2.0, 0.12 * max(mask.shape))
+    if agreement <= max_reasonable_delta:
+        # The component shape carries the target geometry; the activity centroid
+        # adds a small sub-pixel correction without letting one bright side pull
+        # the center too far.
+        blend_shape = 0.85
+        cx = blend_shape * shape_center[0] + (1.0 - blend_shape) * weighted_center[0]
+        cy = blend_shape * shape_center[1] + (1.0 - blend_shape) * weighted_center[1]
+        return cx, cy, f"{shape_method}+weighted", agreement
+
+    return shape_center[0], shape_center[1], shape_method, agreement
+
+
 def detect_blobs(activity: np.ndarray, expected: int = EXPECTED_DOTS) -> List[Blob]:
     if activity.size == 0 or float(np.max(activity)) <= 0.0:
         return []
@@ -458,17 +701,18 @@ def detect_blobs(activity: np.ndarray, expected: int = EXPECTED_DOTS) -> List[Bl
         w = int(stats[label, cv.CC_STAT_WIDTH])
         h = int(stats[label, cv.CC_STAT_HEIGHT])
         mask = labels[y : y + h, x : x + w] == label
-        weights = activity[y : y + h, x : x + w][mask]
+        activity_roi = activity[y : y + h, x : x + w]
+        weights = activity_roi[mask]
         if weights.size == 0:
             continue
-        yy, xx = np.nonzero(mask)
         total = float(np.sum(weights))
-        if total > 0.0:
-            cx = float(np.sum((xx + x) * weights) / total)
-            cy = float(np.sum((yy + y) * weights) / total)
-        else:
-            cx = float(centroids[label][0])
-            cy = float(centroids[label][1])
+        cx, cy, center_method, center_agreement = estimate_blob_center(
+            mask,
+            activity_roi,
+            (float(centroids[label][0]), float(centroids[label][1])),
+            x,
+            y,
+        )
         blobs.append(
             Blob(
                 index=len(blobs),
@@ -478,6 +722,8 @@ def detect_blobs(activity: np.ndarray, expected: int = EXPECTED_DOTS) -> List[Bl
                 weight=total,
                 peak=float(np.max(weights)),
                 bbox=(x, y, w, h),
+                center_method=center_method,
+                center_agreement_px=center_agreement,
             )
         )
 
@@ -489,11 +735,30 @@ def detect_blobs(activity: np.ndarray, expected: int = EXPECTED_DOTS) -> List[Bl
     return blobs
 
 
-def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) -> Tuple[List[Match], str]:
-    if len(blobs) < EXPECTED_DOTS:
-        return [], f"not enough blobs: {len(blobs)}/{EXPECTED_DOTS}"
+def grid_dimensions_from_dots(dots: Sequence[ScreenDot]) -> Tuple[int, int]:
+    if not dots:
+        return 0, 0
+    rows = max(dot.row for dot in dots) + 1
+    cols = max(dot.col for dot in dots) + 1
+    return rows, cols
 
-    selected = list(blobs[:EXPECTED_DOTS])
+
+def expected_cols_by_row_from_dots(dots: Sequence[ScreenDot]) -> Dict[int, List[int]]:
+    rows: Dict[int, List[int]] = {}
+    for dot in dots:
+        rows.setdefault(dot.row, []).append(dot.col)
+    return {row: sorted(cols) for row, cols in rows.items()}
+
+
+def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) -> Tuple[List[Match], str]:
+    expected = len(dots)
+    rows, _cols = grid_dimensions_from_dots(dots)
+    if expected <= 0 or rows <= 0:
+        return [], "empty target layout"
+    if len(blobs) < expected:
+        return [], f"not enough blobs: {len(blobs)}/{expected}"
+
+    selected = list(blobs[:expected])
     points = np.array([[blob.x, blob.y] for blob in selected], dtype=np.float64)
     mean = np.mean(points, axis=0)
     centered = points - mean
@@ -510,6 +775,9 @@ def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) 
         projections = centered @ axes.T
 
     anchor_idx = int(np.argmax([blob.weight for blob in selected]))
+    anchor_dot = next((dot for dot in dots if dot.anchor), min(dots, key=lambda dot: (dot.row, dot.col)))
+    expected_cols_by_row = expected_cols_by_row_from_dots(dots)
+    expected_row_counts = [len(expected_cols_by_row.get(row, [])) for row in range(rows)]
     best_groups: Optional[List[np.ndarray]] = None
     best_coords: Optional[np.ndarray] = None
     best_score = math.inf
@@ -521,16 +789,26 @@ def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) 
             coords[:, 1] *= sy
             x_rank = int(np.argsort(coords[:, 0]).tolist().index(anchor_idx))
             y_rank = int(np.argsort(coords[:, 1]).tolist().index(anchor_idx))
-            row_groups = split_sorted_into_groups(coords[:, 1], ROWS)
+            row_groups = split_sorted_into_groups(coords[:, 1], rows)
             if row_groups is None:
                 continue
-            counts = sorted(len(group) for group in row_groups)
-            count_penalty = sum(abs(a - b) for a, b in zip(counts, [4, 5, 5, 5]))
+            counts = [len(group) for group in row_groups]
+            count_penalty = sum(
+                abs(count - expected_count)
+                for count, expected_count in zip(counts, expected_row_counts)
+            )
             row_with_anchor = next(
                 (row for row, group in enumerate(row_groups) if anchor_idx in group),
-                ROWS,
+                rows,
             )
-            score = x_rank + y_rank + 10 * row_with_anchor + 20 * count_penalty
+            anchor_row_penalty = abs(row_with_anchor - anchor_dot.row)
+            anchor_col_penalty = abs(x_rank - anchor_dot.col)
+            score = (
+                100 * count_penalty
+                + 25 * anchor_row_penalty
+                + 10 * anchor_col_penalty
+                + 0.01 * (x_rank + y_rank)
+            )
             if score < best_score:
                 best_score = score
                 best_groups = row_groups
@@ -539,12 +817,6 @@ def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) 
     if best_groups is None or best_coords is None:
         return [], "could not split blobs into grid rows"
 
-    expected_cols_by_row = {
-        0: [0, 1, 2, 3, 4],
-        1: [0, 1, 3, 4],
-        2: [0, 1, 2, 3, 4],
-        3: [0, 1, 2, 3, 4],
-    }
     dots_by_key = {(dot.row, dot.col): dot for dot in dots}
     matches: List[Match] = []
 
@@ -561,8 +833,8 @@ def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) 
             blob = selected[blob_idx]
             matches.append(Match(dot=dot, blob=blob, reproj_error_px=0.0))
 
-    if len(matches) != EXPECTED_DOTS:
-        return [], f"matched {len(matches)}/{EXPECTED_DOTS}"
+    if len(matches) != expected:
+        return [], f"matched {len(matches)}/{expected}"
 
     src = np.array([[m.dot.object_x_mm, m.dot.object_y_mm] for m in matches], dtype=np.float64)
     dst = np.array([[m.blob.x, m.blob.y] for m in matches], dtype=np.float64)
@@ -770,9 +1042,10 @@ def evaluate_calibration_on_matches(
 
     # Held-out check: pose from the border dots only, then predict the
     # interior dots that were never given to solvePnP.
+    rows, cols = grid_dimensions_from_dots([match.dot for match in matches])
     border = [
         i for i, m in enumerate(matches)
-        if m.dot.row in (0, ROWS - 1) or m.dot.col in (0, COLS - 1)
+        if m.dot.row in (0, rows - 1) or m.dot.col in (0, cols - 1)
     ]
     interior = [i for i in range(len(matches)) if i not in border]
     heldout_errors: Optional[np.ndarray] = None
@@ -888,18 +1161,42 @@ def evaluate_square_validation(
     return result, matches, expected
 
 
-def normalize_activity_to_bgr(activity: np.ndarray) -> np.ndarray:
-    if activity.size == 0 or float(np.max(activity)) <= 0.0:
-        h, w = activity.shape if activity.ndim == 2 else (480, 640)
-        return np.zeros((h, w, 3), dtype=np.uint8)
-    normalized = np.clip(activity / float(np.max(activity)) * 255.0, 0, 255).astype(np.uint8)
-    colored = cv.applyColorMap(normalized, cv.COLORMAP_INFERNO)
-    return colored
+def normalize_activity_to_bgr(
+    activity: np.ndarray,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    background_color: Tuple[int, int, int] = (0, 0, 0),
+    gamma: float = 0.5,
+) -> np.ndarray:
+    h, w = activity.shape if activity.ndim == 2 else (480, 640)
+    max_value = float(np.max(activity)) if activity.size > 0 else 0.0
+    if max_value <= 0.0:
+        canvas = np.empty((h, w, 3), dtype=np.uint8)
+        canvas[:, :] = background_color
+        return canvas
+
+    # Normalize against a high percentile rather than the single hottest pixel so
+    # that a whole blob reaches the full chosen color (true white, etc.) instead
+    # of only a one-pixel peak fading into the background.
+    nonzero = activity[activity > 0.0]
+    robust_max = max(float(np.percentile(nonzero, 92)), 1e-6)
+    ratio = np.clip(activity / robust_max, 0.0, 1.0)
+    boosted = np.power(ratio, gamma, dtype=np.float32)[:, :, None]
+    background_arr = np.array(background_color, dtype=np.float32)[None, None, :]
+    color_arr = np.array(color, dtype=np.float32)[None, None, :]
+    blended = background_arr * (1.0 - boosted) + color_arr * boosted
+    return np.clip(blended, 0, 255).astype(np.uint8)
 
 
-def make_overlay(activity: np.ndarray, blobs: Sequence[Blob], matches: Sequence[Match]) -> np.ndarray:
-    image = normalize_activity_to_bgr(activity)
-    draw_blob_indicators(image, blobs, matches)
+def make_overlay(
+    activity: np.ndarray,
+    blobs: Sequence[Blob],
+    matches: Sequence[Match],
+    event_color: Tuple[int, int, int] = (255, 255, 255),
+    marker_color: Tuple[int, int, int] = (0, 255, 0),
+    background_color: Tuple[int, int, int] = (0, 0, 0),
+) -> np.ndarray:
+    image = normalize_activity_to_bgr(activity, event_color, background_color)
+    draw_blob_indicators(image, blobs, matches, color=marker_color)
     return image
 
 
@@ -907,11 +1204,9 @@ def draw_blob_indicators(
     image: np.ndarray,
     blobs: Sequence[Blob],
     matches: Sequence[Match] = (),
+    color: Tuple[int, int, int] = (0, 255, 0),
 ) -> np.ndarray:
-    matched_blob_indices = {match.blob.index for match in matches}
     for blob in blobs:
-        is_matched = blob.index in matched_blob_indices
-        color = (0, 255, 0) if is_matched else (0, 180, 255)
         x, y, w, h = blob.bbox
         cv.rectangle(image, (x, y), (x + w, y + h), color, 1)
         cv.circle(image, (int(round(blob.x)), int(round(blob.y))), 7, color, 2)
@@ -1079,6 +1374,16 @@ class EventCamera:
             close()
 
 
+def event_store_size(events: object) -> int:
+    size_method = getattr(events, "size", None)
+    if callable(size_method):
+        return int(size_method())
+    try:
+        return len(events)  # type: ignore[arg-type]
+    except TypeError:
+        return 0
+
+
 def event_coordinates(events: object) -> np.ndarray:
     coords_method = getattr(events, "coordinates", None)
     if callable(coords_method):
@@ -1098,7 +1403,7 @@ def event_coordinates(events: object) -> np.ndarray:
 
 # ---------------------------------------------------------------------------
 # Hand-eye collection support (external phone mire + tf2)
-# Plan step 2 of docs/ur3e_camera_base_calibration.md (6-Dof-Ur3e repo):
+# Plan step 2 of docs/Robot_Control/ur3e_camera_base_calibration.md:
 # the mire is the phone screen mounted on tool0, served by serve_phone_mire.py;
 # each capture pairs TF base->tool0 with solvePnP camera->mire in one JSON.
 # ---------------------------------------------------------------------------
@@ -1208,8 +1513,12 @@ def fetch_external_layout(
         )
         for dot in payload.get("dots", [])
     ]
-    if len(dots) != EXPECTED_DOTS:
-        raise RuntimeError(f"layout invalide: {len(dots)} points au lieu de {EXPECTED_DOTS}")
+    layout = payload.get("layout", {})
+    expected = EXPECTED_DOTS
+    if isinstance(layout, dict):
+        expected = int(layout.get("expected_dots", expected))
+    if len(dots) != expected:
+        raise RuntimeError(f"layout invalide: {len(dots)} points au lieu de {expected}")
     return dots, payload
 
 
@@ -1416,15 +1725,20 @@ class MireWindow(QtWidgets.QWidget):
     calibration_started = QtCore.pyqtSignal()
     calibration_done = QtCore.pyqtSignal()
 
-    def __init__(self, blink_hz: float, gradient_softness: int) -> None:
+    def __init__(
+        self,
+        blink_hz: float,
+        gradient_softness: int,
+        pattern_id: str = DEFAULT_PATTERN_ID,
+    ) -> None:
         super().__init__()
         self.setWindowTitle("Mire calibration")
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
         self.setStyleSheet("background: black;")
         self.monitor = MonitorInfo("unknown", 0, 0, 640, 480, 0.0, 0.0, 0.0, 0.0, 1.0, "none")
         self.dots: List[ScreenDot] = []
-        self.layout_meta: Dict[str, float] = {}
-        self.pattern = "mire"
+        self.layout_meta: Dict[str, object] = {}
+        self.pattern = pattern_by_id(pattern_id).pattern_id
         self.square_variant: Dict[str, object] = dict(SQUARE_SEQUENCE[0])
         self.lit = False
         self.blink_hz = blink_hz
@@ -1434,6 +1748,7 @@ class MireWindow(QtWidgets.QWidget):
         self.calibration_timer = QtCore.QTimer(self)
         self.calibration_timer.setSingleShot(True)
         self.calibration_timer.timeout.connect(self.finish_calibration_blink)
+        self.update_layout()
         self.restart_blink()
 
     def restart_blink(self) -> None:
@@ -1449,12 +1764,20 @@ class MireWindow(QtWidgets.QWidget):
         self.update()
 
     def set_pattern(self, pattern: str) -> None:
-        if pattern not in {"mire", "square4"}:
-            pattern = "mire"
+        if pattern != "square4":
+            pattern = pattern_by_id(pattern).pattern_id
         if self.pattern == pattern:
             return
         self.pattern = pattern
         self.update_layout()
+
+    def current_dot_grid_pattern(self) -> DotGridPattern:
+        return pattern_by_id(self.pattern)
+
+    def expected_dot_count(self) -> int:
+        if self.pattern == "square4":
+            return SQUARE_EXPECTED_DOTS
+        return self.current_dot_grid_pattern().expected_dots
 
     def set_square_variant(self, variant: Dict[str, object]) -> None:
         self.square_variant = dict(variant)
@@ -1488,6 +1811,7 @@ class MireWindow(QtWidgets.QWidget):
                 self.monitor.height_px,
                 self.monitor.mm_per_px_x,
                 self.monitor.mm_per_px_y,
+                self.pattern,
             )
         self.update()
 
@@ -1544,6 +1868,125 @@ class MireWindow(QtWidgets.QWidget):
         painter.end()
 
 
+SHORTCUTS_HELP: List[Tuple[str, str, str]] = [
+    ("F1", "Aide / raccourcis", "Ouvre cette page d'aide."),
+    (
+        "F2",
+        "Afficher mire",
+        "Affiche la mire en plein ecran sur l'ecran selectionne dans la liste deroulante.",
+    ),
+    ("F3 / Echap", "Masquer mire", "Masque la fenetre de la mire."),
+    (
+        "F4",
+        "Reconnecter camera",
+        "Ferme puis rouvre la connexion a la camera evenementielle DVXplorer.",
+    ),
+    (
+        "F5",
+        "Rafraichir",
+        "Recharge la liste des fichiers de calibration XML disponibles dans le dossier de sortie.",
+    ),
+    (
+        "F6",
+        "Calib",
+        "Lance une sequence de capture (mire noire puis clignotante), associe les blobs "
+        "detectes a la mire, et exporte l'observation (JSON + PNG) pour la calibration "
+        "des intrinseques.",
+    ),
+    (
+        "F7",
+        "Erase",
+        "Efface l'accumulation d'evenements en cours et supprime les derniers fichiers exportes "
+        "(Calib/Test).",
+    ),
+    (
+        "F8",
+        "Reset",
+        "Reinitialise completement (Erase + fermeture de la camera + remise a zero de la mire). "
+        "Il faut ensuite cliquer sur \"Reconnecter camera\".",
+    ),
+    (
+        "F9",
+        "Test calib",
+        "Lance une capture et evalue la calibration XML selectionnee sur l'observation obtenue "
+        "(RMS de reprojection, pose, distance).",
+    ),
+    (
+        "F10",
+        "Test carre",
+        "Lance la sequence de test \"carres\" (estimation de pose avec la mire 19 points, puis "
+        "4 motifs carres a differentes tailles/positions) pour valider la calibration de facon "
+        "independante.",
+    ),
+    (
+        "F11",
+        "Capture hand-eye",
+        "(mode --external-mire) Enregistre un echantillon hand-eye combinant la pose camera-mire "
+        "(solvePnP) et la transformee TF base-outil au meme instant.",
+    ),
+    (
+        "Shift+F11",
+        "Supprimer dernier",
+        "(mode --external-mire) Supprime le dernier echantillon hand-eye enregistre dans la "
+        "session en cours.",
+    ),
+    (
+        "F12",
+        "Recharger mire/TF",
+        "(mode --external-mire) Recharge le layout de mire externe (telephone) et relance la "
+        "lecture des transformees TF.",
+    ),
+]
+
+
+class ShortcutsHelpDialog(QtWidgets.QDialog):
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Aide - raccourcis et boutons")
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        self.resize(720, 560)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        text = QtWidgets.QTextEdit()
+        text.setReadOnly(True)
+        text.setHtml(self._build_html())
+        layout.addWidget(text)
+
+        close_button = QtWidgets.QPushButton("Fermer")
+        close_button.clicked.connect(self.accept)
+        button_row = QtWidgets.QHBoxLayout()
+        button_row.addStretch(1)
+        button_row.addWidget(close_button)
+        layout.addLayout(button_row)
+
+    @staticmethod
+    def _build_html() -> str:
+        rows = "".join(
+            f"<tr><td><b>{key}</b></td><td>{button}</td><td>{description}</td></tr>"
+            for key, button, description in SHORTCUTS_HELP
+        )
+        return (
+            "<h2>Raccourcis clavier</h2>"
+            "<p>Chaque raccourci declenche la meme action que le clic sur le bouton "
+            "correspondant (et ne fait rien si ce bouton est desactive, par exemple "
+            "pendant une capture en cours).</p>"
+            "<table border='1' cellpadding='6' cellspacing='0' width='100%'>"
+            "<tr><th>Touche</th><th>Bouton</th><th>Action</th></tr>"
+            f"{rows}"
+            "</table>"
+            "<h2>Taille physique de l'ecran</h2>"
+            "<p>La taille en mm de l'ecran de la mire est detectee automatiquement (EDID), "
+            "mais cette detection n'est pas toujours fiable: elle peut etre absente ou fausse "
+            "de quelques millimetres. Il est preferable de mesurer l'ecran et de saisir la "
+            "largeur/hauteur dans les champs \"Taille ecran mesuree (mm)\" puis de cliquer sur "
+            "\"Appliquer taille\".</p>"
+            "<h2>Filtre bruit de fond</h2>"
+            "<p>Le filtre BackgroundActivityNoiseFilter supprime les evenements isoles qui "
+            "n'ont pas de voisin recent. Il ne change pas le mode d'accumulation: les evenements "
+            "ON et OFF conserves sont toujours additionnes positivement dans la meme image.</p>"
+        )
+
+
 class ControlWindow(QtWidgets.QWidget):
     def __init__(self, args: argparse.Namespace, monitors: List[MonitorInfo]) -> None:
         super().__init__()
@@ -1575,8 +2018,22 @@ class ControlWindow(QtWidgets.QWidget):
         self.handeye_json_path: Optional[Path] = None
         self.handeye_tf_start: Optional[Tuple[List[float], List[float]]] = None
         self.handeye_capture_pending = False
+        self._shortcuts: List[QtWidgets.QShortcut] = []
+        self._help_dialog: Optional[ShortcutsHelpDialog] = None
+        self.event_color: Tuple[int, int, int] = (255, 255, 255)
+        self.marker_color: Tuple[int, int, int] = (0, 255, 0)
+        self.background_color: Tuple[int, int, int] = (0, 0, 0)
+        self.noise_filter_enabled = bool(getattr(args, "noise_filter", False))
+        self.noise_filter_cutoff_hz = min(
+            5000.0,
+            max(1.0, float(getattr(args, "noise_cutoff_hz", 500.0))),
+        )
+        self._noise_filter: Optional[object] = None
+        self.noise_filter_incoming_events = 0
+        self.noise_filter_outgoing_events = 0
+        self.noise_filter_error: Optional[str] = None
 
-        self.mire = MireWindow(args.blink_hz, args.gradient_softness)
+        self.mire = MireWindow(args.blink_hz, args.gradient_softness, args.pattern)
         self.mire.calibration_started.connect(self.begin_accumulation)
         self.mire.calibration_done.connect(self.finish_calibration)
 
@@ -1584,6 +2041,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.resize(1060, 760)
         self._build_ui()
         self._connect_ui()
+        self._install_shortcuts()
         self.refresh_monitor_labels()
         self.place_control_window()
 
@@ -1596,6 +2054,8 @@ class ControlWindow(QtWidgets.QWidget):
         elif self.selected_monitor_index >= 0:
             self.show_mire_on_selected_monitor()
         QtCore.QTimer.singleShot(0, self.ensure_camera)
+        QtCore.QTimer.singleShot(0, self.show_screen_size_warning)
+        QtCore.QTimer.singleShot(0, self.show_help_dialog)
 
     def _build_ui(self) -> None:
         root = QtWidgets.QVBoxLayout(self)
@@ -1605,15 +2065,56 @@ class ControlWindow(QtWidgets.QWidget):
         self.monitor_combo.setMinimumWidth(560)
         self.show_mire_button = QtWidgets.QPushButton("Afficher mire")
         self.hide_mire_button = QtWidgets.QPushButton("Masquer mire")
+        self.help_button = QtWidgets.QPushButton("Aide (F1)")
         monitor_row.addWidget(QtWidgets.QLabel("Ecran mire:"))
         monitor_row.addWidget(self.monitor_combo, 1)
         monitor_row.addWidget(self.show_mire_button)
         monitor_row.addWidget(self.hide_mire_button)
+        monitor_row.addWidget(self.help_button)
         root.addLayout(monitor_row)
 
         self.monitor_details = QtWidgets.QLabel()
         self.monitor_details.setWordWrap(True)
         root.addWidget(self.monitor_details)
+
+        pattern_row = QtWidgets.QHBoxLayout()
+        pattern_row.addWidget(QtWidgets.QLabel("Type de mire:"))
+        self.pattern_combo = QtWidgets.QComboBox()
+        for pattern in DOT_GRID_PATTERNS:
+            self.pattern_combo.addItem(pattern.label, pattern.pattern_id)
+        pattern_index = self.pattern_combo.findData(pattern_by_id(self.args.pattern).pattern_id)
+        if pattern_index >= 0:
+            self.pattern_combo.setCurrentIndex(pattern_index)
+        self.pattern_combo.setEnabled(not self.args.external_mire)
+        pattern_row.addWidget(self.pattern_combo)
+        pattern_row.addStretch(1)
+        root.addLayout(pattern_row)
+
+        screen_size_row = QtWidgets.QHBoxLayout()
+        screen_size_row.addWidget(QtWidgets.QLabel("Taille ecran mesuree (mm):"))
+        self.screen_width_edit = QtWidgets.QLineEdit()
+        self.screen_width_edit.setPlaceholderText("largeur (auto EDID)")
+        self.screen_width_edit.setMaximumWidth(140)
+        self.screen_width_edit.setValidator(QtGui.QDoubleValidator(1.0, 100000.0, 2))
+        if self.args.screen_width_mm is not None:
+            self.screen_width_edit.setText(str(self.args.screen_width_mm))
+        screen_size_row.addWidget(self.screen_width_edit)
+        screen_size_row.addWidget(QtWidgets.QLabel("x"))
+        self.screen_height_edit = QtWidgets.QLineEdit()
+        self.screen_height_edit.setPlaceholderText("hauteur (auto EDID)")
+        self.screen_height_edit.setMaximumWidth(140)
+        self.screen_height_edit.setValidator(QtGui.QDoubleValidator(1.0, 100000.0, 2))
+        if self.args.screen_height_mm is not None:
+            self.screen_height_edit.setText(str(self.args.screen_height_mm))
+        screen_size_row.addWidget(self.screen_height_edit)
+        self.apply_screen_size_button = QtWidgets.QPushButton("Appliquer taille")
+        screen_size_row.addWidget(self.apply_screen_size_button)
+        self.screen_size_info_button = QtWidgets.QPushButton("?")
+        self.screen_size_info_button.setMaximumWidth(28)
+        self.screen_size_info_button.setToolTip("Pourquoi mesurer l'ecran soi-meme ?")
+        screen_size_row.addWidget(self.screen_size_info_button)
+        screen_size_row.addStretch(1)
+        root.addLayout(screen_size_row)
 
         camera_row = QtWidgets.QHBoxLayout()
         self.camera_status_label = QtWidgets.QLabel("Camera: non testee")
@@ -1674,6 +2175,41 @@ class ControlWindow(QtWidgets.QWidget):
         mire_params_row.addWidget(self.gradient_slider, 1)
         mire_params_row.addWidget(self.gradient_value_label)
         root.addLayout(mire_params_row)
+
+        colors_row = QtWidgets.QHBoxLayout()
+        colors_row.addWidget(QtWidgets.QLabel("Couleur evenements:"))
+        self.event_color_combo = QtWidgets.QComboBox()
+        self._populate_color_combo(self.event_color_combo, self.event_color)
+        colors_row.addWidget(self.event_color_combo)
+        colors_row.addWidget(QtWidgets.QLabel("Couleur marqueurs:"))
+        self.marker_color_combo = QtWidgets.QComboBox()
+        self._populate_color_combo(self.marker_color_combo, self.marker_color)
+        colors_row.addWidget(self.marker_color_combo)
+        colors_row.addWidget(QtWidgets.QLabel("Couleur arriere-plan (visualisation):"))
+        self.background_color_combo = QtWidgets.QComboBox()
+        self._populate_color_combo(self.background_color_combo, self.background_color)
+        colors_row.addWidget(self.background_color_combo)
+        colors_row.addStretch(1)
+        root.addLayout(colors_row)
+
+        noise_filter_row = QtWidgets.QHBoxLayout()
+        self.noise_filter_checkbox = QtWidgets.QCheckBox("Filtre bruit de fond (BackgroundActivityNoiseFilter)")
+        self.noise_filter_checkbox.setToolTip(
+            "Ne garde un evenement que s'il a un evenement voisin recent (a la frequence de "
+            "cutoff choisie). Elimine le bruit de fond isole de la camera evenementielle."
+        )
+        self.noise_filter_checkbox.setChecked(self.noise_filter_enabled)
+        noise_filter_row.addWidget(self.noise_filter_checkbox)
+        noise_filter_row.addWidget(QtWidgets.QLabel("Frequence cutoff (Hz):"))
+        self.noise_filter_cutoff_spin = QtWidgets.QDoubleSpinBox()
+        self.noise_filter_cutoff_spin.setRange(1.0, 5000.0)
+        self.noise_filter_cutoff_spin.setDecimals(1)
+        self.noise_filter_cutoff_spin.setSingleStep(1.0)
+        self.noise_filter_cutoff_spin.setValue(self.noise_filter_cutoff_hz)
+        self.noise_filter_cutoff_spin.setEnabled(self.noise_filter_enabled)
+        noise_filter_row.addWidget(self.noise_filter_cutoff_spin)
+        noise_filter_row.addStretch(1)
+        root.addLayout(noise_filter_row)
 
         controls = QtWidgets.QHBoxLayout()
         self.calib_button = QtWidgets.QPushButton("Calib")
@@ -1748,10 +2284,238 @@ class ControlWindow(QtWidgets.QWidget):
         self.test_button.clicked.connect(self.start_test)
         self.square_test_button.clicked.connect(self.start_square_test)
         self.refresh_calib_button.clicked.connect(self.populate_calibration_files)
+        self.help_button.clicked.connect(self.show_help_dialog)
+        self.pattern_combo.currentIndexChanged.connect(self.on_pattern_changed)
+        self.apply_screen_size_button.clicked.connect(self.apply_manual_screen_size)
+        self.screen_size_info_button.clicked.connect(self.show_screen_size_warning)
+        self.event_color_combo.currentIndexChanged.connect(self.on_event_color_changed)
+        self.marker_color_combo.currentIndexChanged.connect(self.on_marker_color_changed)
+        self.background_color_combo.currentIndexChanged.connect(self.on_background_color_changed)
+        self.noise_filter_checkbox.toggled.connect(self.on_noise_filter_toggled)
+        self.noise_filter_cutoff_spin.valueChanged.connect(self.on_noise_filter_cutoff_changed)
         if self.args.external_mire:
             self.handeye_refresh_button.clicked.connect(self.setup_external_mire)
             self.handeye_capture_button.clicked.connect(self.start_handeye_capture)
             self.handeye_undo_button.clicked.connect(self.undo_last_handeye_sample)
+
+    def _install_shortcuts(self) -> None:
+        bindings: List[Tuple[str, Callable[[], None]]] = [
+            ("F1", self.show_help_dialog),
+            ("F2", self.show_mire_button.click),
+            ("F3", self.hide_mire_button.click),
+            ("Esc", self.hide_mire_button.click),
+            ("F4", self.reconnect_camera_button.click),
+            ("F5", self.refresh_calib_button.click),
+            ("F6", self.calib_button.click),
+            ("F7", self.erase_button.click),
+            ("F8", self.reset_button.click),
+            ("F9", self.test_button.click),
+            ("F10", self.square_test_button.click),
+        ]
+        if self.args.external_mire:
+            bindings.extend(
+                [
+                    ("F11", self.handeye_capture_button.click),
+                    ("Shift+F11", self.handeye_undo_button.click),
+                    ("F12", self.handeye_refresh_button.click),
+                ]
+            )
+        for sequence, callback in bindings:
+            shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(sequence), self)
+            shortcut.setContext(QtCore.Qt.ApplicationShortcut)
+            shortcut.activated.connect(callback)
+            self._shortcuts.append(shortcut)
+
+    def show_help_dialog(self) -> None:
+        if self._help_dialog is None:
+            self._help_dialog = ShortcutsHelpDialog(self)
+        self._help_dialog.show()
+        self._help_dialog.raise_()
+        self._help_dialog.activateWindow()
+
+    def show_screen_size_warning(self) -> None:
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Warning)
+        box.setWindowTitle("Taille physique de l'ecran")
+        box.setText(
+            "La detection automatique de la taille physique de l'ecran (en mm) n'est pas "
+            "toujours fiable.\n\n"
+            "Elle depend des informations EDID transmises par l'ecran (cable, adaptateur ou "
+            "moniteur ne les fournissant pas forcement). Quand l'EDID n'est pas disponible, la "
+            "taille utilisee peut etre completement erronee.\n\n"
+            "Meme quand l'EDID est disponible, la valeur annoncee peut etre fausse de quelques "
+            "millimetres, ce qui suffit a fausser le calcul mm/px et donc la calibration.\n\n"
+            "Il est donc preferable de mesurer soi-meme la zone active de l'ecran (largeur et "
+            "hauteur en mm) et de saisir ces valeurs dans les champs \"Taille ecran mesuree (mm)\" "
+            "ci-dessus, puis de cliquer sur \"Appliquer taille\"."
+        )
+        box.setWindowFlags(box.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        box.exec_()
+
+    def apply_manual_screen_size(self) -> None:
+        width_text = self.screen_width_edit.text().strip()
+        height_text = self.screen_height_edit.text().strip()
+        try:
+            width_mm = float(width_text) if width_text else None
+            height_mm = float(height_text) if height_text else None
+        except ValueError:
+            self.append_status("Taille ecran invalide: entrer des nombres en mm.")
+            return
+        self.args.screen_width_mm = width_mm
+        self.args.screen_height_mm = height_mm
+        self.update_monitor_details()
+        if self.mire.isVisible():
+            self.show_mire_on_selected_monitor()
+        if width_mm is None and height_mm is None:
+            self.append_status("Taille ecran manuelle effacee: retour a la detection automatique.")
+        else:
+            self.append_status(
+                f"Taille ecran manuelle appliquee: {width_mm} x {height_mm} mm."
+            )
+
+    @staticmethod
+    def _populate_color_combo(combo: QtWidgets.QComboBox, current: Tuple[int, int, int]) -> None:
+        for name, bgr in PRESET_COLORS:
+            combo.addItem(name, bgr)
+        for index in range(combo.count()):
+            if combo.itemData(index) == current:
+                combo.setCurrentIndex(index)
+                break
+
+    def on_event_color_changed(self, index: int) -> None:
+        bgr = self.event_color_combo.itemData(index)
+        if bgr is None:
+            return
+        self.event_color = tuple(bgr)
+        self.append_status(f"Couleur des evenements: {self.event_color_combo.currentText()}.")
+
+    def on_marker_color_changed(self, index: int) -> None:
+        bgr = self.marker_color_combo.itemData(index)
+        if bgr is None:
+            return
+        self.marker_color = tuple(bgr)
+        self.append_status(f"Couleur des marqueurs: {self.marker_color_combo.currentText()}.")
+
+    def on_background_color_changed(self, index: int) -> None:
+        bgr = self.background_color_combo.itemData(index)
+        if bgr is None:
+            return
+        self.background_color = tuple(bgr)
+        self.append_status(
+            f"Couleur d'arriere-plan de la visualisation: {self.background_color_combo.currentText()} "
+            "(n'affecte pas la mire)."
+        )
+
+    @staticmethod
+    def _cutoff_to_duration(frequency_hz: float) -> timedelta:
+        frequency_hz = max(float(frequency_hz), 0.1)
+        microseconds = max(1, int(round(1_000_000.0 / frequency_hz)))
+        return timedelta(microseconds=microseconds)
+
+    def noise_filter_duration(self) -> timedelta:
+        return self._cutoff_to_duration(self.noise_filter_cutoff_hz)
+
+    def noise_filter_duration_us(self) -> int:
+        return max(1, int(round(self.noise_filter_duration().total_seconds() * 1_000_000.0)))
+
+    def _ensure_noise_filter(self) -> None:
+        if self.camera is None:
+            self._noise_filter = None
+            return
+        if self._noise_filter is None:
+            self._noise_filter = self.camera.dv.noise.BackgroundActivityNoiseFilter(
+                (self.camera.width, self.camera.height),
+                self.noise_filter_duration(),
+            )
+
+    def reset_noise_filter_state(self, reset_counters: bool = True) -> None:
+        self._noise_filter = None
+        self.noise_filter_error = None
+        if reset_counters:
+            self.noise_filter_incoming_events = 0
+            self.noise_filter_outgoing_events = 0
+        if self.noise_filter_enabled and self.camera is not None:
+            try:
+                self._ensure_noise_filter()
+            except Exception as exc:  # noqa: BLE001
+                self.disable_noise_filter_after_error(exc)
+
+    def disable_noise_filter_after_error(self, exc: Exception) -> None:
+        self._noise_filter = None
+        self.noise_filter_enabled = False
+        self.noise_filter_error = str(exc)
+        if hasattr(self, "noise_filter_checkbox"):
+            self.noise_filter_checkbox.blockSignals(True)
+            self.noise_filter_checkbox.setChecked(False)
+            self.noise_filter_checkbox.blockSignals(False)
+        if hasattr(self, "noise_filter_cutoff_spin"):
+            self.noise_filter_cutoff_spin.setEnabled(False)
+        self.append_status(f"Filtre bruit de fond desactive: {exc}")
+
+    def filter_background_noise(self, events: object) -> object:
+        if not self.noise_filter_enabled:
+            return events
+        incoming = event_store_size(events)
+        if incoming <= 0:
+            return events
+        try:
+            self._ensure_noise_filter()
+            if self._noise_filter is None:
+                return events
+            self._noise_filter.accept(events)
+            filtered = self._noise_filter.generateEvents()
+        except Exception as exc:  # noqa: BLE001
+            self.disable_noise_filter_after_error(exc)
+            return events
+
+        outgoing = event_store_size(filtered)
+        self.noise_filter_incoming_events += incoming
+        self.noise_filter_outgoing_events += outgoing
+        return filtered
+
+    def noise_filter_snapshot(self) -> EventFilterSnapshot:
+        return EventFilterSnapshot(
+            enabled=self.noise_filter_enabled,
+            name="dv_processing.noise.BackgroundActivityNoiseFilter",
+            support_duration_us=self.noise_filter_duration_us(),
+            cutoff_hz=self.noise_filter_cutoff_hz,
+            incoming_events=self.noise_filter_incoming_events,
+            outgoing_events=self.noise_filter_outgoing_events,
+            error=self.noise_filter_error,
+        )
+
+    def noise_filter_summary(self) -> str:
+        return self.noise_filter_snapshot().summary()
+
+    def on_noise_filter_toggled(self, checked: bool) -> None:
+        self.noise_filter_enabled = bool(checked)
+        self.noise_filter_cutoff_spin.setEnabled(self.noise_filter_enabled)
+        if self.noise_filter_enabled:
+            self.reset_noise_filter_state(reset_counters=True)
+            if self.noise_filter_enabled:
+                self.append_status(
+                    f"Filtre bruit de fond active: cutoff {self.noise_filter_cutoff_hz:.1f} Hz "
+                    f"(support {self.noise_filter_duration_us() / 1000.0:.3f} ms)."
+                )
+        else:
+            self._noise_filter = None
+            self.noise_filter_error = None
+            self.noise_filter_incoming_events = 0
+            self.noise_filter_outgoing_events = 0
+            self.append_status("Filtre bruit de fond desactive.")
+
+    def on_noise_filter_cutoff_changed(self, value: float) -> None:
+        self.noise_filter_cutoff_hz = min(5000.0, max(1.0, float(value)))
+        if self._noise_filter is not None:
+            try:
+                self._noise_filter.setBackgroundActivityDuration(self.noise_filter_duration())
+            except Exception as exc:  # noqa: BLE001
+                self.disable_noise_filter_after_error(exc)
+                return
+        self.append_status(
+            f"Cutoff filtre bruit de fond: {self.noise_filter_cutoff_hz:.1f} Hz "
+            f"(support {self.noise_filter_duration_us() / 1000.0:.3f} ms)."
+        )
 
     def selected_monitor(self) -> Optional[MonitorInfo]:
         if not (0 <= self.selected_monitor_index < len(self.base_monitors)):
@@ -1805,6 +2569,8 @@ class ControlWindow(QtWidgets.QWidget):
         self.calib_button.setEnabled(enabled)
         self.test_button.setEnabled(enabled)
         self.square_test_button.setEnabled(enabled)
+        if hasattr(self, "pattern_combo"):
+            self.pattern_combo.setEnabled(enabled and not self.args.external_mire)
         if hasattr(self, "handeye_capture_button"):
             self.handeye_capture_button.setEnabled(enabled)
 
@@ -1836,6 +2602,26 @@ class ControlWindow(QtWidgets.QWidget):
         self.gradient_value_label.setText(f"{self.args.gradient_softness} %")
         self.mire.set_gradient_softness(self.args.gradient_softness)
 
+    def selected_pattern_id(self) -> str:
+        if not hasattr(self, "pattern_combo"):
+            return pattern_by_id(self.args.pattern).pattern_id
+        data = self.pattern_combo.currentData()
+        return pattern_by_id(str(data) if data is not None else self.args.pattern).pattern_id
+
+    def selected_pattern(self) -> DotGridPattern:
+        return pattern_by_id(self.selected_pattern_id())
+
+    def on_pattern_changed(self, index: int) -> None:
+        data = self.pattern_combo.itemData(index)
+        if data is None:
+            return
+        pattern = pattern_by_id(str(data))
+        self.args.pattern = pattern.pattern_id
+        self.mire.set_pattern(pattern.pattern_id)
+        self.preview_blobs = []
+        self.last_preview_blob_update = 0.0
+        self.append_status(f"Type de mire: {pattern.label}.")
+
     def on_monitor_changed(self, index: int) -> None:
         self.selected_monitor_index = int(self.monitor_combo.itemData(index))
         self.update_monitor_details()
@@ -1855,7 +2641,12 @@ class ControlWindow(QtWidgets.QWidget):
         self.mire.set_blink_hz(self.args.blink_hz)
         self.mire.set_gradient_softness(self.args.gradient_softness)
         self.mire.show_on_monitor(monitor)
-        self.append_status(f"Mire affichee sur {monitor.label()}")
+        pattern_text = (
+            self.mire.current_dot_grid_pattern().label
+            if self.mire.pattern != "square4"
+            else "Carre 4 points"
+        )
+        self.append_status(f"Mire affichee sur {monitor.label()} | {pattern_text}")
 
     def ensure_camera(self) -> bool:
         if self.camera is not None:
@@ -1876,6 +2667,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.activity = np.zeros((self.camera.height, self.camera.width), dtype=np.float32)
         self.live_activity = np.zeros((self.camera.height, self.camera.width), dtype=np.float32)
         self.live_event_count = 0
+        self.reset_noise_filter_state(reset_counters=True)
         self.set_camera_status(
             f"Camera connectee: {self.camera.width}x{self.camera.height} | events live: 0",
             "ok",
@@ -1893,6 +2685,7 @@ class ControlWindow(QtWidgets.QWidget):
         if self.camera is not None:
             self.camera.close()
             self.camera = None
+        self.reset_noise_filter_state(reset_counters=True)
         self.activity = None
         self.live_activity = None
         self.live_event_count = 0
@@ -1912,6 +2705,8 @@ class ControlWindow(QtWidgets.QWidget):
             return
         if events is None:
             return
+
+        events = self.filter_background_noise(events)
 
         coords = event_coordinates(events)
         if coords.size == 0:
@@ -1944,35 +2739,43 @@ class ControlWindow(QtWidgets.QWidget):
             return
         self.event_count += self.add_events_to_array(self.activity, coords)
 
+    def active_expected_dots(self) -> int:
+        if self.args.external_mire and self.external_dots:
+            return len(self.external_dots)
+        if self.square_phase == "validation":
+            return SQUARE_EXPECTED_DOTS
+        return self.mire.expected_dot_count()
+
     def update_live_preview(self) -> None:
         now = time.time()
         if now - self.last_preview_update < 0.04:
             return
         self.last_preview_update = now
+        expected = self.active_expected_dots()
 
         if self.accumulating and self.activity is not None:
             source_activity = self.activity
             if now - self.last_preview_blob_update >= 0.12:
-                self.preview_blobs = detect_blobs(source_activity, EXPECTED_DOTS)
+                self.preview_blobs = detect_blobs(source_activity, expected)
                 self.last_preview_blob_update = now
-            image = normalize_activity_to_bgr(self.activity)
-            draw_blob_indicators(image, self.preview_blobs)
+            image = normalize_activity_to_bgr(self.activity, self.event_color, self.background_color)
+            draw_blob_indicators(image, self.preview_blobs, color=self.marker_color)
             banner = (
                 f"ACCUM {self.event_count} events | "
-                f"blobs {len(self.preview_blobs)}/{EXPECTED_DOTS} | "
+                f"blobs {len(self.preview_blobs)}/{expected} | "
                 f"fenetre {self.current_capture_duration_ms} ms"
             )
             image = draw_preview_banner(image, banner, (0, 255, 255))
         elif self.live_activity is not None:
             source_activity = self.live_activity
             if now - self.last_preview_blob_update >= 0.12:
-                self.preview_blobs = detect_blobs(source_activity, EXPECTED_DOTS)
+                self.preview_blobs = detect_blobs(source_activity, expected)
                 self.last_preview_blob_update = now
-            image = normalize_activity_to_bgr(self.live_activity)
-            draw_blob_indicators(image, self.preview_blobs)
+            image = normalize_activity_to_bgr(self.live_activity, self.event_color, self.background_color)
+            draw_blob_indicators(image, self.preview_blobs, color=self.marker_color)
             image = draw_preview_banner(
                 image,
-                f"LIVE {self.live_event_count} events | blobs {len(self.preview_blobs)}/{EXPECTED_DOTS}",
+                f"LIVE {self.live_event_count} events | blobs {len(self.preview_blobs)}/{expected}",
                 (80, 220, 255),
             )
             self.live_activity *= 0.65
@@ -2011,6 +2814,7 @@ class ControlWindow(QtWidgets.QWidget):
             "calibration_node": node_name,
             "camera_matrix": camera_matrix,
             "dist_coeffs": dist_coeffs,
+            "pose_pattern": self.selected_pattern().to_json(),
             "square_sequence": [dict(variant) for variant in SQUARE_SEQUENCE],
             "square_results": [],
         }
@@ -2035,7 +2839,7 @@ class ControlWindow(QtWidgets.QWidget):
         if square_phase == "validation":
             variant = SQUARE_SEQUENCE[self.square_validation_index]
             self.mire.set_square_variant(variant)
-        self.mire.set_pattern("square4" if square_phase == "validation" else "mire")
+        self.mire.set_pattern("square4" if square_phase == "validation" else self.selected_pattern_id())
         if not self.mire.isVisible():
             self.show_mire_on_selected_monitor()
 
@@ -2052,7 +2856,10 @@ class ControlWindow(QtWidgets.QWidget):
         self.current_capture_duration_ms = int(duration_ms if duration_ms is not None else self.args.accum_ms)
         self.set_capture_buttons_enabled(False)
         if square_phase == "pose":
-            message = "Test carre phase 1/2: estimation pose avec la mire 19 points."
+            message = (
+                f"Test carre phase 1/2: estimation pose avec "
+                f"{self.mire.expected_dot_count()} points."
+            )
         elif square_phase == "validation":
             variant = SQUARE_SEQUENCE[self.square_validation_index]
             message = (
@@ -2069,11 +2876,12 @@ class ControlWindow(QtWidgets.QWidget):
     def begin_accumulation(self) -> None:
         if self.camera is None or self.activity is None:
             return
+        self.reset_noise_filter_state(reset_counters=True)
         self.accumulating = True
         self.accum_started_at = time.time()
         self.append_status(
             f"Accumulation active pour {self.current_capture_duration_ms} ms "
-            f"(polarites ON/OFF additionnees)."
+            f"(polarites ON/OFF additionnees, {self.noise_filter_summary()})."
         )
 
     def finish_calibration(self) -> None:
@@ -2091,20 +2899,25 @@ class ControlWindow(QtWidgets.QWidget):
             self.set_capture_buttons_enabled(True)
             return
 
-        expected = SQUARE_EXPECTED_DOTS if square_phase == "validation" else EXPECTED_DOTS
+        expected = SQUARE_EXPECTED_DOTS if square_phase == "validation" else self.mire.expected_dot_count()
         self.last_blobs = detect_blobs(self.activity, expected)
         if square_phase == "validation":
             self.finish_square_validation(elapsed_ms)
             return
 
         self.last_matches, reason = associate_blobs_to_layout(self.last_blobs, self.mire.dots)
-        overlay = make_overlay(self.activity, self.last_blobs, self.last_matches)
+        overlay = make_overlay(
+            self.activity, self.last_blobs, self.last_matches,
+            event_color=self.event_color, marker_color=self.marker_color,
+            background_color=self.background_color,
+        )
         self.preview_label.setPixmap(pixmap_from_bgr(overlay, self.preview_label.size()))
 
         self.append_status(
             f"Detection: {len(self.last_blobs)} blobs, "
-            f"{len(self.last_matches)}/{EXPECTED_DOTS} associations, "
-            f"{self.event_count} events, {elapsed_ms:.0f} ms. {reason}"
+            f"{len(self.last_matches)}/{expected} associations, "
+            f"{self.event_count} events, {elapsed_ms:.0f} ms, "
+            f"{self.noise_filter_summary()}. {reason}"
         )
         if self.test_mode:
             self.test_mode = False
@@ -2159,6 +2972,7 @@ class ControlWindow(QtWidgets.QWidget):
             {
                 "pose_elapsed_ms": elapsed_ms,
                 "pose_event_count": self.event_count,
+                "pose_background_noise_filter": self.noise_filter_snapshot().to_json(),
                 "pose_layout": dict(self.mire.layout_meta),
                 "pose_matches": list(self.last_matches),
                 "pose_result": pose_result,
@@ -2202,7 +3016,11 @@ class ControlWindow(QtWidgets.QWidget):
             dist_coeffs,
         )
         self.last_matches = square_matches
-        overlay = make_overlay(self.activity, self.last_blobs, self.last_matches)
+        overlay = make_overlay(
+            self.activity, self.last_blobs, self.last_matches,
+            event_color=self.event_color, marker_color=self.marker_color,
+            background_color=self.background_color,
+        )
         draw_expected_points(overlay, expected_points)
 
         measured_mm = self.measured_distance_mm()
@@ -2219,6 +3037,8 @@ class ControlWindow(QtWidgets.QWidget):
             "duration_ms_measured": elapsed_ms,
             "blink_hz": self.args.blink_hz,
             "events_accumulated": self.event_count,
+            "polarity_mode": "positive_count + negative_count",
+            "background_noise_filter": self.noise_filter_snapshot().to_json(),
             "layout": dict(self.mire.layout_meta),
             "dots": [dot.to_json() for dot in self.mire.dots],
             "blobs": [blob.to_json() for blob in self.last_blobs],
@@ -2377,6 +3197,9 @@ class ControlWindow(QtWidgets.QWidget):
             "phase_pose": {
                 "duration_ms_measured": context.get("pose_elapsed_ms"),
                 "events_accumulated": context.get("pose_event_count"),
+                "polarity_mode": "positive_count + negative_count",
+                "background_noise_filter": context.get("pose_background_noise_filter"),
+                "pattern": context.get("pose_pattern"),
                 "layout": context.get("pose_layout"),
                 "matches": [match.to_json() for match in pose_matches],
                 "result": context.get("pose_result"),
@@ -2398,7 +3221,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.square_phase = None
         self.square_test_context = None
         self.square_validation_index = 0
-        self.mire.set_pattern("mire")
+        self.mire.set_pattern(self.selected_pattern_id())
         self.set_capture_buttons_enabled(True)
 
     def export_observation(self, overlay: np.ndarray, elapsed_ms: float) -> None:
@@ -2410,6 +3233,7 @@ class ControlWindow(QtWidgets.QWidget):
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         json_path = output_dir / f"mire_observation_{stamp}.json"
         png_path = output_dir / f"mire_overlay_{stamp}.png"
+        pattern = self.mire.current_dot_grid_pattern()
 
         payload = {
             "created_at": datetime.now().isoformat(timespec="milliseconds"),
@@ -2422,10 +3246,18 @@ class ControlWindow(QtWidgets.QWidget):
             },
             "monitor": monitor.to_json(),
             "mire": {
-                "rows": ROWS,
-                "cols": COLS,
-                "missing_dot": {"row": MISSING_DOT[0], "col": MISSING_DOT[1]},
-                "anchor_dot": {"row": ANCHOR_DOT[0], "col": ANCHOR_DOT[1]},
+                "pattern": pattern.pattern_id,
+                "pattern_type": "dot_grid",
+                "pattern_label": pattern.label,
+                "rows": pattern.rows,
+                "cols": pattern.cols,
+                "expected_dots": pattern.expected_dots,
+                "missing_dot": (
+                    {"row": pattern.missing_dot[0], "col": pattern.missing_dot[1]}
+                    if pattern.missing_dot is not None
+                    else None
+                ),
+                "anchor_dot": {"row": pattern.anchor_dot[0], "col": pattern.anchor_dot[1]},
                 "render": {
                     "blink_hz": self.args.blink_hz,
                     "gradient_softness_percent": self.args.gradient_softness,
@@ -2438,9 +3270,10 @@ class ControlWindow(QtWidgets.QWidget):
                 "duration_ms_measured": elapsed_ms,
                 "blink_hz": self.args.blink_hz,
                 "polarity_mode": "positive_count + negative_count",
+                "background_noise_filter": self.noise_filter_snapshot().to_json(),
             },
             "detection": {
-                "expected_dots": EXPECTED_DOTS,
+                "expected_dots": pattern.expected_dots,
                 "min_matched": self.args.min_matched,
                 "blob_count": len(self.last_blobs),
                 "matched_count": len(self.last_matches),
@@ -2591,6 +3424,8 @@ class ControlWindow(QtWidgets.QWidget):
                 "duration_ms_measured": elapsed_ms,
                 "blink_hz": self.args.blink_hz,
                 "events_accumulated": self.event_count,
+                "polarity_mode": "positive_count + negative_count",
+                "background_noise_filter": self.noise_filter_snapshot().to_json(),
             },
             "matches": [match.to_json() for match in self.last_matches],
             "result": result,
@@ -2717,13 +3552,14 @@ class ControlWindow(QtWidgets.QWidget):
         self.preview_blobs = []
         self.last_preview_blob_update = 0.0
         self.current_capture_duration_ms = int(self.args.accum_ms)
+        self.reset_noise_filter_state(reset_counters=True)
         self.accumulating = True
         self.accum_started_at = time.time()
         self.handeye_capture_pending = True
         self.set_capture_buttons_enabled(False)
         self.append_status(
             f"Capture hand-eye: accumulation {self.current_capture_duration_ms} ms "
-            "(mire telephone en clignotement libre, robot immobile)."
+            f"(mire telephone en clignotement libre, robot immobile, {self.noise_filter_summary()})."
         )
         QtCore.QTimer.singleShot(self.current_capture_duration_ms, self.finish_handeye_capture)
 
@@ -2744,14 +3580,20 @@ class ControlWindow(QtWidgets.QWidget):
             self.append_status("Echantillon rejete: accumulation manquante.")
             return
 
-        self.last_blobs = detect_blobs(self.activity, EXPECTED_DOTS)
+        expected = len(self.external_dots)
+        self.last_blobs = detect_blobs(self.activity, expected)
         self.last_matches, reason = associate_blobs_to_layout(self.last_blobs, self.external_dots)
-        overlay = make_overlay(self.activity, self.last_blobs, self.last_matches)
+        overlay = make_overlay(
+            self.activity, self.last_blobs, self.last_matches,
+            event_color=self.event_color, marker_color=self.marker_color,
+            background_color=self.background_color,
+        )
         self.preview_label.setPixmap(pixmap_from_bgr(overlay, self.preview_label.size()))
         self.append_status(
             f"Detection: {len(self.last_blobs)} blobs, "
-            f"{len(self.last_matches)}/{EXPECTED_DOTS} associations, "
-            f"{self.event_count} events, {elapsed_ms:.0f} ms. {reason}"
+            f"{len(self.last_matches)}/{expected} associations, "
+            f"{self.event_count} events, {elapsed_ms:.0f} ms, "
+            f"{self.noise_filter_summary()}. {reason}"
         )
 
         selected = self.selected_calibration_path()
@@ -2795,6 +3637,8 @@ class ControlWindow(QtWidgets.QWidget):
             pnp,
             self.last_matches,
         )
+        sample["polarity_mode"] = "positive_count + negative_count"
+        sample["background_noise_filter"] = self.noise_filter_snapshot().to_json()
         self.handeye_session["samples"].append(sample)
         self.save_handeye_session()
 
@@ -2840,6 +3684,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.last_matches = []
         self.preview_blobs = []
         self.last_preview_blob_update = 0.0
+        self.reset_noise_filter_state(reset_counters=True)
         for path in self.last_export_paths:
             try:
                 path.unlink()
@@ -2859,7 +3704,7 @@ class ControlWindow(QtWidgets.QWidget):
             self.camera.close()
             self.camera = None
         self.mire.lit = False
-        self.mire.set_pattern("mire")
+        self.mire.set_pattern(self.selected_pattern_id())
         self.mire.restart_blink()
         self.mire.update()
         self.set_camera_status("Camera: reset, appuyer sur Reconnecter camera", "warn")
@@ -2902,9 +3747,11 @@ def render_synthetic_activity(
     return activity
 
 
-def make_synthetic_activity() -> Tuple[np.ndarray, List[ScreenDot], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def make_synthetic_activity(
+    pattern_id: str = DEFAULT_PATTERN_ID,
+) -> Tuple[np.ndarray, List[ScreenDot], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     width, height = 640, 480
-    dots, _ = build_mire_layout(width, height, 1.0, 1.0)
+    dots, _ = build_mire_layout(width, height, 1.0, 1.0, pattern_id)
     camera_matrix = np.array(
         [[520.0, 0.0, 320.0], [0.0, 520.0, 240.0], [0.0, 0.0, 1.0]],
         dtype=np.float64,
@@ -2916,9 +3763,81 @@ def make_synthetic_activity() -> Tuple[np.ndarray, List[ScreenDot], np.ndarray, 
     return activity, dots, camera_matrix, dist_coeffs, rvec, tvec
 
 
+def run_background_filter_self_test() -> bool:
+    try:
+        dv = load_dv_processing()
+    except RuntimeError as exc:
+        print(f"background filter self-test skipped: {exc}")
+        return True
+
+    isolated = dv.EventStore()
+    for index in range(12):
+        isolated.push_back(index * 1000, (index * 7) % 64, (index * 11) % 64, True)
+
+    coherent = dv.EventStore()
+    for index in range(12):
+        coherent.push_back(
+            index * 100,
+            30 + (index % 3),
+            30 + ((index // 3) % 3),
+            True,
+        )
+
+    duration = timedelta(milliseconds=2)
+    isolated_filter = dv.noise.BackgroundActivityNoiseFilter((64, 64), duration)
+    isolated_filter.accept(isolated)
+    isolated_out = isolated_filter.generateEvents()
+
+    coherent_filter = dv.noise.BackgroundActivityNoiseFilter((64, 64), duration)
+    coherent_filter.accept(coherent)
+    coherent_out = coherent_filter.generateEvents()
+
+    print(f"background filter isolated: {len(isolated_out)}/{len(isolated)}")
+    print(f"background filter coherent: {len(coherent_out)}/{len(coherent)}")
+
+    if len(coherent_out) < 8 or len(coherent_out) <= len(isolated_out):
+        print("background filter self-test failed")
+        return False
+    return True
+
+
+def run_blob_center_self_test() -> bool:
+    height, width = 28, 32
+    true_cx, true_cy = 15.3, 13.6
+    yy, xx = np.ogrid[:height, :width]
+    mask = (xx - true_cx) ** 2 + (yy - true_cy) ** 2 <= 9.0 ** 2
+    activity = np.zeros((height, width), dtype=np.float32)
+    activity[mask] = 60.0
+    activity[mask & (xx > true_cx + 4.0) & (yy < true_cy + 3.0)] += 500.0
+
+    mask_ys, mask_xs = np.nonzero(mask)
+    component_centroid = (float(np.mean(mask_xs)), float(np.mean(mask_ys)))
+    center_x, center_y, method, agreement = estimate_blob_center(
+        mask,
+        activity,
+        component_centroid,
+        0,
+        0,
+    )
+
+    raw_weights = activity[mask]
+    raw_x = float(np.sum(mask_xs * raw_weights) / np.sum(raw_weights))
+    raw_y = float(np.sum(mask_ys * raw_weights) / np.sum(raw_weights))
+    robust_error = math.hypot(center_x - true_cx, center_y - true_cy)
+    raw_error = math.hypot(raw_x - true_cx, raw_y - true_cy)
+    print(
+        f"blob center robust: {robust_error:.3f}px via {method} "
+        f"(weighted {raw_error:.3f}px, agreement {agreement})"
+    )
+    if robust_error > 1.0 or robust_error >= raw_error:
+        print("blob center self-test failed")
+        return False
+    return True
+
+
 def run_self_test() -> int:
     activity, dots, camera_matrix, dist_coeffs, rvec, tvec = make_synthetic_activity()
-    blobs = detect_blobs(activity)
+    blobs = detect_blobs(activity, len(dots))
     matches, reason = associate_blobs_to_layout(blobs, dots)
     print(f"synthetic blobs: {len(blobs)}")
     print(f"synthetic matches: {len(matches)} ({reason})")
@@ -2936,6 +3855,28 @@ def run_self_test() -> int:
     if not pose_result.get("valid"):
         print(f"pose evaluation failed: {pose_result.get('reason')}")
         return 1
+    if not run_blob_center_self_test():
+        return 1
+    if not run_background_filter_self_test():
+        return 1
+
+    for pattern in DOT_GRID_PATTERNS:
+        activity_p, dots_p, _, _, _, _ = make_synthetic_activity(pattern.pattern_id)
+        blobs_p = detect_blobs(activity_p, len(dots_p))
+        matches_p, reason_p = associate_blobs_to_layout(blobs_p, dots_p)
+        print(
+            f"synthetic pattern {pattern.pattern_id}: "
+            f"{len(blobs_p)} blobs, {len(matches_p)} matches ({reason_p})"
+        )
+        if len(dots_p) != pattern.expected_dots:
+            print(f"layout failed for {pattern.pattern_id}: {len(dots_p)} dots")
+            return 1
+        if len(blobs_p) != pattern.expected_dots:
+            print(f"blob detection failed for {pattern.pattern_id}")
+            return 1
+        if len(matches_p) != pattern.expected_dots:
+            print(f"association failed for {pattern.pattern_id}")
+            return 1
 
     for index, variant in enumerate(SQUARE_SEQUENCE):
         square_dots, _ = build_square_layout(
@@ -3060,6 +4001,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--blink-hz", type=float, default=6.0, help="Mire blink frequency.")
     parser.add_argument("--accum-ms", type=int, default=240, help="Event accumulation duration in ms.")
     parser.add_argument(
+        "--pattern",
+        choices=[pattern.pattern_id for pattern in DOT_GRID_PATTERNS],
+        default=DEFAULT_PATTERN_ID,
+        help="Initial blinking dot-grid target shown in the dropdown.",
+    )
+    parser.add_argument(
         "--gradient-softness",
         type=int,
         default=55,
@@ -3069,6 +4016,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--output-dir",
         default="recordings/mire_calibration",
         help="Directory for JSON observations and PNG overlays.",
+    )
+    parser.add_argument(
+        "--noise-filter",
+        action="store_true",
+        help="Enable dv-processing BackgroundActivityNoiseFilter by default.",
+    )
+    parser.add_argument(
+        "--noise-cutoff-hz",
+        type=float,
+        default=500.0,
+        help="Background noise support cutoff in Hz (duration = 1 / cutoff, default 500 Hz = 2 ms).",
     )
     parser.add_argument(
         "--min-matched",
