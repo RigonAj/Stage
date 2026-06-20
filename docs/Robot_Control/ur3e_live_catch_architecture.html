@@ -764,7 +764,7 @@ Gère mm→m si nécessaire.</li>
 
 <ul>
 <li><strong>Clip</strong> aux bornes articulaires URDF + <strong>bornes de workspace</strong> (rejet hors zone sûre).</li>
-<li><strong>Rate-limit</strong> : <code>|target − q| ≤ v_safe·dt_step</code> et accélération <code>≤ a_safe</code>, avec <code>v_safe = URDF × 0.5</code> → base/épaule/coude <strong>1.571 rad/s</strong> (90 °/s), poignets <strong>3.142 rad/s</strong> (180 °/s). Identique au clamp côté sim (sim-to-real §2.2) : même borne des deux côtés.</li>
+<li><strong>Rate-limit</strong> : <code>|target − q| ≤ v_safe·dt_step</code> et accélération <code>≤ a_safe</code>, avec <code>v_safe</code> calé sur les limites nominales UR3e constructeur → base/épaule/coude <strong>3.142 rad/s</strong> (180 °/s), poignets <strong>6.283 rad/s</strong> (360 °/s). Identique au clamp côté sim (sim-to-real §2.2) : même borne des deux côtés.</li>
 <li><strong>Watchdog/dead-man</strong> : arrêt contrôlé si perception périmée, dépassement du budget temps de boucle, ou écart commande/réalisé trop grand. Réutilise les <strong>gates</strong> existants de <code>app.py</code> (External Control actif, speed scaling &gt; 0, contrôleur actif).</li>
 </ul>
 
@@ -1073,7 +1073,7 @@ geometry_msgs/Point ball_base   # balle dans le repère base</code></pre>
 </tr>
 </tbody></table></div>
 
-<blockquote><p>Source de vérité des limites de vitesse : <code>ur_description/config/ur3e/joint_limits.yaml</code> du driver réellement lancé ; <code>v_safe = limite × 0.5</code> (cf. sim-to-real §1, §2.1).</p></blockquote>
+<blockquote><p>Source de vérité des limites de vitesse : documentation constructeur UR3e et <code>ur_description/config/ur3e/joint_limits.yaml</code> du driver réellement lancé ; <code>v_safe</code> utilise les limites nominales par joint (cf. sim-to-real §1, §2.1).</p></blockquote>
       </article>
     </main>
   </div>

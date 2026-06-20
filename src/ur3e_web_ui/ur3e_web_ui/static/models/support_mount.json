@@ -1,7 +1,7 @@
 {
-  "comment": "Display-only pose of the Support3D.glb CAD origin in tool0 (ROS axes, meters/radians). The CAD origin is the phone/screen center; the robot-side face is about +0.1595 m on CAD X, with CAD +X pointing back to the flange. In the URDF tool0 used by the viewer, the real support exits along -Z. The metrology-grade T_tool0_mire is co-solved by hand-eye calibration.",
+  "comment": "Display-only pose of the Support3D.glb origin in tool0 (ROS axes, meters/radians). GLB body axes: +X is the long axis with the flange-mounting plate at GLB +X=+0.1595 (plate normal +X, plate centered at GLB y=+0.0079); the broad holder faces are perpendicular to GLB Y, with the phone screen opening toward GLB -Y. rpy=[0,+pi/2,0] maps GLB +X -> tool0 -Z, so the plate seats on the flange plane (tool0 z=0, centered on the tool0 axis) and the support EXITS along tool0 +Z, which on a UR points outward from the flange. The screen then faces tool0 -Y and the mire Z (into the screen) points tool0 +Y. The in-plane clocking around tool0 Z and the metrology-grade T_tool0_mire are co-solved by hand-eye calibration; this mount is only a visual aid.",
   "glb_url": "/static/models/Support3D.glb",
-  "xyz_m": [0.0, -0.0079, -0.1595],
-  "rpy_rad": [0.0, -1.5707963268, 0.0],
+  "xyz_m": [0.0, -0.0079, 0.1595],
+  "rpy_rad": [0.0, 1.5707963268, 0.0],
   "scale": 1.0
 }

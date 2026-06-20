@@ -27,7 +27,7 @@ ur3e_live_catch/
 | `ball_frame.py` | `frame_id → base` via TF (identité si `base`) + filtre vitesse (§4.3.1) |
 | `observation.py` | `ObservationBuilder` 33-D (§4.3.2, §6) |
 | `policy_runtime.py` | `PolicyRunner`, charge le modèle depuis `data/models/` (§4.3.3) |
-| `action.py` | `ActionMapper` (×0.5, mémorise l'action brute) (§4.3.4) |
+| `action.py` | `ActionMapper` (delta clippé + rate-limit, mémorise l'action clippée) (§4.3.4) |
 | `safety.py` | `SafetyLimiter` + watchdog (§4.3.5, §9) |
 | `streaming.py` | sortie vers `forward_position_controller` (§4.3.6) |
 

@@ -56,24 +56,37 @@ First build and test against mock hardware before connecting the real arm.
 Each rollout sample contains both the commanded target and the realized state:
 
 - `action_normalized`: raw policy output from the SKRL agent.
-- `joint_position_target_rad`: the position **command** sent to the Isaac Lab articulation (`action_normalized * action_scale`).
+- `joint_position_target_rad`: the position **command** sent to the Isaac Lab articulation. In legacy
+  rollouts this was `action_normalized * action_scale`; in new sim-to-real rollouts it is the
+  post-clamp incremental target after `v_safe`/`a_safe` limiting.
 - `joint_position_before_rad`: the joint positions the robot **actually reached** in the simulation at that control step.
 
 ### Replay the realized motion, not the raw command
 
-`joint_position_target_rad` is the *commanded* PD-drive target, not the motion the robot performed. The policy commands extremely aggressive targets — in this export the per-step command implies **65–170 rad/s**, far beyond anything the arm can follow in one 1/60 s control step. The simulated robot only reaches **~6 rad/s** (`joint_position_before_rad`), because the joint PD drive heavily filters those targets. So:
+For the legacy export currently copied in `data/ur3e_rollouts/...`,
+`joint_position_target_rad` is the *commanded* PD-drive target, not the motion the robot performed.
+That old policy commands extremely aggressive targets — the per-step command implies **65–170 rad/s**,
+far beyond anything the arm can follow in one 1/60 s control step. The simulated robot only reaches
+**~6 rad/s** (`joint_position_before_rad`), because the joint PD drive heavily filters those
+targets. So:
 
 - What you **see in Isaac Sim** is `joint_position_before_rad` (smooth, modest motion).
 - Replaying `joint_position_target_rad` reproduces the raw command instead: at raw timing it is wildly fast, and even after safety retiming the real robot has time to actually *reach* the extreme targets, tracing a much larger path than the simulated robot ever did.
 
-Therefore the replay defaults to the **realized** source (`joint_position_before_rad`). Use `target` (`joint_position_target_rad`) only for diagnostics/comparison, never as the faithful replay. The replay tools expose this as `--source {realized,target}` (CLI) and the `source` query/body field (web API); the web UI has a `realized`/`target` toggle and a Compare view that overlays the two. Do not stream `action_normalized` directly to the UR3e.
+Therefore the replay defaults to the **realized** source (`joint_position_before_rad`) for legacy
+rollouts. Use `target` (`joint_position_target_rad`) only for diagnostics/comparison unless the file
+metadata says the rollout was regenerated with the new incremental, rate-limited action semantics.
+The replay tools expose this as `--source {realized,target}` (CLI) and the `source` query/body field
+(web API); the web UI has a `realized`/`target` toggle and a Compare view that overlays the two. Do
+not stream `action_normalized` directly to the UR3e.
 
 In this task:
 
 ```text
-joint_position_target_rad = action_normalized * 0.5   # raw command (aggressive)
-joint_position_before_rad                              # realized motion (replay this)
-dt_s = 0.016666666666666666                           # = sim.dt (1/120) * decimation (2) = 1/60
+legacy: joint_position_target_rad = action_normalized * 0.5
+new:    joint_position_target_rad = q + clamp(action, -1, 1) * v_safe * dt_s, then a_safe/limit clamped
+joint_position_before_rad = realized sim motion
+dt_s = 0.016666666666666666  # = sim.dt (1/120) * decimation (2) = 1/60
 ```
 
 The 6 joint targets are absolute joint positions in radians, ordered as:

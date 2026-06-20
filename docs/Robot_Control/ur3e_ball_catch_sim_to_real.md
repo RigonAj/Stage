@@ -17,7 +17,8 @@ les vraies limites du robot.
 >    fréquence de contrôle, alimentée par la perception en direct. C'est le seul mode capable
 >    d'attraper une balle réellement lancée (le replay open-loop ne peut pas ralentir une vraie
 >    balle).
-> 2. **Enveloppe = « vitesse sûre réaliste »** — contraindre la sim à ~50 % des limites UR3e,
+> 2. **Enveloppe = limites articulaires UR3e nominales** — contraindre la sim aux vitesses UR3e
+>    constructeur (`180 deg/s` autres joints, `360 deg/s` poignets),
 >    modéliser la latence, et **reformuler la dynamique de la balle** pour que la tâche reste
 >    faisable dans ce budget.
 
@@ -34,12 +35,12 @@ Dans `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining
 - `ur_gripper.py` : `effort_limit_sim` par joint =
   `[54, 54, 28, 9, 9, 9] Nm` pour
   `[shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3]`.
-- `ur_gripper.py` : `velocity_limit_sim` sûr par joint =
-  `[1.5708, 1.5708, 1.5708, 3.1416, 3.1416, 3.1416] rad/s`
-  (50 % des vitesses nominales UR3e). Les gains restent provisoires :
+- `ur_gripper.py` : `velocity_limit_sim` nominal UR3e par joint =
+  `[3.1416, 3.1416, 3.1416, 6.2832, 6.2832, 6.2832] rad/s`
+  (`180 deg/s` autres joints, `360 deg/s` poignets). Les gains restent provisoires :
   `stiffness = 800`, `damping = 40`, à identifier par mesure step-response réelle.
 - `firsttraining_env_cfg.py` : `a_safe = 4 * v_safe` =
-  `[6.2832, 6.2832, 6.2832, 12.5664, 12.5664, 12.5664] rad/s^2`.
+  `[12.5664, 12.5664, 12.5664, 25.1328, 25.1328, 25.1328] rad/s^2`.
 - `firsttraining_env_cfg.py` : bornes opérationnelles de position =
   `[-2π, -2π, -π, -2π, -2π, -2π]` à `[2π, 2π, π, 2π, 2π, 2π]`.
 - `firsttraining_env.py` : l'action PPO est maintenant clippée dans `[-1, 1]`, transformée en
@@ -48,6 +49,9 @@ Dans `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining
 - `scripts/skrl/play.py` : les nouveaux rollouts exportent la vraie cible
   `base_env.joint_pos_target` et les métadonnées `dt_s`, `action_delta_scale_rad`, `v_safe`,
   `a_safe`, bornes articulaires et nouvelle note `action_semantics`.
+- `firsttraining_env_cfg.py` : distribution de balle resserrée pour le debug/training initial :
+  spawn `x=(-0.52,-0.48)`, `y=(1.25,1.35)`, `z=(0.78,0.86)`, bruit position `0.01 m`,
+  vitesse `vx=(-0.15,0.15)`, `vy=(-4.0,-3.0)`, `vz=(-0.1,0.1)`.
 
 Conséquence importante : les anciennes policies et l'ancien
 `rollouts_10_episodes.json` sont **incompatibles** avec la nouvelle sémantique d'action
@@ -104,9 +108,9 @@ Actionneur sim avant correctif (`ur_gripper.py`, `ImplicitActuatorCfg`) : `effor
 **Conséquences (les 4 causes de non-transfert) :**
 
 1. **Pas de limite de vitesse en sim** → le drive PD atteint ou dépasse les limites URDF
-   actuelles : base/coude autour de 3.2–3.4 rad/s, poignets autour de 6.28 rad/s. Par rapport
-   à l'enveloppe sûre choisie (50 % des limites), le mouvement réalisé en sim est déjà environ
-   ×2 trop rapide, et les **commandes brutes** impliquent 70–169 rad/s selon le joint.
+   actuelles : base/coude autour de 3.2–3.4 rad/s, poignets autour de 6.28 rad/s. C'est déjà
+   au niveau des vitesses nominales UR3e, et les **commandes brutes** impliquent 70–169 rad/s
+   selon le joint.
 2. **Stiffness trop raide (800)** → suivi quasi instantané de la cible en 1/60 s. Le vrai
    `scaled_joint_trajectory_controller` a une bande passante finie : il y a un retard de suivi
    et une accélération bornée que la sim ignore.
@@ -129,10 +133,9 @@ Objectif : faire en sorte que **tout mouvement réalisable en sim soit réalisab
 réel**, en injectant la physique et les retards réels dans l'entraînement.
 
 ### 2.1 Modèle d'actionneur réaliste (`ur_gripper.py`)
-- **Appliqué : `velocity_limit_sim` par joint** = limites UR3e nominales × 0.5
-  (enveloppe sûre) :
-  - base/épaule/coude : `v_safe = 1.571 rad/s` (90 °/s)
-  - poignets : `v_safe = 3.142 rad/s` (180 °/s)
+- **Appliqué : `velocity_limit_sim` par joint** = limites UR3e nominales constructeur :
+  - base/épaule/coude : `v_safe = 3.142 rad/s` (180 °/s)
+  - poignets : `v_safe = 6.283 rad/s` (360 °/s)
 - **Appliqué : `effort_limit_sim` par joint** (ne pas garder 23 Nm uniforme) : `[54, 54, 28,
   9, 9, 9]` Nm. (Les poignets à 9 Nm sont bien plus faibles que 23 → la sim les survalorise
   dans l'ancien modèle.)
@@ -171,7 +174,8 @@ Dans les deux cas :
   `[±360°, ±360°, ±180°, ±360°, ±360°, ±360°]`. Si un autre `ur_description` est utilisé,
   vérifier le fichier de limites du driver réellement lancé : l'ancien workspace legacy local
   contient des efforts/limites légèrement différents.
-- Vitesse : `v_safe` (URDF × 0.5) — voir 2.1.
+- Vitesse : `v_safe` nominal UR3e — voir 2.1. Pour le vrai robot, garder une marge opérateur
+  via le speed slider / safety layer, même si la policy est entraînée à la limite nominale.
 - Vérifier que la **distribution de reset** (`_reset_idx`) reste dans ces bornes (c'est déjà le
   cas) et que la pose de départ est atteignable par le vrai robot.
 
@@ -239,7 +243,7 @@ Randomiser à chaque reset / par épisode :
 
 ## 4. Reformulation de la DYNAMIQUE DE LA BALLE (faisabilité)
 
-La balle actuelle (`ball_velocity_y_range = (-10, -2.5)` m/s, spawn ~1.2 m) arrive trop vite
+L'ancienne balle (`ball_velocity_y_range = (-10, -2.5)` m/s, spawn ~1.2 m) arrivait trop vite
 pour le budget de vitesse sûr. Elle est aussi balistique : rayon `0.03 m`, masse `0.05 kg`,
 gravité activée, et `max_linear_velocity = 10.0` dans `ball_cfg`. **Inégalité de faisabilité**
 à respecter :
@@ -251,9 +255,9 @@ t_déplacement_robot ≈ Δθ_max / v_safe       (Δθ_max = plus grand mouvemen
 
 Actions :
 - **Réduire `ball_velocity_y_range`** et/ou **augmenter la distance de spawn** (`ball_spawn_*`)
-  pour que `t_arrivée` laisse le temps au robot de se positionner à `v_safe ≈ 1.57 rad/s`
-  (joints de base). Point de départ suggéré : vitesse balle réduite d'un facteur ~3–4
-  (ex. `(-3.0, -1.0)` m/s) puis calibrage empirique.
+  pour que `t_arrivée` laisse le temps au robot de se positionner à `v_safe ≈ 3.14 rad/s`
+  (joints base/épaule/coude). Le réglage actuel de debug/training resserre déjà la balle à
+  `vy=(-4.0,-3.0)` m/s, avec `x=(-0.52,-0.48)`, `y=(1.25,1.35)`, `z=(0.78,0.86)`.
 - **Méthode de calibrage** : mesurer en sim le `t_déplacement_robot` typique sur des catches
   réussis (= `Δθ_max / v_safe`), fixer `t_arrivée` à ≥ ce temps + marge de latence, en déduire
   vitesse/distance de balle.
@@ -393,11 +397,12 @@ rollouts ne peuvent pas servir de validation car leur policy commande des cibles
 |---|---|
 | `source/.../firsttraining/ur_gripper.py` | appliqué : `velocity_limit_sim` + `effort_limit_sim` par joint ; reste : k/d system-id |
 | `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env.py` | appliqué : action delta/rate-limit (`_pre_physics_step`) ; reste : buffers de latence, reward shaping (`compute_rewards`), bruit d'obs |
-| `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env_cfg.py` | appliqué : `v_safe`/`a_safe`/bornes position ; reste : ranges balle, `episode_length_s`, flags DR |
+| `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env_cfg.py` | appliqué : `v_safe`/`a_safe`/bornes position/ranges balle ; reste : `episode_length_s`, flags DR |
 | `<ISAAC_REPO>/source/.../firsttraining/agents/skrl_ppo_cfg.yaml` | appliqué : `clip_actions: True` côté policy ; reste : renommage expérience, hyperparams |
 | **nouveau** paquet ROS2 (ex. `ur3e_live_policy`) | nœud closed-loop : perception → obs 33-D → policy → sécurité → contrôleur streaming |
 | `docs/Robot_Control/ur3e_real_robot_replay.md`, `docs/Robot_Control/ur3e_robot_control_architecture.md` | lien croisé vers ce document |
 
 > Source de vérité côté robot : la documentation constructeur UR3e et le
 > `ur_description/config/ur3e/joint_limits.yaml` du driver ROS réellement lancé. Toute valeur
-> d'entraînement en dérive explicitement, ici ×0.5 pour la vitesse sûre.
+> d'entraînement doit indiquer explicitement si elle utilise la limite nominale ou une marge
+> volontaire sous cette limite.

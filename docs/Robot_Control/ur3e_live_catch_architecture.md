@@ -58,7 +58,7 @@ sérialisation ni saut DDS, sur le chemin critique 60 Hz. Les topics ROS ne serv
                           ┌─ ur3e_live_catch : 1 PROCESSUS, boucle 60 Hz ─────────────┐
    /joint_states ────────▶│  [ball→base via TF {}^B T_C] ▸ [filtre vitesse balle]     │
                           │  ▸ [ObservationBuilder 33-D] ▸ [PolicyRunner .ts+scaler]  │
-                          │  ▸ [ActionMapper ×0.5 + clip + rate-limit] ▸ [streaming]  │
+                          │  ▸ [ActionMapper delta + clip + rate-limit] ▸ [streaming]  │
                           │   ── appels directs, pas de topic sur le chemin chaud ──   │
                           └──┬─────────────────────────────────────────────────┬─────┘
             télémétrie/debug ▼ (BallState base, obs, action, cible) hors-chemin │ commande
@@ -201,8 +201,9 @@ Reconstruit l'observation **dans l'ordre et les unités exacts** de
 #### 4.3.5 `safety.py` (SafetyLimiter + watchdog) — défense en profondeur
 - **Clip** aux bornes articulaires URDF + **bornes de workspace** (rejet hors zone sûre).
 - **Rate-limit** : `|target − q| ≤ v_safe·dt_step` et accélération `≤ a_safe`, avec
-  `v_safe = URDF × 0.5` → base/épaule/coude **1.571 rad/s** (90 °/s), poignets **3.142 rad/s**
-  (180 °/s). Identique au clamp côté sim (sim-to-real §2.2) : même borne des deux côtés.
+  `v_safe` calé sur les limites nominales UR3e constructeur → base/épaule/coude
+  **3.142 rad/s** (180 °/s), poignets **6.283 rad/s** (360 °/s). Identique au clamp côté sim
+  (sim-to-real §2.2) : même borne des deux côtés.
 - **Watchdog/dead-man** : arrêt contrôlé si perception périmée, dépassement du budget temps de
   boucle, ou écart commande/réalisé trop grand. Réutilise les **gates** existants de `app.py`
   (External Control actif, speed scaling > 0, contrôleur actif).
@@ -442,5 +443,6 @@ et la composition rclcpp en réserve si la latence mesurée (§10) l'exige.
 | Perception (Trace, régression, conversion 3D) | `Dv-Rosws/src/Ball_Tracking_Cpp/` (`Gui.cpp`, `BallTracker.cpp`, `RegressionAccumulator.hpp`, `util.hpp::ToMeters`) |
 | Calibration caméra + extrinsèque | `Dv-Rosws/calibration_camera_DVXplorer_*.xml`, `Dv-Rosws/scripts/solve_handeye.py`, `ur3e_camera_base_calibration.md`, `handeye_result.yaml` |
 
-> Source de vérité des limites de vitesse : `ur_description/config/ur3e/joint_limits.yaml` du
-> driver réellement lancé ; `v_safe = limite × 0.5` (cf. sim-to-real §1, §2.1).
+> Source de vérité des limites de vitesse : documentation constructeur UR3e et
+> `ur_description/config/ur3e/joint_limits.yaml` du driver réellement lancé ; `v_safe` utilise les
+> limites nominales par joint (cf. sim-to-real §1, §2.1).
