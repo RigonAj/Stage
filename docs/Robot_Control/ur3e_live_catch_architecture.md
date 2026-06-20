@@ -67,7 +67,7 @@ sérialisation ni saut DDS, sur le chemin critique 60 Hz. Les topics ROS ne serv
 
 **Le retour « Observation » du schéma initial** se réalise sans topic :
 - (a) l'état articulaire via l'abonnement `/joint_states` (callback qui met à jour un cache) ;
-- (b) l'**action brute précédente**, stockée comme attribut du nœud (c'est la composante 9 de
+- (b) l'**action policy clippée précédente**, stockée comme attribut du nœud (c'est la composante 9 de
   l'observation, cf. §6) et réinjectée à l'itération suivante.
 
 ### Nuance rclpy (à connaître)
@@ -77,7 +77,7 @@ l'inférence est PyTorch/Python, on ne peut pas l'obtenir telle quelle. On réal
 « composition » par **un nœud rclpy unique** dont les sous-blocs sont des classes appelées
 directement dans le même processus (mémoire partagée, pas de DDS). On garde le **bénéfice
 latence** et une **structure modulaire** (un module = un fichier = une responsabilité). Les
-signaux intermédiaires (obs, action brute, cible) restent **inspectables** via des topics de
+signaux intermédiaires (obs, action policy, cible) restent **inspectables** via des topics de
 **debug en best-effort, hors chemin critique**. Une vraie composition rclcpp est listée comme
 option future en §13.
 
@@ -190,13 +190,13 @@ Reconstruit l'observation **dans l'ordre et les unités exacts** de
   (`<ISAAC_REPO>/scripts/skrl/play.py`) et `policy_metadata.json`. Alimenter le réseau brut avec
   une observation non normalisée serait
   une source majeure de divergence sim-to-real.
-- **Sortie = action brute (6)** (avant `action_scale`). C'est aussi ce qui est mémorisé pour la
-  composante 9 de l'obs suivante.
+- **Sortie = action policy (6)**, clippée dans `[-1, 1]` avant mapping. C'est aussi ce qui est
+  mémorisé pour la composante 9 de l'obs suivante.
 
 #### 4.3.4 `action.py` (ActionMapper) — cible articulaire
-- `joint_target = action_brute × action_scale`, avec `action_scale = 0.5`
-  (`_pre_physics_step`, env.py:182). **Cible de position absolue** (pas vitesse/couple).
-- Mémorise l'action **brute** pour l'obs suivante.
+- `joint_target = q + clamp(action, -1, 1) * v_safe * dt_step`, puis limite d'accélération
+  `a_safe` et clamp articulaire. **Cible de position incrémentale bornée** (pas vitesse/couple).
+- Mémorise l'action policy **clippée** pour l'obs suivante.
 
 #### 4.3.5 `safety.py` (SafetyLimiter + watchdog) — défense en profondeur
 - **Clip** aux bornes articulaires URDF + **bornes de workspace** (rejet hors zone sûre).
@@ -274,22 +274,23 @@ Ordre **exact** (somme = 6+6+3+3+3+1+3+1+6+1 = **33**), miroir de `firsttraining
 | 6 | `distance` | 1 | `‖direction‖` | dérivé |
 | 7 | `ball_vel_w` | 3 | vitesse balle **filtrée** | **critique** (bruit) |
 | 8 | flag `prev_disk_signed_dist > 0` | 1 | recalculé (projection balle sur normale disque) | moyen |
-| 9 | `actions` (action **brute** précédente) | 6 | attribut mémorisé (pré-`action_scale`) | facile |
+| 9 | `actions` (action policy clippée précédente) | 6 | attribut mémorisé avant mapping cible | facile |
 | 10 | `pass_through_count` | 1 | recalculé (`detect_pass_through`, env.py:327) | moyen |
 
 Points d'attention :
 - **`ball_vel_w` est une vitesse « monde ».** Comme le passage en `base` n'est qu'une translation
   constante (origine d'environnement), la **vitesse est invariante** : la différence finie filtrée
   des positions `base` donne directement `ball_vel_w`.
-- **Composante 9 = action brute**, pas la cible mise à l'échelle. C'est le retour interne décrit
-  en §2.
+- **Composante 9 = action policy clippée**, pas la cible articulaire après `v_safe`/`a_safe`.
+  C'est le retour interne décrit en §2.
 - **Composantes 8 et 10** dépendent de la **géométrie disque/balle** (centre + normale du hoop).
   Elles doivent reproduire `detect_pass_through` et le signe de `(balle − disque)·normale`.
 - **Unités strictes** : rad, rad/s, m, m/s. Aucune conversion en degrés ne doit traîner.
 
 Source de vérité : `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining/firsttraining_env.py`
 (`_get_observations`, `_update_local_pose_tensors`, `_read_disk_pose_in_body_frame`,
-`detect_pass_through`) et `firsttraining_env_cfg.py` (`action_scale`, géométrie disque).
+`detect_pass_through`) et `firsttraining_env_cfg.py` (`action_semantics`, `v_safe`, `a_safe`,
+géométrie disque).
 
 ---
 
@@ -385,7 +386,7 @@ exclusifs** ; l'exposer clairement dans l'UI/launch.
    visualisation), vérifié en parité base/caméra (§12).
 4. **`ObservationBuilder`** 33-D + **test d'équivalence** : rejouer un épisode
    `rollouts_10_episodes.json`, reconstruire l'obs, comparer bit-à-bit à l'obs sim.
-5. **`PolicyRunner`** (trancher la question du scaler) → action brute en **dry-run** (logs, aucune
+5. **`PolicyRunner`** (trancher la question du scaler) → action policy en **dry-run** (logs, aucune
    commande robot).
 6. **`ActionMapper` + `safety` + `streaming`** vers `forward_position_controller` sur
    **fake hardware/URSim**.

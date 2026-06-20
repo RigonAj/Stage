@@ -1,15 +1,16 @@
 # UR3e Ball-Catch — Plan & contraintes Sim-to-Real (PPO)
 
 Ce document est le plan de référence pour rendre la politique PPO « attrape-balle »
-**transférable au vrai UR3e**. Il ne contient pas de code : c'est une checklist détaillée
-des contraintes de **simulation**, d'**entraînement** et d'**inférence (closed-loop live)** à
-mettre en place, avec les valeurs numériques ancrées sur les vraies limites du robot.
+**transférable au vrai UR3e**. Il documente les contraintes de **simulation**,
+**d'entraînement** et **d'inférence (closed-loop live)**, avec les valeurs numériques ancrées sur
+les vraies limites du robot.
 
-> Statut audit code (2026-06-16) : le diagnostic ci-dessous correspond au code actuel
-> (`<ISAAC_REPO>/source/FirstTraining/...`, `$DV_ROSWS_ROOT/src/...`) et au rollout copié dans
-> `$DV_ROSWS_ROOT/data/ur3e_rollouts/...`. Les contraintes
-> sim-to-real listées ensuite sont des **changements à implémenter** ; elles ne sont pas encore
-> présentes dans l'environnement Isaac Lab ni dans un noeud ROS2 live.
+> Statut code (2026-06-20) : les corrections de base côté Isaac Lab sont appliquées dans
+> `<ISAAC_REPO>/source/FirstTraining/...` : actionneur borné par joint, action incrémentale
+> clippée/rate-limitée, `clip_actions: True` côté policy, et métadonnées d'export mises à jour.
+> Le diagnostic chiffré ci-dessous reste celui de l'**ancien** rollout copié dans
+> `$DV_ROSWS_ROOT/data/ur3e_rollouts/...`. La latence, la domain randomization, le reward shaping,
+> la dynamique de balle ralentie et le noeud ROS2 live restent à implémenter/valider.
 
 > Décisions cadrant ce plan :
 > 1. **Cible de déploiement = closed-loop live** — la politique tourne sur le robot à la
@@ -26,12 +27,39 @@ Documents liés : `ur3e_real_robot_replay.md` (réalisé vs commande, replay ope
 
 ---
 
+## 0. Changements appliqués (2026-06-20)
+
+Dans `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining/` :
+
+- `ur_gripper.py` : `effort_limit_sim` par joint =
+  `[54, 54, 28, 9, 9, 9] Nm` pour
+  `[shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3]`.
+- `ur_gripper.py` : `velocity_limit_sim` sûr par joint =
+  `[1.5708, 1.5708, 1.5708, 3.1416, 3.1416, 3.1416] rad/s`
+  (50 % des vitesses nominales UR3e). Les gains restent provisoires :
+  `stiffness = 800`, `damping = 40`, à identifier par mesure step-response réelle.
+- `firsttraining_env_cfg.py` : `a_safe = 4 * v_safe` =
+  `[6.2832, 6.2832, 6.2832, 12.5664, 12.5664, 12.5664] rad/s^2`.
+- `firsttraining_env_cfg.py` : bornes opérationnelles de position =
+  `[-2π, -2π, -π, -2π, -2π, -2π]` à `[2π, 2π, π, 2π, 2π, 2π]`.
+- `firsttraining_env.py` : l'action PPO est maintenant clippée dans `[-1, 1]`, transformée en
+  cible incrémentale `q + action * v_safe * dt_s`, puis limitée en accélération et en position.
+- `agents/skrl_ppo_cfg.yaml` : `models.policy.clip_actions: True`.
+- `scripts/skrl/play.py` : les nouveaux rollouts exportent la vraie cible
+  `base_env.joint_pos_target` et les métadonnées `dt_s`, `action_delta_scale_rad`, `v_safe`,
+  `a_safe`, bornes articulaires et nouvelle note `action_semantics`.
+
+Conséquence importante : les anciennes policies et l'ancien
+`rollouts_10_episodes.json` sont **incompatibles** avec la nouvelle sémantique d'action
+absolu → incrémental. Il faut réentraîner puis régénérer les rollouts avant toute comparaison
+avant/après ou replay de la nouvelle policy.
+
 ## 1. Diagnostic chiffré de l'écart sim↔réel
 
 Tout est contrôlé à **60 Hz** : `sim.dt = 1/120`, `decimation = 2` → `dt_step = 1/60 ≈
 16.67 ms` (`firsttraining_env_cfg.py`, confirmé par `metadata.dt_s`).
 
-L'action est une **cible de position articulaire absolue** : `joint_pos_target =
+Dans l'ancien code/export, l'action était une **cible de position articulaire absolue** : `joint_pos_target =
 action × action_scale` avec `action_scale = 0.5` (`_pre_physics_step`), appliquée via
 `set_joint_position_target` (`_apply_action`). La politique a **`clip_actions: False`**
 (`skrl_ppo_cfg.yaml`) → aucune borne sur la sortie. Dans le rollout exporté,
@@ -44,6 +72,7 @@ Mesures sur `rollouts_10_episodes.json` (10 épisodes) :
 |---|---|---|
 | Pas max par step | 0.105 rad | 2.815 rad |
 | **Vitesse max impliquée** | **6.3 rad/s (361 °/s)** | **168.9 rad/s (9677 °/s)** |
+| **Accélération max impliquée** | **754.0 rad/s²** | **13224.7 rad/s²** |
 | Plage absolue | [-2.45, 1.07] rad | [-3.08, 1.44] rad |
 | Durée d'un catch | **~11 steps ≈ 0.18 s** | idem |
 
@@ -58,8 +87,9 @@ Détail des vitesses max impliquées par joint :
 | wrist_2 | 6.29 rad/s | 74.94 rad/s | 6.28 rad/s |
 | wrist_3 | 6.28 rad/s | 112.85 rad/s | 6.28 rad/s |
 
-Limites réelles UR3e (source courante :
-`/opt/ros/humble/share/ur_description/config/ur3e/joint_limits.yaml`) :
+Limites réelles UR3e (source constructeur Universal Robots :
+<https://www.universal-robots.com/manuals/EN/HTML/SW5_24/Content/prod-usr-man/complianceUR3e/H_g5_sections/appendix_g5/tech_spec_data.htm>,
+à comparer au `ur_description/config/ur3e/joint_limits.yaml` du driver réellement lancé) :
 
 | Joint | effort max | vitesse max | position |
 |---|---|---|---|
@@ -68,7 +98,7 @@ Limites réelles UR3e (source courante :
 | wrist_1 / wrist_2 | 9 Nm | 360 °/s = **6.28 rad/s** | ±360° |
 | wrist_3 | 9 Nm | 360 °/s = **6.28 rad/s** | sans limite de position dans l'URDF Humble actuel |
 
-Actionneur sim actuel (`ur_gripper.py`, `ImplicitActuatorCfg`) : `effort_limit_sim = 23.0`
+Actionneur sim avant correctif (`ur_gripper.py`, `ImplicitActuatorCfg`) : `effort_limit_sim = 23.0`
 **uniforme**, `stiffness = 800`, `damping = 40`, **aucune `velocity_limit`**.
 
 **Conséquences (les 4 causes de non-transfert) :**
@@ -99,14 +129,14 @@ Objectif : faire en sorte que **tout mouvement réalisable en sim soit réalisab
 réel**, en injectant la physique et les retards réels dans l'entraînement.
 
 ### 2.1 Modèle d'actionneur réaliste (`ur_gripper.py`)
-- **Ajouter `velocity_limit`/`velocity_limit_sim` par joint** = limites URDF × 0.5
+- **Appliqué : `velocity_limit_sim` par joint** = limites UR3e nominales × 0.5
   (enveloppe sûre) :
   - base/épaule/coude : `v_safe = 1.571 rad/s` (90 °/s)
   - poignets : `v_safe = 3.142 rad/s` (180 °/s)
-- **`effort_limit` par joint** depuis l'URDF (ne pas garder 23 Nm uniforme) : `[54, 54, 28,
+- **Appliqué : `effort_limit_sim` par joint** (ne pas garder 23 Nm uniforme) : `[54, 54, 28,
   9, 9, 9]` Nm. (Les poignets à 9 Nm sont bien plus faibles que 23 → la sim les survalorise
-  actuellement.)
-- **Ré-identifier `stiffness`/`damping`** pour reproduire la **bande passante de suivi réelle**.
+  dans l'ancien modèle.)
+- **Reste à faire : ré-identifier `stiffness`/`damping`** pour reproduire la **bande passante de suivi réelle**.
   Méthode (system-id) : sur le vrai robot, envoyer un échelon de position et enregistrer la
   réponse via `/joint_states` ; ajuster `k`/`d` en sim pour matcher le temps de montée et le
   dépassement. La stiffness 800 actuelle donne un suivi trop rapide → la réduire jusqu'à
@@ -115,32 +145,32 @@ réel**, en injectant la physique et les retards réels dans l'entraînement.
   si le system-id montre une saturation couple importante.
 
 ### 2.2 Redéfinition de l'espace d'action (le levier principal)
-Deux options, **option A recommandée** :
+L'option A est maintenant appliquée. L'option B reste une alternative historique non retenue :
 
-- **Option A — Cibles incrémentales (delta) bornées.** Dans `_pre_physics_step` :
+- **Option A appliquée — Cibles incrémentales (delta) bornées.** Dans `_pre_physics_step` :
   `target[t] = clip(q[t] + action × Δ, q_min, q_max)` avec `Δ = v_safe × dt_step`. Cela
   **borne intrinsèquement la vitesse commandée** à `v_safe`, indépendamment de la sortie de la
   politique. Plus robuste, et identique à ce qu'on appliquera côté robot.
-- **Option B — Garder l'absolu + rate-limiter.** Conserver `target = action × scale` puis
+- **Option B non retenue — Garder l'absolu + rate-limiter.** Conserver `target = action × scale` puis
   clamper : `|target − q| ≤ v_safe × dt_step` et limite d'accélération
   `|target − 2·q + q_prev| ≤ a_safe × dt_step²`. Plus proche du code actuel mais laisse la
   politique apprendre des cibles hors-limite que le clamp masque (moins propre).
 
 Dans les deux cas :
-- **Clipping des actions** : activer `clip_actions: True` dans `skrl_ppo_cfg.yaml` comme
+- **Clipping des actions appliqué** : `clip_actions: True` dans `skrl_ppo_cfg.yaml` comme
   garde-fou, mais **ne pas compter dessus comme seule sécurité** : selon l'action space exposé
   à SKRL, le clipping peut ne pas suffire. La source de vérité doit être un clamp/rate-limit
   explicite dans `_pre_physics_step`, puis le même clamp côté robot. Objectif : supprimer les
   cibles ±3 rad vues dans le rollout actuel.
-- **Limite d'accélération `a_safe`** : l'URDF n'expose pas d'accel max ; choisir `a_safe` par
-  system-id (échelon) ou conservativement (ex. atteindre `v_safe` en ~3–5 steps). La borner
-  empêche la politique d'exploiter des sauts d'accélération infinis irréalistes.
+- **Limite d'accélération `a_safe` appliquée avec une valeur initiale conservatrice** :
+  `a_safe = 4 * v_safe`. Cette valeur reste à confirmer par system-id ; la borne empêche déjà
+  la politique d'exploiter des sauts d'accélération infinis irréalistes.
 
 ### 2.3 Limites articulaires
-- Position : URDF UR3e Humble (`elbow` limité à ±180°, `wrist_1/2` à ±360°,
-  `wrist_3` sans limite de position déclarée). Si un autre `ur_description` est utilisé,
-  vérifier ce fichier : l'ancien workspace legacy local contient des efforts/limites
-  légèrement différents.
+- Position : la couche sim utilise une enveloppe opérationnelle finie
+  `[±360°, ±360°, ±180°, ±360°, ±360°, ±360°]`. Si un autre `ur_description` est utilisé,
+  vérifier le fichier de limites du driver réellement lancé : l'ancien workspace legacy local
+  contient des efforts/limites légèrement différents.
 - Vitesse : `v_safe` (URDF × 0.5) — voir 2.1.
 - Vérifier que la **distribution de reset** (`_reset_idx`) reste dans ces bornes (c'est déjà le
   cas) et que la pose de départ est atteignable par le vrai robot.
@@ -251,12 +281,14 @@ caméra ─▶ détection balle 3D ─▶ TF base ─▶ construit obs 33-D ─�
                                        interface streaming bas-niveau (servoj / forward ctrl)
 ```
 
-La politique est déjà exportable (`play.py --export_policy [--export_onnx]` →
-`policy_deterministic.ts` / `.onnx` + `policy_metadata.json` ; sémantique
-`joint_position_target_rad = action × action_scale`). Comme le PPO utilise
-`RunningStandardScaler` pour les observations/valeurs, le noeud live doit charger l'export
-déterministe complet ou reproduire exactement le prétraitement SKRL ; alimenter directement le
-réseau brut avec une observation non normalisée serait une autre source de divergence.
+La politique est exportable (`play.py --export_policy [--export_onnx]` →
+`policy_deterministic.ts` / `.onnx` + `policy_metadata.json`). Pour les policies réentraînées
+après le 2026-06-20, la sémantique attendue est incrémentale :
+`joint_position_target_rad = q + clamp(action, -1, 1) * v_safe * dt_s`, avec limite
+d'accélération puis clamp articulaire. Comme le PPO utilise `RunningStandardScaler` pour les
+observations/valeurs, le noeud live doit charger l'export déterministe complet ou reproduire
+exactement le prétraitement SKRL ; alimenter directement le réseau brut avec une observation non
+normalisée serait une autre source de divergence.
 
 ### 5.2 Reconstruction de l'observation 33-D (champ par champ)
 Ordre exact (`_get_observations`) — **doit être reproduit à l'identique** :
@@ -322,12 +354,27 @@ Points critiques :
 
 ## 6. Vérification
 
+Baseline ancien export (`rollouts_10_episodes.json`, policy absolue incompatible) :
+
+| Mesure avant correctif | Valeur |
+|---|---:|
+| Plage globale `action_normalized` | `[-6.165, 2.871]` |
+| Vitesse max réalisée | `6.292 rad/s` |
+| Vitesse max cible brute | `168.891 rad/s` |
+| Accélération max réalisée | `753.991 rad/s²` |
+| Accélération max cible brute | `13224.679 rad/s²` |
+
+Chiffres après correctif : **à produire après réentraînement et nouvel export**. Les anciens
+rollouts ne peuvent pas servir de validation car leur policy commande des cibles absolues.
+
 1. **Sim — succès** : `play.py --eval_episodes N` avant/après contraintes (taux de succès).
    Une baisse est attendue (tâche plus dure) ; viser un compromis succès/réalisme.
 2. **Sim — bornes physiques** : ré-enregistrer des rollouts (`play.py --record_actions`) puis
-   vérifier programmatiquement que **`max vitesse réalisée ≤ v_safe`** par joint et que les
-   cibles sont bornées (réutiliser l'analyse de vitesse de §1). Critère de réussite du
-   re-cadrage sim.
+   vérifier programmatiquement que **`max vitesse réalisée ≤ v_safe`** par joint, que les
+   cibles sont bornées par `v_safe * dt_s` et `a_safe`, et qu'aucune cible ne sort des bornes
+   articulaires. Les nouveaux rollouts doivent contenir `metadata.dt_s`, `metadata.action_scale`,
+   `metadata.action_delta_scale_rad`, `metadata.action_semantics`, `joint_velocity_safe_rad_s`
+   et `joint_acceleration_safe_rad_s2`.
 3. **Robustesse latence** : balayer `L_a`/`L_o` en éval, tracer la dégradation du succès →
    confirme que la politique tolère la latence réelle.
 4. **Observation live** : enregistrer des observations construites par le noeud ROS2 en dry-run
@@ -340,17 +387,17 @@ Points critiques :
 
 ---
 
-## 7. Récapitulatif des fichiers impactés (lors de l'implémentation ultérieure)
+## 7. Récapitulatif des fichiers impactés
 
 | Fichier | Changement |
 |---|---|
-| `source/.../firsttraining/ur_gripper.py` | `velocity_limit` + `effort_limit` par joint, k/d system-id |
-| `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env.py` | action delta/rate-limit (`_pre_physics_step`), buffers de latence, reward shaping (`compute_rewards`), bruit d'obs |
-| `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env_cfg.py` | `v_safe`/`a_safe`, ranges balle, `episode_length_s`, flags DR |
-| `<ISAAC_REPO>/source/.../firsttraining/agents/skrl_ppo_cfg.yaml` | `clip_actions: True`, renommage expérience, hyperparams |
+| `source/.../firsttraining/ur_gripper.py` | appliqué : `velocity_limit_sim` + `effort_limit_sim` par joint ; reste : k/d system-id |
+| `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env.py` | appliqué : action delta/rate-limit (`_pre_physics_step`) ; reste : buffers de latence, reward shaping (`compute_rewards`), bruit d'obs |
+| `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env_cfg.py` | appliqué : `v_safe`/`a_safe`/bornes position ; reste : ranges balle, `episode_length_s`, flags DR |
+| `<ISAAC_REPO>/source/.../firsttraining/agents/skrl_ppo_cfg.yaml` | appliqué : `clip_actions: True` côté policy ; reste : renommage expérience, hyperparams |
 | **nouveau** paquet ROS2 (ex. `ur3e_live_policy`) | nœud closed-loop : perception → obs 33-D → policy → sécurité → contrôleur streaming |
 | `docs/Robot_Control/ur3e_real_robot_replay.md`, `docs/Robot_Control/ur3e_robot_control_architecture.md` | lien croisé vers ce document |
 
-> Source de vérité des limites : le `ur_description/config/ur3e/joint_limits.yaml` du driver
-> ROS réellement lancé. Les valeurs ci-dessus viennent de l'installation Humble courante
-> (`/opt/ros/humble/...`) ; toute valeur d'entraînement en dérive (×0.5 pour la vitesse sûre).
+> Source de vérité côté robot : la documentation constructeur UR3e et le
+> `ur_description/config/ur3e/joint_limits.yaml` du driver ROS réellement lancé. Toute valeur
+> d'entraînement en dérive explicitement, ici ×0.5 pour la vitesse sûre.

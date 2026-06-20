@@ -64,7 +64,12 @@ The web app launcher can be installed locally with:
 ur3e_install_web_app
 ```
 
-Replay timing can be tuned from the launcher. Defaults are conservative:
+Replay timing can be tuned from the launcher. The backend defaults remain the conservative
+safe replay values: `0.25 rad/s`, `0.5 rad/s^2`, `10.0 s` approach minimum, and `0.5 s`
+minimum segment duration.
+
+The example below is a manual "balanced" replay setting for quicker previews/execution after
+validation, not the default startup configuration:
 
 ```bash
 UR3E_MAX_JOINT_VELOCITY=0.5 \
@@ -81,7 +86,8 @@ The same replay limits can also be changed while the server is running from the 
 - Max velocity / max acceleration: retiming limits for the replay trajectory.
 - Approach min: minimum duration for the move from the robot's current pose to the first recorded replay pose.
 - Segment min: minimum duration for each recorded replay segment.
-- Safe / Balanced / Fast presets: quick starting points; each plan is still recomputed and checked before execution.
+- Safe / Balanced / Fast presets: quick starting points; Safe matches the conservative defaults,
+  Balanced is `0.5/1.0/3.0/0.1`, and each plan is still recomputed and checked before execution.
 
 The teach-pendant speed slider and UR controller limits still apply on top of these UI settings.
 

@@ -70,7 +70,7 @@ REPLAY_PRESETS = {
         max_joint_velocity=0.5,
         max_joint_acceleration=1.0,
         approach_min_duration=3.0,
-        min_segment_duration=0.15,
+        min_segment_duration=0.1,
     ),
     "fast": SafetyLimits(
         max_joint_velocity=1.0,

@@ -559,7 +559,7 @@
     <g class="arch-node arch-policy">
       <rect x="650" y="510" width="245" height="110"></rect>
       <text x="772.5" y="542" class="arch-node-title">ActionMapper</text>
-      <text x="772.5" y="567" class="arch-node-detail">action brute × 0.5</text>
+      <text x="772.5" y="567" class="arch-node-detail">action delta bornée</text>
       <text x="772.5" y="587" class="arch-node-detail">cible articulaire</text>
       <text x="772.5" y="607" class="arch-code-tag">action.py</text>
     </g>
@@ -623,7 +623,7 @@
     <text x="392" y="790" class="arch-line-label">repères base, caméra, hoop_center</text>
 
     <path class="arch-flow-soft" marker-end="url(#arch-soft-arrow)" d="M650 565 H604 V270 H650"></path>
-    <text x="560" y="426" class="arch-line-label">action brute précédente</text>
+    <text x="560" y="426" class="arch-line-label">action clippée précédente</text>
 
     <path class="arch-flow-soft" marker-end="url(#arch-soft-arrow)" d="M895 420 H1045 V331 H1200"></path>
     <text x="1082" y="356" class="arch-line-label">télémétrie debug</text>
@@ -648,12 +648,12 @@
 
 <ul>
 <li>(a) l'état articulaire via l'abonnement <code>/joint_states</code> (callback qui met à jour un cache) ;</li>
-<li>(b) l'<strong>action brute précédente</strong>, stockée comme attribut du nœud (c'est la composante 9 de l'observation, cf. §6) et réinjectée à l'itération suivante.</li>
+<li>(b) l'<strong>action policy clippée précédente</strong>, stockée comme attribut du nœud (c'est la composante 9 de l'observation, cf. §6) et réinjectée à l'itération suivante.</li>
 </ul>
 
 <h3 id="nuance-rclpy-a-connaitre">Nuance rclpy (à connaître)<a class="anchor" href="#nuance-rclpy-a-connaitre" aria-label="Lien vers cette section">#</a></h3>
 
-<p>La vraie composition <strong>intra-process zéro-copie</strong> est une fonctionnalité <strong>rclcpp</strong> (C++). Comme l'inférence est PyTorch/Python, on ne peut pas l'obtenir telle quelle. On réalise donc la « composition » par <strong>un nœud rclpy unique</strong> dont les sous-blocs sont des classes appelées directement dans le même processus (mémoire partagée, pas de <span class="term">DDS</span>). On garde le <strong>bénéfice latence</strong> et une <strong>structure modulaire</strong> (un module = un fichier = une responsabilité). Les signaux intermédiaires (obs, action brute, cible) restent <strong>inspectables</strong> via des topics de <strong>debug en best-effort, hors chemin critique</strong>. Une vraie composition rclcpp est listée comme option future en §13.</p>
+<p>La vraie composition <strong>intra-process zéro-copie</strong> est une fonctionnalité <strong>rclcpp</strong> (C++). Comme l'inférence est PyTorch/Python, on ne peut pas l'obtenir telle quelle. On réalise donc la « composition » par <strong>un nœud rclpy unique</strong> dont les sous-blocs sont des classes appelées directement dans le même processus (mémoire partagée, pas de <span class="term">DDS</span>). On garde le <strong>bénéfice latence</strong> et une <strong>structure modulaire</strong> (un module = un fichier = une responsabilité). Les signaux intermédiaires (obs, action policy, cible) restent <strong>inspectables</strong> via des topics de <strong>debug en best-effort, hors chemin critique</strong>. Une vraie composition rclcpp est listée comme option future en §13.</p>
 
 <hr>
 
@@ -750,14 +750,14 @@ Gère mm→m si nécessaire.</li>
 <ul>
 <li>Charge l'export déterministe <code>$DV_ROSWS_ROOT/data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts</code> (+ <code>policy_metadata.json</code> ; <code>.onnx</code> disponible en alternative runtime).</li>
 <li><strong>Risque de correction critique — le scaler.</strong> Le <span class="term">PPO</span> SKRL utilise un <code>RunningStandardScaler</code> sur les observations. Il faut <strong>vérifier si l'export embarque le scaler</strong> ou s'il faut appliquer <code>mean</code>/<code>var</code> sauvegardés <strong>avant</strong> le réseau. Inspecter le script d'export du dépôt Isaac (<code>&lt;ISAAC_REPO&gt;/scripts/skrl/play.py</code>) et <code>policy_metadata.json</code>. Alimenter le réseau brut avec une observation non normalisée serait une source majeure de divergence sim-to-real.</li>
-<li><strong>Sortie = action brute (6)</strong> (avant <code>action_scale</code>). C'est aussi ce qui est mémorisé pour la composante 9 de l'obs suivante.</li>
+<li><strong>Sortie = action policy (6)</strong>, clippée dans <code>[-1, 1]</code> avant mapping. C'est aussi ce qui est mémorisé pour la composante 9 de l'obs suivante.</li>
 </ul>
 
 <h4 id="4-3-4-action-py-actionmapper-cible-articulaire">4.3.4 <code>action.py</code> (ActionMapper) — cible articulaire<a class="anchor" href="#4-3-4-action-py-actionmapper-cible-articulaire" aria-label="Lien vers cette section">#</a></h4>
 
 <ul>
-<li><code>joint_target = action_brute × action_scale</code>, avec <code>action_scale = 0.5</code> (<code>_pre_physics_step</code>, env.py:182). <strong>Cible de position absolue</strong> (pas vitesse/couple).</li>
-<li>Mémorise l'action <strong>brute</strong> pour l'obs suivante.</li>
+<li><code>joint_target = q + clamp(action, -1, 1) * v_safe * dt_step</code>, puis limite d'accélération <code>a_safe</code> et clamp articulaire. <strong>Cible de position incrémentale bornée</strong> (pas vitesse/couple).</li>
+<li>Mémorise l'action policy <strong>clippée</strong> pour l'obs suivante.</li>
 </ul>
 
 <h4 id="4-3-5-safety-py-safetylimiter-watchdog-defense-en-profondeur">4.3.5 <code>safety.py</code> (SafetyLimiter + watchdog) — défense en profondeur<a class="anchor" href="#4-3-5-safety-py-safetylimiter-watchdog-defense-en-profondeur" aria-label="Lien vers cette section">#</a></h4>
@@ -886,9 +886,9 @@ geometry_msgs/Point ball_base   # balle dans le repère base</code></pre>
 </tr>
 <tr>
 <td>9</td>
-<td><code>actions</code> (action <strong>brute</strong> précédente)</td>
+<td><code>actions</code> (action policy clippée précédente)</td>
 <td class="num">6</td>
-<td>attribut mémorisé (pré-<code>action_scale</code>)</td>
+<td>attribut mémorisé avant mapping cible</td>
 <td>facile</td>
 </tr>
 <tr>
@@ -904,12 +904,12 @@ geometry_msgs/Point ball_base   # balle dans le repère base</code></pre>
 
 <ul>
 <li><strong><code>ball_vel_w</code> est une vitesse « monde ».</strong> Comme le passage en <code>base</code> n'est qu'une translation constante (origine d'environnement), la <strong>vitesse est invariante</strong> : la différence finie filtrée des positions <code>base</code> donne directement <code>ball_vel_w</code>.</li>
-<li><strong>Composante 9 = action brute</strong>, pas la cible mise à l'échelle. C'est le retour interne décrit en §2.</li>
+<li><strong>Composante 9 = action policy clippée</strong>, pas la cible articulaire après <code>v_safe</code>/<code>a_safe</code>. C'est le retour interne décrit en §2.</li>
 <li><strong>Composantes 8 et 10</strong> dépendent de la <strong>géométrie disque/balle</strong> (centre + normale du hoop). Elles doivent reproduire <code>detect_pass_through</code> et le signe de <code>(balle − disque)·normale</code>.</li>
 <li><strong>Unités strictes</strong> : rad, rad/s, m, m/s. Aucune conversion en degrés ne doit traîner.</li>
 </ul>
 
-<p>Source de vérité : <code>&lt;ISAAC_REPO&gt;/source/FirstTraining/FirstTraining/tasks/direct/firsttraining/firsttraining_env.py</code> (<code>_get_observations</code>, <code>_update_local_pose_tensors</code>, <code>_read_disk_pose_in_body_frame</code>, <code>detect_pass_through</code>) et <code>firsttraining_env_cfg.py</code> (<code>action_scale</code>, géométrie disque).</p>
+<p>Source de vérité : <code>&lt;ISAAC_REPO&gt;/source/FirstTraining/FirstTraining/tasks/direct/firsttraining/firsttraining_env.py</code> (<code>_get_observations</code>, <code>_update_local_pose_tensors</code>, <code>_read_disk_pose_in_body_frame</code>, <code>detect_pass_through</code>) et <code>firsttraining_env_cfg.py</code> (<code>action_semantics</code>, <code>v_safe</code>, <code>a_safe</code>, géométrie disque).</p>
 
 <hr>
 
@@ -977,7 +977,7 @@ geometry_msgs/Point ball_base   # balle dans le repère base</code></pre>
 <li><strong><code>test_ball_node</code></strong> (param <code>publish_frame</code> : <code>base</code> <strong>ou</strong> <code>&lt;camera_frame&gt;</code>) + <strong>adaptateur</strong> <code>Float32MultiArray → BallState</code> → chaîne testable sans caméra. Commencer en <code>publish_frame=base</code> (sans dépendre du hand-eye), puis passer en <code>&lt;camera_frame&gt;</code>.</li>
 <li><strong><code>ball_frame</code></strong> <strong>conscient du repère</strong> (transforme selon <code>header.frame_id</code>) + <span class="term">TF</span> statiques (<code>base → &lt;camera_frame&gt;</code>, <code>wrist_3_link → hoop_center</code>) → <code>ball_pos_local</code> validé (echo + visualisation), vérifié en parité base/caméra (§12).</li>
 <li><strong><code>ObservationBuilder</code></strong> 33-D + <strong>test d'équivalence</strong> : rejouer un épisode <code>rollouts_10_episodes.json</code>, reconstruire l'obs, comparer bit-à-bit à l'obs sim.</li>
-<li><strong><code>PolicyRunner</code></strong> (trancher la question du scaler) → action brute en <strong>dry-run</strong> (logs, aucune commande robot).</li>
+<li><strong><code>PolicyRunner</code></strong> (trancher la question du scaler) → action policy en <strong>dry-run</strong> (logs, aucune commande robot).</li>
 <li><strong><code>ActionMapper</code> + <code>safety</code> + <code>streaming</code></strong> vers <code>forward_position_controller</code> sur <strong>fake hardware/<span class="term">URSim</span></strong>.</li>
 <li><strong>Bascule de contrôleur</strong> + mode « live catch » dans le web UI + <strong>visualisation balle</strong>.</li>
 <li><strong>Mesure de latence</strong> bout-en-bout ; vérifier ≤ latence modélisée.</li>

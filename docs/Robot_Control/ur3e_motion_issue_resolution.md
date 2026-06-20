@@ -182,6 +182,25 @@ The UI now exposes replay timing controls in the Rollout tab:
 
 The teach-pendant speed slider and UR controller limits still apply on top of these replay settings.
 
+### Simulation/replay limits are different
+
+Do not mix the replay timing knobs with the physics used during PPO training:
+
+- **Simulation PPO** runs at 60 Hz (`sim.dt = 1/120`, `decimation = 2`) and is constrained in
+  Isaac by the action/actuator limits documented in
+  `docs/Robot_Control/ur3e_ball_catch_sim_to_real.md`.
+- **Real-robot replay** is open-loop playback of a recorded joint sequence through
+  `/scaled_joint_trajectory_controller/follow_joint_trajectory`. Its conservative defaults are
+  `0.25 rad/s`, `0.5 rad/s^2`, `10.0 s` approach minimum, and `0.5 s` minimum segment duration.
+  These are safety retiming values for the physical robot, not the simulated actuator dynamics.
+- **Future live catching** is a separate closed-loop controller. It must rebuild the policy
+  observation at runtime and apply the same action clipping/rate limits as the simulation; it
+  should not use the replay retiming defaults as a substitute for a live safety layer.
+
+The original motion issue was a ROS/driver/External-Control gate. The later sim-to-real issue is
+physical transferability: the old simulation let the PPO command and realize motions that were too
+aggressive for direct UR3e deployment.
+
 ## TCP Target Issue: Robot Moves Away From The Goal Frame (2026-06-12)
 
 ### Symptom
