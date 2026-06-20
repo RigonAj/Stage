@@ -1,0 +1,49 @@
+# Parameters for the live-catch dry-run (archi §4.3, roadmap steps 1–5).
+# ROS 2 parameter-file format: <node_name>: { ros__parameters: { ... } }
+
+live_catch_node:
+  ros__parameters:
+    loop_hz: 60.0                 # control rate, aligned on the sim dt = 1/60 (archi §1.2)
+    base_frame: "base"            # NOT base_link (π-about-Z trap, archi §7)
+    hoop_frame: "hoop_center"     # TF wrist_3_link -> hoop_center (static, mount geometry)
+    ball_topic: "ball_state"
+    joint_states_topic: "/joint_states"
+    telemetry_topic: "catch_telemetry"
+    units: "m"
+    model_path: ""                # "" => data/models/ then dated export fallback
+    stale_after_s: 0.1
+
+    # Disk geometry fallback used only when TF base->hoop is missing. PLACEHOLDER:
+    # to be replaced by the Isaac-sourced / measured mount geometry (archi §6 comp 3/8/10).
+    disk_pos_fallback: [0.0, 0.0, 0.5]
+    disk_normal_fallback: [0.0, 0.0, 1.0]
+
+    # --- reserved for step 6 (ActionMapper / safety / streaming), unused in dry-run ---
+    action_mode: "faithful"       # faithful | safe (user decision; default faithful)
+    # v_safe = URDF joint limit × 0.5 (sim-to-real §2.1); loaded from
+    # ur_description/config/ur3e/joint_limits.yaml when safety is wired.
+
+test_ball_node:
+  ros__parameters:
+    output_topic: "ball_state"
+    publish_frame: "base"         # base | <camera_frame> (parity test, archi §12)
+    base_frame: "base"
+    rate_hz: 30.0                 # perception cadence
+    source: "parabola"            # parabola | csv
+    noise_std: 0.0                # inject Gaussian position noise (m) to stress filtering
+    dropout_prob: 0.0             # simulate detection gaps
+    p0: [-1.0, 1.5, 0.4]
+    v0: [1.5, -1.0, 2.5]
+    gravity: [0.0, 0.0, -9.81]
+    restart_after_s: 2.0
+    # camera pose in base (base<-camera), only used when publish_frame != base:
+    camera_translation: [0.0, 0.0, 0.0]
+    camera_quaternion: [0.0, 0.0, 0.0, 1.0]
+    csv_path: ""
+
+ball_float32_adapter:
+  ros__parameters:
+    input_topic: "ball_position_3d_mm"
+    output_topic: "ball_state"
+    camera_frame: "camera_optical"
+    units: "mm"

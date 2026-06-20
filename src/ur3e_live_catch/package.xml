@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ur3e_live_catch</name>
+  <version>0.1.0</version>
+  <description>
+    Single-process live closed-loop ball-catch node for the UR3e: ball-frame
+    transform, 33-D observation reconstruction, PPO policy runtime, plus an
+    artificial test-ball source and a Float32MultiArray-&gt;BallState adapter.
+    See docs/Robot_Control/ur3e_live_catch_architecture.md §4.3.
+  </description>
+  <maintainer email="rigon@example.com">rigon</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>ur3e_catch_msgs</exec_depend>
+
+  <test_depend>ament_pytest</test_depend>
+  <test_depend>pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

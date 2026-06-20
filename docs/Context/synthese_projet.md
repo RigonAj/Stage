@@ -383,6 +383,7 @@ Les points qui restent critiques ou a finaliser sont :
 - Probleme de mouvement UR3e : `docs/Robot_Control/ur3e_motion_issue_resolution.md`
 - Sim-to-real PPO : `docs/Robot_Control/ur3e_ball_catch_sim_to_real.md`
 - Boucle live future : `docs/Robot_Control/ur3e_live_catch_architecture.md`
+- État d'implémentation boucle live : `docs/Robot_Control/ur3e_live_catch_implementation_status.md`
 - Compilation du rapport : `docs/latex_compilation.md`
 - Contexte historique : `docs/Antonio_Stage.pdf`
 - Consignes de rapport : `docs/Consignes pour le rapport M1_M2MTN-1.pdf`
