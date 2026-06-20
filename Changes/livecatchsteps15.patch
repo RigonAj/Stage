@@ -1,0 +1,2292 @@
+From 23d78e560de6209c0fad73020993171dfa67e76c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 20 Jun 2026 13:50:33 +0000
+Subject: [PATCH] Add live-catch loop steps 1-5: messages + perception->policy
+ dry-run
+
+New ROS 2 packages for the UR3e live closed-loop ball catch:
+
+- ur3e_catch_msgs (rosidl/ament_cmake): BallState, CatchTelemetry.
+- ur3e_live_catch (ament_python):
+  - pure-logic modules (no rclpy/numpy): joint_order, ball_frame
+    (frame-aware transform + velocity filter), observation (33-D builder),
+    policy_runtime (torch/onnx lazy backends + obs scaler), action and
+    safety (designed, not yet wired -> step 6);
+  - rclpy nodes: float32_adapter, test_ball_node (publish_frame base|camera),
+    live_catch_node (60 Hz DRY-RUN, no robot command);
+  - config/live_catch.yaml, launch/test_dry_run.launch.py;
+  - stdlib unit tests (19 passing): observation equivalence against recorded
+    rollouts, ball_frame, action mapper, safety; torch-gated policy
+    equivalence test (decides the SKRL scaler question on the ROS machine).
+
+Docs: add ur3e_live_catch_implementation_status.md and link it from
+docs/Context/synthese_projet.md.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NYM9VgerqXFJ8o5Zdi9fX9
+---
+ docs/Context/synthese_projet.md               |   1 +
+ .../ur3e_live_catch_implementation_status.md  | 318 ++++++++++++++++++
+ src/ur3e_catch_msgs/CMakeLists.txt            |  19 ++
+ src/ur3e_catch_msgs/msg/BallState.msg         |  12 +
+ src/ur3e_catch_msgs/msg/CatchTelemetry.msg    |   5 +
+ src/ur3e_catch_msgs/package.xml               |  27 ++
+ src/ur3e_live_catch/config/live_catch.yaml    |  49 +++
+ src/ur3e_live_catch/launch/.gitkeep           |   0
+ .../launch/test_dry_run.launch.py             |  43 +++
+ src/ur3e_live_catch/package.xml               |  30 ++
+ src/ur3e_live_catch/pytest.ini                |   2 +
+ src/ur3e_live_catch/resource/.gitkeep         |   0
+ .../resource/ur3e_live_catch}                 |   0
+ src/ur3e_live_catch/setup.cfg                 |   4 +
+ src/ur3e_live_catch/setup.py                  |  29 ++
+ src/ur3e_live_catch/test/.gitkeep             |   0
+ src/ur3e_live_catch/test/conftest.py          |  22 ++
+ .../test/test_action_mapper.py                |  50 +++
+ src/ur3e_live_catch/test/test_ball_frame.py   |  62 ++++
+ .../test/test_observation_equivalence.py      |  91 +++++
+ .../test/test_policy_equivalence.py           |  61 ++++
+ src/ur3e_live_catch/test/test_safety.py       |  60 ++++
+ src/ur3e_live_catch/ur3e_live_catch/.gitkeep  |   0
+ .../.gitkeep => ur3e_live_catch/__init__.py}  |   0
+ src/ur3e_live_catch/ur3e_live_catch/action.py |  67 ++++
+ .../ur3e_live_catch/ball_frame.py             | 162 +++++++++
+ .../ur3e_live_catch/float32_adapter.py        |  65 ++++
+ .../ur3e_live_catch/joint_order.py            |  49 +++
+ .../ur3e_live_catch/live_catch_node.py        | 221 ++++++++++++
+ .../ur3e_live_catch/observation.py            | 158 +++++++++
+ .../ur3e_live_catch/policy_runtime.py         | 110 ++++++
+ src/ur3e_live_catch/ur3e_live_catch/safety.py | 117 +++++++
+ .../ur3e_live_catch/test_ball_node.py         | 174 ++++++++++
+ 33 files changed, 2008 insertions(+)
+ create mode 100644 docs/Robot_Control/ur3e_live_catch_implementation_status.md
+ create mode 100644 src/ur3e_catch_msgs/CMakeLists.txt
+ create mode 100644 src/ur3e_catch_msgs/msg/BallState.msg
+ create mode 100644 src/ur3e_catch_msgs/msg/CatchTelemetry.msg
+ create mode 100644 src/ur3e_catch_msgs/package.xml
+ create mode 100644 src/ur3e_live_catch/config/live_catch.yaml
+ delete mode 100644 src/ur3e_live_catch/launch/.gitkeep
+ create mode 100644 src/ur3e_live_catch/launch/test_dry_run.launch.py
+ create mode 100644 src/ur3e_live_catch/package.xml
+ create mode 100644 src/ur3e_live_catch/pytest.ini
+ delete mode 100644 src/ur3e_live_catch/resource/.gitkeep
+ rename src/{ur3e_catch_msgs/msg/.gitkeep => ur3e_live_catch/resource/ur3e_live_catch} (100%)
+ create mode 100644 src/ur3e_live_catch/setup.cfg
+ create mode 100644 src/ur3e_live_catch/setup.py
+ delete mode 100644 src/ur3e_live_catch/test/.gitkeep
+ create mode 100644 src/ur3e_live_catch/test/conftest.py
+ create mode 100644 src/ur3e_live_catch/test/test_action_mapper.py
+ create mode 100644 src/ur3e_live_catch/test/test_ball_frame.py
+ create mode 100644 src/ur3e_live_catch/test/test_observation_equivalence.py
+ create mode 100644 src/ur3e_live_catch/test/test_policy_equivalence.py
+ create mode 100644 src/ur3e_live_catch/test/test_safety.py
+ delete mode 100644 src/ur3e_live_catch/ur3e_live_catch/.gitkeep
+ rename src/ur3e_live_catch/{config/.gitkeep => ur3e_live_catch/__init__.py} (100%)
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/action.py
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/ball_frame.py
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/float32_adapter.py
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/joint_order.py
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/observation.py
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/policy_runtime.py
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/safety.py
+ create mode 100644 src/ur3e_live_catch/ur3e_live_catch/test_ball_node.py
+
+diff --git a/docs/Context/synthese_projet.md b/docs/Context/synthese_projet.md
+index cffe318..90b7f9a 100644
+--- a/docs/Context/synthese_projet.md
++++ b/docs/Context/synthese_projet.md
+@@ -383,6 +383,7 @@ Les points qui restent critiques ou a finaliser sont :
+ - Probleme de mouvement UR3e : `docs/Robot_Control/ur3e_motion_issue_resolution.md`
+ - Sim-to-real PPO : `docs/Robot_Control/ur3e_ball_catch_sim_to_real.md`
+ - Boucle live future : `docs/Robot_Control/ur3e_live_catch_architecture.md`
++- État d'implémentation boucle live : `docs/Robot_Control/ur3e_live_catch_implementation_status.md`
+ - Compilation du rapport : `docs/latex_compilation.md`
+ - Contexte historique : `docs/Antonio_Stage.pdf`
+ - Consignes de rapport : `docs/Consignes pour le rapport M1_M2MTN-1.pdf`
+diff --git a/docs/Robot_Control/ur3e_live_catch_implementation_status.md b/docs/Robot_Control/ur3e_live_catch_implementation_status.md
+new file mode 100644
+index 0000000..80fdf27
+--- /dev/null
++++ b/docs/Robot_Control/ur3e_live_catch_implementation_status.md
+@@ -0,0 +1,318 @@
++# UR3e Ball-Catch — État d'implémentation de la boucle live (passage 1)
++
++> Statut (2026-06-20) : **étapes 1–5 de la feuille de route §11 implémentées**
++> (contrat de messages, source de balle de test, transform de repère,
++> observation 33-D, runtime policy en **dry-run**). Aucune commande robot n'est
++> émise. ActionMapper / safety / streaming (étape 6+) sont **conçus mais non
++> câblés**.
++
++Ce document décrit **précisément ce qui existe dans le code à ce jour**, ce qui a
++été **vérifié**, ce qui reste **ouvert**, et comment construire/exécuter. Il
++complète (et n'remplace pas) le plan d'architecture
++`ur3e_live_catch_architecture.md`, qui reste la référence de conception.
++
++Documents liés :
++- `ur3e_live_catch_architecture.md` — plan d'architecture (référence de conception).
++- `../Context/synthese_projet.md` — synthèse générale du projet.
++- `ur3e_ball_catch_sim_to_real.md` — contraintes sim/inférence.
++
++---
++
++## 1. Résumé exécutif
++
++La boucle live (perception → policy → robot) est désormais **amorcée** dans le
++workspace ROS (`Dv-Rosws`, c'est-à-dire ce dépôt). Deux paquets, jusqu'ici de
++simples squelettes (READMEs), contiennent maintenant du code :
++
++- **`src/ur3e_catch_msgs`** — contrat de messages typés/horodatés (`BallState`,
++  `CatchTelemetry`). **Complet.**
++- **`src/ur3e_live_catch`** — paquet Python : modules de logique pure
++  (repère/observation/policy/action/safety), trois nœuds rclpy (adaptateur,
++  source de test, boucle live dry-run), config et launch, plus une batterie de
++  tests. **Chemin perception→policy complet, en dry-run.**
++
++Le **chemin chaud** `observation → inférence` tourne par **appels directs** dans
++un seul processus (pas de topic ROS interne), conformément à l'architecture
++mono-processus retenue (§2 du plan).
++
++État global de la feuille de route (§11 du plan) :
++
++| Étape | Sujet | État |
++|---|---|---|
++| 1 | `ur3e_catch_msgs` (`BallState`, `CatchTelemetry`) | ✅ implémenté |
++| 2 | `test_ball_node` + adaptateur `Float32 → BallState` | ✅ implémenté |
++| 3 | `ball_frame` conscient du repère + filtre vitesse | ✅ implémenté (TF statiques à fournir au lancement) |
++| 4 | `ObservationBuilder` 33-D + test d'équivalence | ✅ implémenté ; comps 3/8/10 paramétrées, à figer (source Isaac) |
++| 5 | `PolicyRunner` (question scaler) → action en dry-run | ✅ implémenté ; scaler à trancher (test torch) |
++| 6 | `ActionMapper` + safety + streaming | 🟡 conçu (modules+tests), **non câblé** |
++| 7 | Bascule contrôleur + viz web UI | ⬜ à faire |
++| 8 | Mesure de latence bout-en-bout | ⬜ à faire |
++| 9 | Bring-up robot par étapes | ⬜ à faire |
++
++---
++
++## 2. Décisions verrouillées (Q&A du 2026-06-20)
++
++1. **Périmètre de ce passage = étapes 1–5** (pas de mouvement robot).
++2. **Mapping action / observation = fidélité sim + safety indépendante, via un
++   flag `action_mode = faithful | safe` (défaut `faithful`)**.
++   - Conséquence *en vigueur dès maintenant* : **l'observation composante 9 = action
++     policy BRUTE précédente** (non clippée), comme à l'entraînement.
++   - Le mapping commande lui-même (faithful = cible absolue `action×0.5` ;
++     safe = incrémental `q + clamp(action,-1,1)·v_safe·dt`) appartient à
++     l'**ActionMapper (étape 6)**.
++3. **Source Isaac fournie par l'utilisateur** (`firsttraining_env.py`,
++   `firsttraining_env_cfg.py`) → composantes obs **3 / 8 / 10** finalisées exactement
++   d'après ces fichiers. En attendant, elles sont **isolées et paramétrées**.
++
++### Découverte clé (confirmée sur les rollouts enregistrés)
++Les données `rollouts_10_episodes.json` ont permis de **vérifier la sémantique
++réelle** de la policy, ce qui a tranché deux ambiguïtés du plan :
++- `joint_position_target_rad == action_normalized × 0.5` → la cible sim est
++  **absolue et non clippée** (le plan §4.3.4 décrivait une variante incrémentale
++  *de sécurité*, différente — d'où le flag).
++- `observation[26:32]` (composante 9) = action **brute** précédente (valeurs hors
++  `[-1,1]`, p.ex. −4.2) → comp 9 n'est **pas** clippée (le plan §6 disait
++  « clippée »). Le code suit la donnée : **brute**.
++
++---
++
++## 3. Paquet `ur3e_catch_msgs` (rosidl / `ament_cmake`)
++
++Fichiers : `package.xml`, `CMakeLists.txt`, `msg/BallState.msg`,
++`msg/CatchTelemetry.msg`.
++
++**`BallState.msg`** — pose balle horodatée, partagée perception ↔ commande :
++```
++std_msgs/Header        header       # stamp = temps d'événement ; frame_id = repère DÉCLARÉ
++geometry_msgs/Point    position     # mètres
++geometry_msgs/Vector3  velocity     # m/s (optionnel ; sinon recalculée côté ball_frame)
++bool                   valid
++float32                confidence
++```
++
++**`CatchTelemetry.msg`** — debug/visualisation, hors chemin critique :
++```
++float32[]            observation    # 33
++float32[]            raw_action     # 6 (sortie policy, avant mapping/clip)
++float32[]            joint_target   # 6 (après clip+rate-limit ; VIDE en dry-run)
++geometry_msgs/Point  ball_base      # balle dans le repère base
++```
++
++Le paquet est buildable et visible par le producteur C++ (`Ball_Tracking_Cpp`,
++futur) et le consommateur Python (`ur3e_live_catch`) — workspace unique (§3 du plan).
++
++---
++
++## 4. Paquet `ur3e_live_catch` (`ament_python`)
++
++Arborescence effective :
++```
++ur3e_live_catch/
++  package.xml, setup.py, setup.cfg, pytest.ini, resource/ur3e_live_catch
++  config/live_catch.yaml
++  launch/test_dry_run.launch.py
++  ur3e_live_catch/
++    joint_order.py       ball_frame.py     observation.py
++    policy_runtime.py    action.py         safety.py
++    float32_adapter.py   test_ball_node.py live_catch_node.py
++  test/
++    conftest.py
++    test_observation_equivalence.py  test_ball_frame.py
++    test_action_mapper.py            test_safety.py
++    test_policy_equivalence.py
++```
++
++Entry points (`setup.py`) : `test_ball_node`, `float32_adapter`, `live_catch_node`.
++
++### 4.1 Modules de logique pure (sans rclpy / sans numpy → testables hors ROS)
++
++**`joint_order.py`** — constante canonique `JOINT_ORDER`
++(`shoulder_pan_joint … wrist_3_joint`, identique à `policy_metadata.json` et
++`replay_core.py:14`) + `reorder_by_name(names, values)` qui réordonne
++`/joint_states` (ordre non garanti) vers l'ordre canonique. Lève
++`JointOrderError` si un joint manque — **jamais** de zéro silencieux.
++
++**`ball_frame.py`** (§4.3.1) — conscience du repère + vitesse :
++- `RigidTransform(translation, quaternion)` : `P^target = R·P^source + t`
++  (exactement ce que retourne un lookup tf2). Rotation par quaternion en pur Python.
++- `BallVelocityFilter(ema_alpha, max_dt=0.5)` : vitesse par **différence finie**
++  des positions `base` + lissage EMA ; garde `max_dt` (gap trop grand → ré-ancre,
++  ne calcule pas). La vitesse `base` **est** la vitesse monde (translation
++  d'origine constante, §6 du plan).
++- `BallFrameTransformer(base_frame, units, stale_after_s)` :
++  - `to_base(position, frame_id, transform)` → **identité si `frame_id == base`**,
++    sinon applique la transformée fournie ; convertit mm→m ; **rejette** un
++    `frame_id` vide (`FrameError`) ou un repère non-`base` sans transformée.
++  - `process(...)` renvoie `(pos_base, vel_base)` et met à jour le filtre.
++  - `is_stale(now_s)` → drapeau watchdog (péremption).
++
++**`observation.py`** (§4.3.2, §6) — `ObservationBuilder`, vecteur **33-D** dans
++l'ordre exact, avec les indices de tranche exposés en constantes (`IDX_*`) :
++
++| Tranche | # | Composante | Source |
++|---|---|---|---|
++| `[0:6]` | 1 | `joint_pos` | `/joint_states` réordonné |
++| `[6:12]` | 2 | `joint_vel` | `/joint_states` |
++| `[12:15]` | 3 | `disk_pos_local` | pose disque (TF) — *à figer Isaac* |
++| `[15:18]` | 4 | `ball_pos_local` | `ball_frame` |
++| `[18:21]` | 5 | `direction` = ball−disk | dérivé |
++| `[21]` | 6 | `distance` = ‖direction‖ | dérivé |
++| `[22:25]` | 7 | `ball_vel_w` | vitesse filtrée |
++| `[25]` | 8 | `prev_signed_dist > 0` | signe — *à figer Isaac* |
++| `[26:32]` | 9 | `actions` (brute précédente) | mémorisé |
++| `[32]` | 10 | `pass_through_count` | recompté — *à figer Isaac* |
++
++- Méthodes **isolées** : `disk_pos_local`, `signed_distance`, `_update_pass_through`
++  (marquées `TODO(isaac)`). État interne : `_prev_signed_dist`, `_pass_through_count`.
++- Composante 8 lit le signe **du tick précédent** ; l'état avance **après** émission.
++- Unités strictes (rad, rad/s, m, m/s). Lève si longueur ≠ 33.
++
++**`policy_runtime.py`** (§4.3.3) — `PolicyRunner` :
++- Charge `policy_deterministic.ts` (torch) **ou** `.onnx` (onnxruntime), **imports
++  backend paresseux** (le module s'importe sans torch ni onnx).
++- `ObsScaler(mean, var)` : `(obs − mean)/√(var+eps)`, chargeable depuis
++  `policy_scaler.json` ; appliqué **avant** le réseau **si fourni**.
++- `infer(obs33) -> action6`. `load_metadata()` lit `policy_metadata.json`.
++- ⚠️ **Question scaler ouverte** : `policy_metadata.json` ne porte pas mean/var →
++  soit le `.ts` embarque le scaler, soit il faut un sidecar. **Tranché par le test
++  d'équivalence policy** (§6 ci-dessous) sur la machine ROS.
++
++**`action.py`** (§4.3.4, **conçu, non câblé**) — `ActionMapper(mode)` :
++- `faithful` : `target = action × 0.5` (absolu, non clippé) ; mémorise l'action
++  **brute** pour comp 9.
++- `safe` : `target = q + clamp(action,−1,1)·v_safe·dt` ; mémorise l'action
++  **clippée**. Nécessite `v_safe`.
++- Ne **fait pas** respecter les bornes — c'est le rôle de `safety.py`.
++
++**`safety.py`** (§4.3.5, §9, **conçu, non câblé**) :
++- `SafetyLimiter(bounds, dt)` : **clip** position (URDF) → **rate-limit**
++  `|Δ| ≤ v_safe·dt` → **accel-limit** `|Δv| ≤ a_safe·dt` ; renvoie un `SafetyReport`
++  (quelles contraintes ont mordu).
++- `Watchdog(stale_after_s, loop_budget_s, max_tracking_error)` : `check(...)`
++  renvoie `(ok, reasons)` ; `ok=False` ⇒ arrêt contrôlé. `v_safe = limite URDF × 0.5`.
++
++### 4.2 Nœuds rclpy (exécutables sur la machine ROS)
++
++**`float32_adapter.py`** (§4.1, intérim) — abonne `ball_position_3d_mm`
++(`Float32MultiArray`, caméra, mm) → republie `BallState` (stamp = réception,
++`frame_id` = caméra constante, mm→m). Permet de brancher le tracker C++ existant
++**sans toucher à son build**.
++
++**`test_ball_node.py`** (§4.2) — source de balle artificielle :
++- param **`publish_frame`** = `base` **ou** `<camera_frame>` (`header.frame_id`
++  toujours renseigné) ;
++- sources `parabola` (analytique, repère `base` z-up) ou `csv`
++  (`ground_truth.csv`, colonnes monde/caméra sélectionnées selon `publish_frame`) ;
++- en mode caméra, la parabole passe par l'**inverse** de la pose caméra
++  (`camera_translation`/`camera_quaternion`) → permet le **test de parité** §12 ;
++- `noise_std` (bruit gaussien) et `dropout_prob` (trous) injectables.
++
++**`live_catch_node.py`** (§2, §4.3) — **boucle live DRY-RUN, 60 Hz** :
++- abonne `/joint_states` (cache réordonné) et `ball_state` ; tf2 `Buffer`+`Listener` ;
++- par tick : `ball_frame.process` (TF `frame_id→base`) → pose disque (TF
++  `base→hoop_center`, sinon **fallback config**) → `ObservationBuilder.build` →
++  `PolicyRunner.infer` → **log de l'action brute** + publication `CatchTelemetry` ;
++- **aucune commande robot** ; l'action brute est réinjectée comme **composante 9**
++  au tick suivant ;
++- modèle chargé depuis `data/models/` puis **fallback** sur l'export daté ; si
++  aucun modèle, tourne en observation-seule (action = zéros) avec un warning.
++
++### 4.3 Config & launch
++- `config/live_catch.yaml` : sections `live_catch_node`, `test_ball_node`,
++  `ball_float32_adapter`. Contient `loop_hz: 60`, repères, géométrie disque
++  **placeholder**, `model_path`, et les clés safety/`action_mode` **réservées**
++  (étape 6).
++- `launch/test_dry_run.launch.py` : `test_ball_node` (`publish_frame=base`) +
++  `live_catch_node` ; argument CLI `publish_frame:=camera_optical` pour la parité.
++
++---
++
++## 5. Cohérence des repères (rappel des pièges, §7 du plan)
++- **Un seul `<camera_frame>`** : le tracker publie dedans, le hand-eye `{}^B T_C`
++  est résolu dedans, publié en **TF statique**. À fournir au lancement.
++- **`base` vs `base_link`** : rotation π autour de Z. Le « local » de la sim =
++  `base`. Le code construit l'obs dans **`base`** (param `base_frame`).
++- **`hoop_center`** : TF statique `wrist_3_link → hoop_center` (offset+normale du
++  montage). Tant qu'elle n'est pas publiée, `live_catch_node` utilise le **fallback**
++  config (placeholder) — à remplacer par la vraie géométrie.
++
++---
++
++## 6. Vérification
++
++### Exécuté **ici** (Python stdlib, sans ROS/torch/numpy) — **19 tests OK**
++- `test_observation_equivalence.py` — rejoue les rollouts ; vérifie longueur 33,
++  ordre, et **bit-proximité** sur comp 1/2 (vs `joint_position_before_rad` /
++  `velocity`), comp 5/6 (dérivations), **comp 9 (action brute précédente)**.
++  → **Confirme** que la donnée enregistrée correspond à notre reconstruction.
++- `test_ball_frame.py` — identité si `base`, mm→m, rotation+translation, rejet
++  frame vide/inconnu, vitesse par différence finie + invariance par translation,
++  staleness.
++- `test_action_mapper.py` — faithful (`target=action×0.5`, comp 9 brute) ; safe
++  (incrémental + clip, comp 9 clippée) ; **faithful reproduit
++  `joint_position_target_rad`** des rollouts.
++- `test_safety.py` — clip position, rate-limit, accel-limit, watchdog (stale /
++  overrun / tracking error).
++- `py_compile` **OK** sur **tous** les fichiers, y compris les nœuds rclpy
++  (validation de syntaxe ; les imports ROS se résolvent sur la machine ROS).
++
++### À exécuter **sur la machine ROS Humble** (différé ici)
++- `test_policy_equivalence.py` (**`skip` si torch absent**) — charge le `.ts`,
++  alimente l'`observation` enregistrée, compare à `action_normalized`. Un écart
++  serré ⇒ scaler OK ; un écart large ⇒ **scaler manquant** → fournir
++  `policy_scaler.json` et passer un `ObsScaler` au `PolicyRunner`.
++- `colcon build` des deux paquets ; lancement du dry-run ; `ros2 topic echo` ;
++  **parité de repère** (base vs caméra, §12).
++
++---
++
++## 7. Points ouverts / à finaliser
++
++1. **Scaler SKRL** (§4.3.3) — trancher via `test_policy_equivalence.py` (torch).
++   *Risque de divergence sim-to-real majeur si non résolu.*
++2. **Composantes obs 3 / 8 / 10** — figer d'après la **source Isaac**
++   (`_read_disk_pose_in_body_frame`, signe `(ball−disk)·normale`,
++   `detect_pass_through`) ; renseigner la géométrie disque réelle (montage). Voir
++   les `TODO(isaac)` dans `observation.py`.
++3. **TF statiques** — publier `base → <camera_frame>` (hand-eye) et
++   `wrist_3_link → hoop_center` (montage) avant tout test réaliste.
++4. **Étape 6** — câbler `ActionMapper` (flag `action_mode`) + `SafetyLimiter` +
++   streaming vers `forward_position_controller` (bascule de contrôleur via la
++   plomberie existante de `ros_interface.py`).
++5. **Horodatage événement** — `BallState.header.stamp` est pour l'instant le temps
++   de réception (adaptateur/test node) ; migrer vers le temps d'événement pour le
++   budget de latence (étape 8).
++
++---
++
++## 8. Construire & exécuter
++
++```bash
++# Sur la machine ROS Humble, à la racine du workspace (Dv-Rosws) :
++colcon build --packages-select ur3e_catch_msgs ur3e_live_catch
++source install/setup.bash
++
++# (optionnel) lier le modèle canonique :
++ln -s ../ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts \
++      data/models/policy_deterministic.ts
++
++# Dry-run (fournir /joint_states via use_fake_hardware/URSim séparément) :
++ros2 launch ur3e_live_catch test_dry_run.launch.py
++ros2 topic echo /catch_telemetry
++ros2 topic echo /ball_state
++
++# Tests de logique pure (stdlib) :
++cd src/ur3e_live_catch && python3 -m pytest test/ -q
++```
++
++---
++
++## 9. Récapitulatif réutilisation
++- Pattern paquet `ament_python`, joint order : `src/ur3e_rollout_replay/`.
++- Bridge rclpy, `switch_controller`, gates sécurité (étapes 6+) :
++  `src/ur3e_web_ui/ur3e_web_ui/ros_interface.py`, `app.py`, `joint_limits.py`.
++- Vérité terrain (équivalence obs/policy) :
++  `data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/rollouts_10_episodes.json`.
++- Modèle + métadonnées : `data/models/` → export
++  `.../exports/policy_deterministic.{ts,onnx}`, `policy_metadata.json`.
+diff --git a/src/ur3e_catch_msgs/CMakeLists.txt b/src/ur3e_catch_msgs/CMakeLists.txt
+new file mode 100644
+index 0000000..b2d962c
+--- /dev/null
++++ b/src/ur3e_catch_msgs/CMakeLists.txt
+@@ -0,0 +1,19 @@
++cmake_minimum_required(VERSION 3.8)
++project(ur3e_catch_msgs)
++
++if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++  add_compile_options(-Wall -Wextra -Wpedantic)
++endif()
++
++find_package(ament_cmake REQUIRED)
++find_package(rosidl_default_generators REQUIRED)
++find_package(std_msgs REQUIRED)
++find_package(geometry_msgs REQUIRED)
++
++rosidl_generate_interfaces(${PROJECT_NAME}
++  "msg/BallState.msg"
++  "msg/CatchTelemetry.msg"
++  DEPENDENCIES std_msgs geometry_msgs
++)
++
++ament_package()
+diff --git a/src/ur3e_catch_msgs/msg/BallState.msg b/src/ur3e_catch_msgs/msg/BallState.msg
+new file mode 100644
+index 0000000..d24b8e4
+--- /dev/null
++++ b/src/ur3e_catch_msgs/msg/BallState.msg
+@@ -0,0 +1,12 @@
++# BallState.msg — pose balle horodatée, partagée perception ↔ commande.
++#
++# stamp    : temps d'ÉVÉNEMENT (pas le temps de réception) — crucial pour la
++#            synchronisation et le budget de latence (archi §5, §10).
++# frame_id : repère DÉCLARÉ de la position. <camera_frame> pour le tracker ;
++#            <camera_frame> OU base pour test_ball_node. Le consommateur
++#            (ball_frame) transforme vers base selon ce seul champ (archi §4.3.1).
++std_msgs/Header        header
++geometry_msgs/Point    position      # mètres
++geometry_msgs/Vector3  velocity      # m/s (optionnel ; sinon recalculée côté ball_frame)
++bool                   valid         # estimation exploitable ?
++float32                confidence    # qualité (résidu/visibilité)
+diff --git a/src/ur3e_catch_msgs/msg/CatchTelemetry.msg b/src/ur3e_catch_msgs/msg/CatchTelemetry.msg
+new file mode 100644
+index 0000000..cc3fd43
+--- /dev/null
++++ b/src/ur3e_catch_msgs/msg/CatchTelemetry.msg
+@@ -0,0 +1,5 @@
++# CatchTelemetry.msg — debug / visualisation, HORS chemin critique 60 Hz (archi §5).
++float32[]            observation   # 33 (ordre de firsttraining_env, archi §6)
++float32[]            raw_action    # 6  (sortie policy, avant mapping/clip)
++float32[]            joint_target  # 6  (après clip + rate-limit ; VIDE en dry-run)
++geometry_msgs/Point  ball_base     # balle dans le repère base
+diff --git a/src/ur3e_catch_msgs/package.xml b/src/ur3e_catch_msgs/package.xml
+new file mode 100644
+index 0000000..c8f7275
+--- /dev/null
++++ b/src/ur3e_catch_msgs/package.xml
+@@ -0,0 +1,27 @@
++<?xml version="1.0"?>
++<package format="3">
++  <name>ur3e_catch_msgs</name>
++  <version>0.1.0</version>
++  <description>
++    Typed, timestamped message contract shared between the event-camera
++    perception and the UR3e live-catch loop (BallState, CatchTelemetry).
++    See docs/Robot_Control/ur3e_live_catch_architecture.md §5.
++  </description>
++  <maintainer email="rigon@example.com">rigon</maintainer>
++  <license>BSD-3-Clause</license>
++
++  <buildtool_depend>ament_cmake</buildtool_depend>
++  <buildtool_depend>rosidl_default_generators</buildtool_depend>
++
++  <depend>std_msgs</depend>
++  <depend>geometry_msgs</depend>
++  <depend>builtin_interfaces</depend>
++
++  <exec_depend>rosidl_default_runtime</exec_depend>
++
++  <member_of_group>rosidl_interface_packages</member_of_group>
++
++  <export>
++    <build_type>ament_cmake</build_type>
++  </export>
++</package>
+diff --git a/src/ur3e_live_catch/config/live_catch.yaml b/src/ur3e_live_catch/config/live_catch.yaml
+new file mode 100644
+index 0000000..4b87808
+--- /dev/null
++++ b/src/ur3e_live_catch/config/live_catch.yaml
+@@ -0,0 +1,49 @@
++# Parameters for the live-catch dry-run (archi §4.3, roadmap steps 1–5).
++# ROS 2 parameter-file format: <node_name>: { ros__parameters: { ... } }
++
++live_catch_node:
++  ros__parameters:
++    loop_hz: 60.0                 # control rate, aligned on the sim dt = 1/60 (archi §1.2)
++    base_frame: "base"            # NOT base_link (π-about-Z trap, archi §7)
++    hoop_frame: "hoop_center"     # TF wrist_3_link -> hoop_center (static, mount geometry)
++    ball_topic: "ball_state"
++    joint_states_topic: "/joint_states"
++    telemetry_topic: "catch_telemetry"
++    units: "m"
++    model_path: ""                # "" => data/models/ then dated export fallback
++    stale_after_s: 0.1
++
++    # Disk geometry fallback used only when TF base->hoop is missing. PLACEHOLDER:
++    # to be replaced by the Isaac-sourced / measured mount geometry (archi §6 comp 3/8/10).
++    disk_pos_fallback: [0.0, 0.0, 0.5]
++    disk_normal_fallback: [0.0, 0.0, 1.0]
++
++    # --- reserved for step 6 (ActionMapper / safety / streaming), unused in dry-run ---
++    action_mode: "faithful"       # faithful | safe (user decision; default faithful)
++    # v_safe = URDF joint limit × 0.5 (sim-to-real §2.1); loaded from
++    # ur_description/config/ur3e/joint_limits.yaml when safety is wired.
++
++test_ball_node:
++  ros__parameters:
++    output_topic: "ball_state"
++    publish_frame: "base"         # base | <camera_frame> (parity test, archi §12)
++    base_frame: "base"
++    rate_hz: 30.0                 # perception cadence
++    source: "parabola"            # parabola | csv
++    noise_std: 0.0                # inject Gaussian position noise (m) to stress filtering
++    dropout_prob: 0.0             # simulate detection gaps
++    p0: [-1.0, 1.5, 0.4]
++    v0: [1.5, -1.0, 2.5]
++    gravity: [0.0, 0.0, -9.81]
++    restart_after_s: 2.0
++    # camera pose in base (base<-camera), only used when publish_frame != base:
++    camera_translation: [0.0, 0.0, 0.0]
++    camera_quaternion: [0.0, 0.0, 0.0, 1.0]
++    csv_path: ""
++
++ball_float32_adapter:
++  ros__parameters:
++    input_topic: "ball_position_3d_mm"
++    output_topic: "ball_state"
++    camera_frame: "camera_optical"
++    units: "mm"
+diff --git a/src/ur3e_live_catch/launch/.gitkeep b/src/ur3e_live_catch/launch/.gitkeep
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/src/ur3e_live_catch/launch/test_dry_run.launch.py b/src/ur3e_live_catch/launch/test_dry_run.launch.py
+new file mode 100644
+index 0000000..14822fc
+--- /dev/null
++++ b/src/ur3e_live_catch/launch/test_dry_run.launch.py
+@@ -0,0 +1,43 @@
++"""Dry-run launch: test_ball_node (publish_frame=base) + live_catch_node (archi step 2–5).
++
++No robot command is emitted. ``/joint_states`` must come from somewhere — bring up
++``use_fake_hardware:=true`` or URSim separately, or remap to a stub publisher.
++Inspect with:  ros2 topic echo /ball_state   and   ros2 topic echo /catch_telemetry
++
++Override params on the CLI, e.g. publish in the camera frame for the §12 parity test:
++    ros2 launch ur3e_live_catch test_dry_run.launch.py publish_frame:=camera_optical
++"""
++
++from launch import LaunchDescription
++from launch.actions import DeclareLaunchArgument
++from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
++from launch_ros.actions import Node
++from launch_ros.substitutions import FindPackageShare
++
++
++def generate_launch_description() -> LaunchDescription:
++    config = PathJoinSubstitution(
++        [FindPackageShare("ur3e_live_catch"), "config", "live_catch.yaml"]
++    )
++    publish_frame = LaunchConfiguration("publish_frame")
++
++    return LaunchDescription([
++        DeclareLaunchArgument(
++            "publish_frame", default_value="base",
++            description="Frame the test ball is published in: base | <camera_frame>",
++        ),
++        Node(
++            package="ur3e_live_catch",
++            executable="test_ball_node",
++            name="test_ball_node",
++            parameters=[config, {"publish_frame": publish_frame}],
++            output="screen",
++        ),
++        Node(
++            package="ur3e_live_catch",
++            executable="live_catch_node",
++            name="live_catch_node",
++            parameters=[config],
++            output="screen",
++        ),
++    ])
+diff --git a/src/ur3e_live_catch/package.xml b/src/ur3e_live_catch/package.xml
+new file mode 100644
+index 0000000..87f53cf
+--- /dev/null
++++ b/src/ur3e_live_catch/package.xml
+@@ -0,0 +1,30 @@
++<?xml version="1.0"?>
++<package format="3">
++  <name>ur3e_live_catch</name>
++  <version>0.1.0</version>
++  <description>
++    Single-process live closed-loop ball-catch node for the UR3e: ball-frame
++    transform, 33-D observation reconstruction, PPO policy runtime, plus an
++    artificial test-ball source and a Float32MultiArray-&gt;BallState adapter.
++    See docs/Robot_Control/ur3e_live_catch_architecture.md §4.3.
++  </description>
++  <maintainer email="rigon@example.com">rigon</maintainer>
++  <license>BSD-3-Clause</license>
++
++  <buildtool_depend>ament_python</buildtool_depend>
++
++  <exec_depend>rclpy</exec_depend>
++  <exec_depend>sensor_msgs</exec_depend>
++  <exec_depend>geometry_msgs</exec_depend>
++  <exec_depend>std_msgs</exec_depend>
++  <exec_depend>tf2_ros</exec_depend>
++  <exec_depend>tf2_geometry_msgs</exec_depend>
++  <exec_depend>ur3e_catch_msgs</exec_depend>
++
++  <test_depend>ament_pytest</test_depend>
++  <test_depend>pytest</test_depend>
++
++  <export>
++    <build_type>ament_python</build_type>
++  </export>
++</package>
+diff --git a/src/ur3e_live_catch/pytest.ini b/src/ur3e_live_catch/pytest.ini
+new file mode 100644
+index 0000000..f2597bf
+--- /dev/null
++++ b/src/ur3e_live_catch/pytest.ini
+@@ -0,0 +1,2 @@
++[pytest]
++addopts = -p no:launch_testing -p no:launch_testing_ros_pytest_entrypoint
+diff --git a/src/ur3e_live_catch/resource/.gitkeep b/src/ur3e_live_catch/resource/.gitkeep
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/src/ur3e_catch_msgs/msg/.gitkeep b/src/ur3e_live_catch/resource/ur3e_live_catch
+similarity index 100%
+rename from src/ur3e_catch_msgs/msg/.gitkeep
+rename to src/ur3e_live_catch/resource/ur3e_live_catch
+diff --git a/src/ur3e_live_catch/setup.cfg b/src/ur3e_live_catch/setup.cfg
+new file mode 100644
+index 0000000..114ed8b
+--- /dev/null
++++ b/src/ur3e_live_catch/setup.cfg
+@@ -0,0 +1,4 @@
++[develop]
++script_dir=$base/lib/ur3e_live_catch
++[install]
++install_scripts=$base/lib/ur3e_live_catch
+diff --git a/src/ur3e_live_catch/setup.py b/src/ur3e_live_catch/setup.py
+new file mode 100644
+index 0000000..539c23d
+--- /dev/null
++++ b/src/ur3e_live_catch/setup.py
+@@ -0,0 +1,29 @@
++from setuptools import find_packages, setup
++
++package_name = "ur3e_live_catch"
++
++setup(
++    name=package_name,
++    version="0.1.0",
++    packages=find_packages(exclude=["test", "test.*"]),
++    data_files=[
++        ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
++        (f"share/{package_name}", ["package.xml"]),
++        (f"share/{package_name}/config", ["config/live_catch.yaml"]),
++        (f"share/{package_name}/launch", ["launch/test_dry_run.launch.py"]),
++    ],
++    install_requires=["setuptools"],
++    zip_safe=True,
++    maintainer="rigon",
++    maintainer_email="rigon@example.com",
++    description="UR3e live closed-loop ball catch: ball-frame, observation, policy runtime, test source.",
++    license="BSD-3-Clause",
++    tests_require=["pytest"],
++    entry_points={
++        "console_scripts": [
++            "test_ball_node = ur3e_live_catch.test_ball_node:main",
++            "float32_adapter = ur3e_live_catch.float32_adapter:main",
++            "live_catch_node = ur3e_live_catch.live_catch_node:main",
++        ],
++    },
++)
+diff --git a/src/ur3e_live_catch/test/.gitkeep b/src/ur3e_live_catch/test/.gitkeep
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/src/ur3e_live_catch/test/conftest.py b/src/ur3e_live_catch/test/conftest.py
+new file mode 100644
+index 0000000..542cf5d
+--- /dev/null
++++ b/src/ur3e_live_catch/test/conftest.py
+@@ -0,0 +1,22 @@
++"""Make ``ur3e_live_catch`` importable in-tree (no colcon install needed).
++
++The pure-logic modules use only the stdlib, so these tests run anywhere a plain
++``python3`` is available — including this cloud environment with no ROS/torch.
++"""
++
++import sys
++from pathlib import Path
++
++# .../src/ur3e_live_catch  (the dir that *contains* the ur3e_live_catch package)
++PACKAGE_ROOT = Path(__file__).resolve().parents[1]
++if str(PACKAGE_ROOT) not in sys.path:
++    sys.path.insert(0, str(PACKAGE_ROOT))
++
++
++def repo_root() -> Path:
++    """Walk up until we find the repository data directory."""
++    here = Path(__file__).resolve()
++    for parent in here.parents:
++        if (parent / "data" / "ur3e_rollouts").is_dir():
++            return parent
++    raise RuntimeError("could not locate repo root (data/ur3e_rollouts not found)")
+diff --git a/src/ur3e_live_catch/test/test_action_mapper.py b/src/ur3e_live_catch/test/test_action_mapper.py
+new file mode 100644
+index 0000000..3b3f9c4
+--- /dev/null
++++ b/src/ur3e_live_catch/test/test_action_mapper.py
+@@ -0,0 +1,50 @@
++"""ActionMapper faithful vs safe (archi §4.3.4; user decision: flag, default faithful)."""
++
++import json
++
++import pytest
++
++from conftest import repo_root
++from ur3e_live_catch.action import ACTION_SCALE, ActionMapper
++
++ROLLOUTS = (
++    "data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/rollouts_10_episodes.json"
++)
++
++
++def test_faithful_is_absolute_unclipped():
++    m = ActionMapper(mode="faithful")
++    action = [2.0, -3.0, 0.1, -1.5, 0.0, 4.2]
++    q = [0.5] * 6
++    target = m.map(action, q)
++    assert target == pytest.approx([a * ACTION_SCALE for a in action])
++    # comp-9 feedback is the RAW action
++    assert m.prev_action == pytest.approx(action)
++
++
++def test_safe_is_incremental_and_clipped():
++    v_safe = [1.571, 1.571, 1.571, 3.142, 3.142, 3.142]
++    dt = 1.0 / 60.0
++    m = ActionMapper(mode="safe", v_safe=v_safe, dt=dt)
++    action = [2.0, -2.0, 0.5, 0.0, -0.25, 10.0]  # some beyond [-1, 1]
++    q = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
++    target = m.map(action, q)
++    clipped = [1.0, -1.0, 0.5, 0.0, -0.25, 1.0]
++    expect = [q[i] + clipped[i] * v_safe[i] * dt for i in range(6)]
++    assert target == pytest.approx(expect)
++    # comp-9 feedback is the CLIPPED action in safe mode
++    assert m.prev_action == pytest.approx(clipped)
++
++
++def test_safe_requires_v_safe():
++    with pytest.raises(ValueError):
++        ActionMapper(mode="safe")
++
++
++def test_faithful_matches_recorded_targets():
++    """faithful target must reproduce joint_position_target_rad from the rollouts."""
++    data = json.loads((repo_root() / ROLLOUTS).read_text())
++    m = ActionMapper(mode="faithful")
++    sample = data["episodes"][0]["samples"][3]
++    target = m.map(sample["action_normalized"], [0.0] * 6)
++    assert target == pytest.approx(sample["joint_position_target_rad"], abs=1e-4)
+diff --git a/src/ur3e_live_catch/test/test_ball_frame.py b/src/ur3e_live_catch/test/test_ball_frame.py
+new file mode 100644
+index 0000000..44baef5
+--- /dev/null
++++ b/src/ur3e_live_catch/test/test_ball_frame.py
+@@ -0,0 +1,62 @@
++"""Frame transform + velocity filter + staleness (archi §4.3.1, §12 parité repère)."""
++
++import math
++
++import pytest
++
++from ur3e_live_catch.ball_frame import (
++    BallFrameTransformer, BallVelocityFilter, FrameError, RigidTransform,
++)
++
++
++def test_identity_when_base():
++    t = BallFrameTransformer(base_frame="base")
++    assert t.to_base([1.0, 2.0, 3.0], "base") == (1.0, 2.0, 3.0)
++
++
++def test_mm_to_m_conversion():
++    t = BallFrameTransformer(base_frame="base", units="mm")
++    assert t.to_base([1000.0, -2000.0, 3000.0], "base") == pytest.approx((1.0, -2.0, 3.0))
++
++
++def test_empty_frame_rejected():
++    t = BallFrameTransformer()
++    with pytest.raises(FrameError):
++        t.to_base([0.0, 0.0, 0.0], "")
++
++
++def test_unknown_frame_without_transform_rejected():
++    t = BallFrameTransformer(base_frame="base")
++    with pytest.raises(FrameError):
++        t.to_base([1.0, 0.0, 0.0], "camera_optical")  # no transform supplied
++
++
++def test_rotation_plus_translation():
++    # 90 deg about +z maps (1,0,0) -> (0,1,0); then translate by (10,0,0).
++    s = math.sin(math.pi / 4)
++    tf = RigidTransform(translation=(10.0, 0.0, 0.0), quaternion=(0.0, 0.0, s, s))
++    t = BallFrameTransformer(base_frame="base")
++    out = t.to_base([1.0, 0.0, 0.0], "camera_optical", transform=tf)
++    assert out == pytest.approx((10.0, 1.0, 0.0), abs=1e-9)
++
++
++def test_velocity_finite_difference_exact_with_alpha_one():
++    f = BallVelocityFilter(ema_alpha=1.0)
++    assert f.update([0.0, 0.0, 0.0], 0.0) == (0.0, 0.0, 0.0)  # first call
++    v = f.update([0.1, 0.2, -0.3], 0.1)  # dt = 0.1 s (realistic ~30 Hz range)
++    assert v == pytest.approx((1.0, 2.0, -3.0))
++
++
++def test_velocity_invariant_to_constant_translation():
++    # Adding a constant offset (env origin) must not change the velocity.
++    f = BallVelocityFilter(ema_alpha=1.0)
++    f.update([5.0, 5.0, 5.0], 0.0)
++    v = f.update([6.0, 5.0, 5.0], 0.5)
++    assert v == pytest.approx((2.0, 0.0, 0.0))
++
++
++def test_staleness_flag():
++    t = BallFrameTransformer(base_frame="base", stale_after_s=0.1)
++    t.process([0.0, 0.0, 0.0], "base", stamp_s=10.0)
++    assert t.is_stale(10.05) is False
++    assert t.is_stale(10.2) is True
+diff --git a/src/ur3e_live_catch/test/test_observation_equivalence.py b/src/ur3e_live_catch/test/test_observation_equivalence.py
+new file mode 100644
+index 0000000..e77e709
+--- /dev/null
++++ b/src/ur3e_live_catch/test/test_observation_equivalence.py
+@@ -0,0 +1,91 @@
++"""Offline observation-equivalence test (archi §12, roadmap step 4).
++
++Reconstruct the 33-D observation and compare it, component by component, to the
++``observation`` recorded in the Isaac rollouts. No Isaac source / torch / numpy
++needed: the recorded observation IS the ground truth.
++
++What is validated exactly here:
++  - comp 1 joint_pos == recorded, fed from the INDEPENDENT joint_position_before_rad
++  - comp 2 joint_vel == recorded, fed from joint_velocity_before_rad_s
++  - comp 5 direction == ball - disk   (derivation)
++  - comp 6 distance  == ||direction|| (derivation)
++  - comp 9 actions   == previous sample's action_normalized (raw, unclipped)
++  - structure: length 33 and slot placement
++
++comps 3/8/10 (disk geometry, pass-through) are injected from the recorded obs and
++will get their own bit-exact check once the Isaac geometry lands.
++"""
++
++import json
++
++import pytest
++
++from conftest import repo_root
++from ur3e_live_catch.observation import (
++    IDX_ACTIONS, IDX_BALL_POS, IDX_BALL_VEL, IDX_DIRECTION, IDX_DISK_POS,
++    IDX_DISTANCE, IDX_JOINT_POS, IDX_JOINT_VEL, OBS_DIM, ObservationBuilder,
++)
++
++ROLLOUTS = (
++    "data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/rollouts_10_episodes.json"
++)
++TOL = 2e-4  # recorded values are float32
++
++
++def _load_samples():
++    path = repo_root() / ROLLOUTS
++    data = json.loads(path.read_text())
++    return data["episodes"]
++
++
++def _close(a, b, tol=TOL):
++    return all(abs(x - y) <= tol + tol * abs(y) for x, y in zip(a, b))
++
++
++@pytest.fixture(scope="module")
++def episodes():
++    return _load_samples()
++
++
++def test_dataset_present(episodes):
++    assert episodes, "no episodes in rollouts file"
++    assert len(episodes[0]["samples"]) > 1
++
++
++def test_observation_equivalence(episodes):
++    checked = 0
++    for ep in episodes:
++        builder = ObservationBuilder()
++        prev_action = [0.0] * 6  # comp 9 at step 0 is zeros
++        for sample in ep["samples"]:
++            rec = sample["observation"]
++            assert len(rec) == OBS_DIM
++
++            disk = rec[IDX_DISK_POS:IDX_DISK_POS + 3]
++            ball = rec[IDX_BALL_POS:IDX_BALL_POS + 3]
++            ball_vel = rec[IDX_BALL_VEL:IDX_BALL_VEL + 3]
++
++            obs = builder.build(
++                joint_pos=sample["joint_position_before_rad"],
++                joint_vel=sample["joint_velocity_before_rad_s"],
++                disk_pos=disk,
++                disk_normal=(0.0, 0.0, 1.0),
++                ball_pos=ball,
++                ball_vel=ball_vel,
++                prev_action=prev_action,
++            )
++
++            assert len(obs) == OBS_DIM
++            # comp 1 / 2: independent fields must equal the recorded slots
++            assert _close(obs[IDX_JOINT_POS:IDX_JOINT_POS + 6], rec[IDX_JOINT_POS:IDX_JOINT_POS + 6])
++            assert _close(obs[IDX_JOINT_VEL:IDX_JOINT_VEL + 6], rec[IDX_JOINT_VEL:IDX_JOINT_VEL + 6])
++            # comp 5 / 6: derivations
++            expect_dir = [ball[i] - disk[i] for i in range(3)]
++            assert _close(obs[IDX_DIRECTION:IDX_DIRECTION + 3], expect_dir)
++            assert abs(obs[IDX_DISTANCE] - (sum(d * d for d in expect_dir)) ** 0.5) <= TOL
++            # comp 9: raw previous action
++            assert _close(obs[IDX_ACTIONS:IDX_ACTIONS + 6], rec[IDX_ACTIONS:IDX_ACTIONS + 6])
++
++            prev_action = sample["action_normalized"]
++            checked += 1
++    assert checked > 50, f"only {checked} samples checked"
+diff --git a/src/ur3e_live_catch/test/test_policy_equivalence.py b/src/ur3e_live_catch/test/test_policy_equivalence.py
+new file mode 100644
+index 0000000..f95091b
+--- /dev/null
++++ b/src/ur3e_live_catch/test/test_policy_equivalence.py
+@@ -0,0 +1,61 @@
++"""Policy-equivalence test — decides the SCALER question (archi §4.3.3, §12).
++
++Feed each recorded ``observation`` to the exported policy and compare the output
++to the recorded ``action_normalized``. If they match, the export already embeds
++(or does not need) the SKRL ``RunningStandardScaler``. If they diverge, the
++scaler must be applied before the net — wire an :class:`ObsScaler` and re-run.
++
++Skipped automatically where torch (or the model) is unavailable — e.g. this
++cloud environment. Run it on the ROS Humble machine.
++"""
++
++import json
++
++import pytest
++
++from conftest import repo_root
++from ur3e_live_catch.policy_runtime import PolicyRunner, load_metadata
++
++torch = pytest.importorskip("torch", reason="torch not installed (run on the ROS machine)")
++
++EXPORTS = "data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports"
++
++
++@pytest.fixture(scope="module")
++def runner():
++    model = repo_root() / EXPORTS / "policy_deterministic.ts"
++    if not model.exists():
++        pytest.skip(f"model not found: {model}")
++    return PolicyRunner(model).load()
++
++
++@pytest.fixture(scope="module")
++def rollouts():
++    return json.loads((repo_root() / EXPORTS / "rollouts_10_episodes.json").read_text())
++
++
++def test_metadata_dims():
++    meta = load_metadata(repo_root() / EXPORTS / "policy_metadata.json")
++    assert meta["observation_space"] == 33
++    assert meta["action_space"] == 6
++    assert meta["action_scale"] == pytest.approx(0.5)
++
++
++def test_policy_reproduces_recorded_actions(runner, rollouts):
++    max_abs = 0.0
++    n = 0
++    for ep in rollouts["episodes"]:
++        for sample in ep["samples"][:5]:
++            out = runner.infer(sample["observation"])
++            assert len(out) == 6
++            for a, b in zip(out, sample["action_normalized"]):
++                max_abs = max(max_abs, abs(a - b))
++            n += 1
++    assert n > 0
++    # A loose-but-meaningful bound: large divergence => the observation scaler is
++    # NOT being applied (see module docstring) — wire ObsScaler and re-run.
++    assert max_abs < 1e-2, (
++        f"policy output diverges from recorded actions (max |delta|={max_abs:.4g}); "
++        "the SKRL RunningStandardScaler is most likely missing from the export — "
++        "provide policy_scaler.json and pass ObsScaler to PolicyRunner."
++    )
+diff --git a/src/ur3e_live_catch/test/test_safety.py b/src/ur3e_live_catch/test/test_safety.py
+new file mode 100644
+index 0000000..f515129
+--- /dev/null
++++ b/src/ur3e_live_catch/test/test_safety.py
+@@ -0,0 +1,60 @@
++"""SafetyLimiter (clip + rate + accel) and Watchdog (archi §4.3.5, §9)."""
++
++import math
++
++import pytest
++
++from ur3e_live_catch.safety import JointBound, SafetyLimiter, Watchdog
++
++DT = 1.0 / 60.0
++
++
++def _bounds(v_safe=1.0, a_safe=1e9, lo=-6.28, hi=6.28):
++    return [JointBound(lo, hi, v_safe, a_safe) for _ in range(6)]
++
++
++def test_position_clip():
++    lim = SafetyLimiter(_bounds(v_safe=1e9, a_safe=1e9, lo=-1.0, hi=1.0), DT)
++    rep = lim.limit([5.0] * 6, [0.9] * 6)
++    assert all(t == pytest.approx(1.0) for t in rep.target)
++    assert all(rep.position_clamped)
++
++
++def test_rate_limit():
++    v_safe = 1.0
++    lim = SafetyLimiter(_bounds(v_safe=v_safe, a_safe=1e9), DT)
++    rep = lim.limit([10.0] * 6, [0.0] * 6)  # huge jump
++    step = v_safe * DT
++    assert all(t == pytest.approx(step) for t in rep.target)
++    assert all(rep.rate_limited)
++
++
++def test_accel_limit_from_rest():
++    a_safe = 2.0
++    lim = SafetyLimiter(_bounds(v_safe=1e9, a_safe=a_safe), DT)
++    rep = lim.limit([10.0] * 6, [0.0] * 6)
++    # from rest, velocity can grow by at most a_safe*dt this tick -> step = a_safe*dt*dt
++    expect = a_safe * DT * DT
++    assert all(t == pytest.approx(expect) for t in rep.target)
++    assert all(rep.accel_limited)
++
++
++def test_no_limit_when_within_bounds():
++    lim = SafetyLimiter(_bounds(v_safe=100.0, a_safe=1e9), DT)
++    rep = lim.limit([0.001] * 6, [0.0] * 6)
++    assert not rep.any_limited
++
++
++def test_watchdog_triggers():
++    wd = Watchdog(stale_after_s=0.1, loop_budget_s=0.02, max_tracking_error=0.05)
++    ok, reasons = wd.check(perception_age_s=0.0, loop_time_s=0.001, tracking_error=0.0)
++    assert ok and not reasons
++
++    ok, reasons = wd.check(perception_age_s=0.2, loop_time_s=0.001, tracking_error=0.0)
++    assert not ok and any("stale" in r for r in reasons)
++
++    ok, reasons = wd.check(perception_age_s=0.0, loop_time_s=0.05, tracking_error=0.0)
++    assert not ok and any("overrun" in r for r in reasons)
++
++    ok, reasons = wd.check(perception_age_s=0.0, loop_time_s=0.001, tracking_error=0.5)
++    assert not ok and any("tracking" in r for r in reasons)
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/.gitkeep b/src/ur3e_live_catch/ur3e_live_catch/.gitkeep
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/src/ur3e_live_catch/config/.gitkeep b/src/ur3e_live_catch/ur3e_live_catch/__init__.py
+similarity index 100%
+rename from src/ur3e_live_catch/config/.gitkeep
+rename to src/ur3e_live_catch/ur3e_live_catch/__init__.py
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/action.py b/src/ur3e_live_catch/ur3e_live_catch/action.py
+new file mode 100644
+index 0000000..910bfc2
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/action.py
+@@ -0,0 +1,67 @@
++"""Action -> joint target mapping (archi §4.3.4), wired at step 6.
++
++Two modes behind a config flag (user decision; default ``faithful``):
++
++  faithful : reproduce the trained policy exactly. The simulation commanded an
++             ABSOLUTE, UNCLIPPED target ``q_target = action * action_scale``
++             (verified on the rollouts: ``joint_position_target_rad ==
++             action_normalized * 0.5``). The observation feedback (comp 9) stores
++             the RAW action. Safety (clip + rate-limit) is a SEPARATE, independent
++             layer (archi §9) — so fidelity and safety are reconciled, not traded.
++
++  safe     : the literal doc formula ``q + clamp(action, -1, 1) * v_safe * dt``
++             (bounded incremental). Stores the CLIPPED action as comp 9. Safest,
++             but diverges from the trained policy (likely needs retraining).
++
++This module only maps; it does NOT enforce limits — :mod:`safety` does.
++"""
++
++from __future__ import annotations
++
++from typing import Optional, Sequence
++
++ACTION_SCALE = 0.5  # policy_metadata.json: joint_position_target_rad = action * 0.5
++DT_STEP = 1.0 / 60.0
++
++
++def _clip(value: float, lo: float, hi: float) -> float:
++    return lo if value < lo else hi if value > hi else value
++
++
++class ActionMapper:
++    def __init__(
++        self,
++        mode: str = "faithful",
++        *,
++        action_scale: float = ACTION_SCALE,
++        v_safe: Optional[Sequence[float]] = None,
++        dt: float = DT_STEP,
++    ) -> None:
++        if mode not in ("faithful", "safe"):
++            raise ValueError(f"mode must be 'faithful' or 'safe', got {mode!r}")
++        if mode == "safe" and v_safe is None:
++            raise ValueError("mode 'safe' requires v_safe (per-joint rad/s)")
++        self.mode = mode
++        self.action_scale = float(action_scale)
++        self.v_safe = list(v_safe) if v_safe is not None else None
++        self.dt = float(dt)
++        self._prev_action: list[float] = [0.0] * 6
++
++    @property
++    def prev_action(self) -> list[float]:
++        """The value to feed back as observation component 9 next tick."""
++        return list(self._prev_action)
++
++    def map(self, action: Sequence[float], q: Sequence[float]) -> list[float]:
++        """Return the 6-D joint target and record the comp-9 feedback action."""
++        if len(action) != 6 or len(q) != 6:
++            raise ValueError("action and q must each have 6 elements")
++        if self.mode == "faithful":
++            target = [float(a) * self.action_scale for a in action]
++            self._prev_action = [float(a) for a in action]  # raw
++        else:
++            clipped = [_clip(float(a), -1.0, 1.0) for a in action]
++            assert self.v_safe is not None
++            target = [q[i] + clipped[i] * self.v_safe[i] * self.dt for i in range(6)]
++            self._prev_action = clipped
++        return target
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/ball_frame.py b/src/ur3e_live_catch/ur3e_live_catch/ball_frame.py
+new file mode 100644
+index 0000000..090d52c
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/ball_frame.py
+@@ -0,0 +1,162 @@
++"""Frame-aware ball transform + velocity filtering (archi §4.3.1).
++
++Pure logic, no rclpy / no numpy: the rigid-body transform is passed *as data*
++(translation + quaternion, exactly what a tf2 lookup yields), so the whole module
++is unit-testable off-robot. The live node supplies the transform via tf2.
++
++Design rule (archi §4.3.1, §7): the consumer is **frame-aware and never assumes
++the camera**. It transforms ``header.frame_id -> base``:
++  - ``frame_id == base``           -> identity (ball already in base);
++  - any other frame                -> apply the supplied transform (e.g. hand-eye);
++  - empty / unknown frame          -> caller rejects (raise), never guess.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++import math
++from typing import Optional, Sequence
++
++Vec3 = tuple[float, float, float]
++
++
++@dataclass(frozen=True)
++class RigidTransform:
++    """``P^target = R(quaternion) * P^source + translation``.
++
++    Matches tf2 ``lookup_transform(target, source)``: applying this to a point
++    expressed in ``source`` yields the point expressed in ``target``.
++    """
++
++    translation: Vec3 = (0.0, 0.0, 0.0)
++    quaternion: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)  # x, y, z, w
++
++    @classmethod
++    def identity(cls) -> "RigidTransform":
++        return cls((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
++
++    def apply(self, point: Sequence[float]) -> Vec3:
++        rx, ry, rz = _quat_rotate(self.quaternion, point)
++        tx, ty, tz = self.translation
++        return (rx + tx, ry + ty, rz + tz)
++
++
++def _quat_rotate(q: Sequence[float], v: Sequence[float]) -> Vec3:
++    """Rotate vector ``v`` by quaternion ``q`` (x, y, z, w): v' = q * v * q^-1."""
++    x, y, z, w = q
++    vx, vy, vz = v
++    # t = 2 * cross(q_xyz, v)
++    tx = 2.0 * (y * vz - z * vy)
++    ty = 2.0 * (z * vx - x * vz)
++    tz = 2.0 * (x * vy - y * vx)
++    # v' = v + w * t + cross(q_xyz, t)
++    return (
++        vx + w * tx + (y * tz - z * ty),
++        vy + w * ty + (z * tx - x * tz),
++        vz + w * tz + (x * ty - y * tx),
++    )
++
++
++class BallVelocityFilter:
++    """Filtered ball velocity from finite differences of base positions.
++
++    No direct velocity measurement exists — this is the noisy link (sim-to-real
++    §5.2). Because base = world - constant env origin, the finite difference of
++    base positions IS the world velocity ``ball_vel_w`` (archi §6 note).
++    """
++
++    def __init__(self, ema_alpha: float = 0.5, max_dt: float = 0.5) -> None:
++        self._ema_alpha = float(ema_alpha)
++        self._max_dt = float(max_dt)
++        self._prev_pos: Optional[Vec3] = None
++        self._prev_stamp: Optional[float] = None
++        self._vel: Vec3 = (0.0, 0.0, 0.0)
++
++    def reset(self) -> None:
++        self._prev_pos = None
++        self._prev_stamp = None
++        self._vel = (0.0, 0.0, 0.0)
++
++    def update(self, pos_base: Sequence[float], stamp_s: float) -> Vec3:
++        pos = (float(pos_base[0]), float(pos_base[1]), float(pos_base[2]))
++        if self._prev_pos is None or self._prev_stamp is None:
++            self._prev_pos, self._prev_stamp = pos, float(stamp_s)
++            return self._vel
++        dt = float(stamp_s) - self._prev_stamp
++        if dt <= 0.0 or dt > self._max_dt:
++            # Out-of-order or too large a gap: keep last estimate, re-anchor.
++            self._prev_pos, self._prev_stamp = pos, float(stamp_s)
++            return self._vel
++        raw = ((pos[0] - self._prev_pos[0]) / dt,
++               (pos[1] - self._prev_pos[1]) / dt,
++               (pos[2] - self._prev_pos[2]) / dt)
++        a = self._ema_alpha
++        self._vel = (a * raw[0] + (1 - a) * self._vel[0],
++                     a * raw[1] + (1 - a) * self._vel[1],
++                     a * raw[2] + (1 - a) * self._vel[2])
++        self._prev_pos, self._prev_stamp = pos, float(stamp_s)
++        return self._vel
++
++
++class FrameError(ValueError):
++    """The declared frame_id is empty or no transform is available for it."""
++
++
++class BallFrameTransformer:
++    """Transform a declared ball position into ``base`` and filter its velocity."""
++
++    def __init__(
++        self,
++        base_frame: str = "base",
++        *,
++        units: str = "m",
++        ema_alpha: float = 0.5,
++        stale_after_s: float = 0.1,
++    ) -> None:
++        if units not in ("m", "mm"):
++            raise ValueError(f"units must be 'm' or 'mm', got {units!r}")
++        self.base_frame = base_frame
++        self._scale = 1e-3 if units == "mm" else 1.0
++        self._vel_filter = BallVelocityFilter(ema_alpha=ema_alpha)
++        self.stale_after_s = float(stale_after_s)
++        self._last_stamp: Optional[float] = None
++
++    def to_base(
++        self,
++        position: Sequence[float],
++        frame_id: str,
++        transform: Optional[RigidTransform] = None,
++    ) -> Vec3:
++        """Return the ball position in ``base``.
++
++        ``transform`` is the ``frame_id -> base`` rigid transform (tf2 lookup).
++        It is ignored for the identity case (``frame_id == base_frame``) and
++        required otherwise.
++        """
++        if not frame_id:
++            raise FrameError("empty frame_id: refusing to assume a frame")
++        p = (position[0] * self._scale, position[1] * self._scale, position[2] * self._scale)
++        if frame_id == self.base_frame:
++            return (float(p[0]), float(p[1]), float(p[2]))
++        if transform is None:
++            raise FrameError(f"no transform available for frame_id {frame_id!r} -> {self.base_frame!r}")
++        return transform.apply(p)
++
++    def process(
++        self,
++        position: Sequence[float],
++        frame_id: str,
++        stamp_s: float,
++        transform: Optional[RigidTransform] = None,
++    ) -> tuple[Vec3, Vec3]:
++        """Return ``(pos_base, vel_base)``, updating the velocity filter."""
++        pos_base = self.to_base(position, frame_id, transform)
++        vel_base = self._vel_filter.update(pos_base, stamp_s)
++        self._last_stamp = float(stamp_s)
++        return pos_base, vel_base
++
++    def is_stale(self, now_s: float) -> bool:
++        """True if no fresh detection within ``stale_after_s`` (archi §9 watchdog)."""
++        if self._last_stamp is None:
++            return True
++        return (now_s - self._last_stamp) > self.stale_after_s
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/float32_adapter.py b/src/ur3e_live_catch/ur3e_live_catch/float32_adapter.py
+new file mode 100644
+index 0000000..4170328
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/float32_adapter.py
+@@ -0,0 +1,65 @@
++"""Interim adapter: ``ball_position_3d_mm`` (Float32MultiArray) -> ``BallState``.
++
++Lets the existing C++ tracker (which publishes a camera-frame mm Float32MultiArray)
++feed the live loop WITHOUT touching its build, while the native timestamped
++``BallState`` publisher is being added (archi §4.1 "intérim"). Stamp = reception
++(no event time available yet); frame_id = a fixed camera frame parameter.
++"""
++
++from __future__ import annotations
++
++import rclpy
++from rclpy.node import Node
++from std_msgs.msg import Float32MultiArray
++
++from ur3e_catch_msgs.msg import BallState
++
++
++class Float32Adapter(Node):
++    def __init__(self) -> None:
++        super().__init__("ball_float32_adapter")
++        self.declare_parameter("input_topic", "ball_position_3d_mm")
++        self.declare_parameter("output_topic", "ball_state")
++        self.declare_parameter("camera_frame", "camera_optical")
++        self.declare_parameter("units", "mm")  # tracker publishes millimetres
++
++        self._frame = self.get_parameter("camera_frame").value
++        self._scale = 1e-3 if self.get_parameter("units").value == "mm" else 1.0
++        self._pub = self.create_publisher(BallState, self.get_parameter("output_topic").value, 10)
++        self._sub = self.create_subscription(
++            Float32MultiArray, self.get_parameter("input_topic").value, self._on_msg, 10
++        )
++        self.get_logger().info(
++            f"Float32->BallState adapter: frame={self._frame!r}, scale={self._scale}"
++        )
++
++    def _on_msg(self, msg: Float32MultiArray) -> None:
++        out = BallState()
++        out.header.stamp = self.get_clock().now().to_msg()
++        out.header.frame_id = self._frame
++        if len(msg.data) >= 3:
++            out.position.x = float(msg.data[0]) * self._scale
++            out.position.y = float(msg.data[1]) * self._scale
++            out.position.z = float(msg.data[2]) * self._scale
++            out.valid = True
++            out.confidence = 1.0
++        else:
++            out.valid = False
++            out.confidence = 0.0
++        self._pub.publish(out)
++
++
++def main(args=None) -> None:
++    rclpy.init(args=args)
++    node = Float32Adapter()
++    try:
++        rclpy.spin(node)
++    except KeyboardInterrupt:
++        pass
++    finally:
++        node.destroy_node()
++        rclpy.try_shutdown()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/joint_order.py b/src/ur3e_live_catch/ur3e_live_catch/joint_order.py
+new file mode 100644
+index 0000000..6c8a8e0
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/joint_order.py
+@@ -0,0 +1,49 @@
++"""Canonical UR3e joint order, shared by every module on the live path.
++
++This MUST match three independent sources or the policy receives a scrambled
++observation:
++  - the training export ``policy_metadata.json`` ``joint_names``;
++  - the replay package ``ur3e_rollout_replay/replay_core.py`` ``DEFAULT_JOINT_NAMES``;
++  - the order assumed by ``firsttraining_env`` when it builds the observation.
++
++``/joint_states`` does NOT guarantee this order, so callers reorder by name with
++:func:`reorder_by_name` before doing anything else (archi §4.3, §6 comp 1/2).
++"""
++
++from __future__ import annotations
++
++from typing import Mapping, Sequence
++
++JOINT_ORDER: tuple[str, ...] = (
++    "shoulder_pan_joint",
++    "shoulder_lift_joint",
++    "elbow_joint",
++    "wrist_1_joint",
++    "wrist_2_joint",
++    "wrist_3_joint",
++)
++
++
++class JointOrderError(KeyError):
++    """A required joint is missing from the source message."""
++
++
++def reorder_by_name(
++    names: Sequence[str],
++    values: Sequence[float],
++    target: Sequence[str] = JOINT_ORDER,
++) -> list[float]:
++    """Return ``values`` re-indexed from ``names`` into ``target`` order.
++
++    Raises :class:`JointOrderError` if a target joint is absent — we never
++    silently drop or zero a joint, which would corrupt the observation.
++    """
++    if len(names) != len(values):
++        raise ValueError(f"names ({len(names)}) and values ({len(values)}) length mismatch")
++    index: Mapping[str, int] = {name: i for i, name in enumerate(names)}
++    out: list[float] = []
++    for joint in target:
++        if joint not in index:
++            raise JointOrderError(f"joint {joint!r} not present in {list(names)!r}")
++        out.append(float(values[index[joint]]))
++    return out
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py b/src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py
+new file mode 100644
+index 0000000..6f44f82
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py
+@@ -0,0 +1,221 @@
++"""Live catch loop — DRY-RUN build (archi §2, §4.3; roadmap steps 1–5).
++
++One rclpy node, one 60 Hz timer. The hot path ``observation -> inference`` runs as
++DIRECT CALLS into the pure modules (no intra-process topic, no DDS hop, archi §2):
++
++    BallState ─▶ ball_frame ─▶ ObservationBuilder ─▶ PolicyRunner ─▶ raw action
++    /joint_states ─▶ cache (reordered)              (TF: frame_id→base, base→hoop)
++
++In this pass the node is DRY-RUN: it logs the raw policy action and publishes
++``CatchTelemetry`` only. ActionMapper / SafetyLimiter / streaming to the
++forward_position_controller are step 6 and are intentionally NOT wired here — no
++robot command is ever emitted. The raw action is fed back as observation
++component 9 on the next tick (raw, matching training; archi §6).
++"""
++
++from __future__ import annotations
++
++import math
++from pathlib import Path
++from typing import Optional
++
++import rclpy
++from rclpy.node import Node
++from sensor_msgs.msg import JointState
++from tf2_ros import Buffer, TransformListener
++
++from ur3e_catch_msgs.msg import BallState, CatchTelemetry
++from ur3e_live_catch.ball_frame import BallFrameTransformer, FrameError, RigidTransform
++from ur3e_live_catch.joint_order import JointOrderError, reorder_by_name
++from ur3e_live_catch.observation import ObservationBuilder
++from ur3e_live_catch.policy_runtime import PolicyRunner
++
++# Default model: canonical data/models/, falling back to the dated training export.
++CANONICAL_MODEL = "data/models/policy_deterministic.ts"
++FALLBACK_MODEL = (
++    "data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts"
++)
++
++
++def _stamp_to_s(stamp) -> float:
++    return stamp.sec + stamp.nanosec * 1e-9
++
++
++def _transform_from_msg(tf_msg) -> RigidTransform:
++    t = tf_msg.transform.translation
++    q = tf_msg.transform.rotation
++    return RigidTransform(translation=(t.x, t.y, t.z), quaternion=(q.x, q.y, q.z, q.w))
++
++
++class LiveCatchNode(Node):
++    def __init__(self) -> None:
++        super().__init__("live_catch_node")
++        self.declare_parameter("loop_hz", 60.0)
++        self.declare_parameter("base_frame", "base")
++        self.declare_parameter("hoop_frame", "hoop_center")
++        self.declare_parameter("ball_topic", "ball_state")
++        self.declare_parameter("joint_states_topic", "/joint_states")
++        self.declare_parameter("telemetry_topic", "catch_telemetry")
++        self.declare_parameter("units", "m")
++        self.declare_parameter("model_path", "")  # "" => canonical then fallback
++        self.declare_parameter("stale_after_s", 0.1)
++        # Disk geometry fallback when no TF base->hoop is available (placeholder,
++        # to be replaced by the Isaac-sourced mount geometry). normal in base.
++        self.declare_parameter("disk_pos_fallback", [0.0, 0.0, 0.5])
++        self.declare_parameter("disk_normal_fallback", [0.0, 0.0, 1.0])
++        # action_mode is reserved for step 6 (ActionMapper); unused in dry-run.
++        self.declare_parameter("action_mode", "faithful")
++
++        self._base_frame = str(self.get_parameter("base_frame").value)
++        self._hoop_frame = str(self.get_parameter("hoop_frame").value)
++
++        self._joint_pos: Optional[list[float]] = None
++        self._joint_vel: Optional[list[float]] = None
++        self._ball_msg: Optional[BallState] = None
++        self._prev_action: list[float] = [0.0] * 6
++
++        self._ball_frame = BallFrameTransformer(
++            base_frame=self._base_frame,
++            units=str(self.get_parameter("units").value),
++            stale_after_s=float(self.get_parameter("stale_after_s").value),
++        )
++        self._obs_builder = ObservationBuilder()
++        self._policy = self._make_policy()
++
++        self._tf_buffer = Buffer()
++        self._tf_listener = TransformListener(self._tf_buffer, self)
++
++        self.create_subscription(JointState, str(self.get_parameter("joint_states_topic").value),
++                                 self._on_joint_states, 10)
++        self.create_subscription(BallState, str(self.get_parameter("ball_topic").value),
++                                 self._on_ball, 10)
++        self._telemetry_pub = self.create_publisher(
++            CatchTelemetry, str(self.get_parameter("telemetry_topic").value), 10
++        )
++
++        hz = float(self.get_parameter("loop_hz").value)
++        self._timer = self.create_timer(1.0 / hz, self._on_tick)
++        self.get_logger().info(f"live_catch_node DRY-RUN @ {hz} Hz (no robot command emitted)")
++
++    # --- setup ---------------------------------------------------------------
++
++    def _make_policy(self) -> Optional[PolicyRunner]:
++        configured = str(self.get_parameter("model_path").value)
++        candidates = [configured] if configured else [CANONICAL_MODEL, FALLBACK_MODEL]
++        for cand in candidates:
++            if cand and Path(cand).exists():
++                self.get_logger().info(f"policy model: {cand}")
++                return PolicyRunner(cand)
++        self.get_logger().warn(
++            "no policy model found (looked for "
++            f"{candidates}); running observation-only, action will be zeros"
++        )
++        return None
++
++    # --- subscriptions -------------------------------------------------------
++
++    def _on_joint_states(self, msg: JointState) -> None:
++        try:
++            self._joint_pos = reorder_by_name(msg.name, msg.position)
++            self._joint_vel = reorder_by_name(msg.name, msg.velocity) if msg.velocity else [0.0] * 6
++        except (JointOrderError, ValueError) as exc:
++            self.get_logger().warn(f"joint_states ignored: {exc}", throttle_duration_sec=2.0)
++
++    def _on_ball(self, msg: BallState) -> None:
++        self._ball_msg = msg
++
++    # --- TF lookups ----------------------------------------------------------
++
++    def _ball_transform(self, frame_id: str) -> Optional[RigidTransform]:
++        if frame_id == self._base_frame:
++            return None  # identity handled inside ball_frame
++        try:
++            tf_msg = self._tf_buffer.lookup_transform(self._base_frame, frame_id, rclpy.time.Time())
++            return _transform_from_msg(tf_msg)
++        except Exception as exc:  # tf2 raises several exception types
++            self.get_logger().warn(
++                f"TF {frame_id}->{self._base_frame} unavailable: {exc}", throttle_duration_sec=2.0
++            )
++            return None
++
++    def _disk_pose(self):
++        """Return (disk_pos_base, disk_normal_base) from TF, else the fallback."""
++        try:
++            tf_msg = self._tf_buffer.lookup_transform(self._base_frame, self._hoop_frame, rclpy.time.Time())
++            tf = _transform_from_msg(tf_msg)
++            normal = RigidTransform(quaternion=tf.quaternion).apply((0.0, 0.0, 1.0))
++            return list(tf.translation), list(normal)
++        except Exception:
++            return (
++                [float(x) for x in self.get_parameter("disk_pos_fallback").value],
++                [float(x) for x in self.get_parameter("disk_normal_fallback").value],
++            )
++
++    # --- hot loop ------------------------------------------------------------
++
++    def _on_tick(self) -> None:
++        if self._joint_pos is None:
++            self.get_logger().warn("waiting for /joint_states", throttle_duration_sec=2.0)
++            return
++        if self._ball_msg is None or not self._ball_msg.valid:
++            self.get_logger().warn("waiting for a valid BallState", throttle_duration_sec=2.0)
++            return
++
++        ball = self._ball_msg
++        frame_id = ball.header.frame_id
++        stamp_s = _stamp_to_s(ball.header.stamp)
++        transform = self._ball_transform(frame_id)
++        try:
++            ball_pos, ball_vel = self._ball_frame.process(
++                (ball.position.x, ball.position.y, ball.position.z),
++                frame_id, stamp_s, transform=transform,
++            )
++        except FrameError as exc:
++            self.get_logger().warn(f"ball frame rejected: {exc}", throttle_duration_sec=2.0)
++            return
++
++        disk_pos, disk_normal = self._disk_pose()
++
++        obs = self._obs_builder.build(
++            joint_pos=self._joint_pos,
++            joint_vel=self._joint_vel,
++            disk_pos=disk_pos,
++            disk_normal=disk_normal,
++            ball_pos=ball_pos,
++            ball_vel=ball_vel,
++            prev_action=self._prev_action,
++        )
++
++        raw_action = self._policy.infer(obs) if self._policy is not None else [0.0] * 6
++
++        telem = CatchTelemetry()
++        telem.observation = [float(x) for x in obs]
++        telem.raw_action = [float(x) for x in raw_action]
++        telem.joint_target = []  # empty in dry-run (no command, archi step 6 wires this)
++        telem.ball_base.x, telem.ball_base.y, telem.ball_base.z = ball_pos
++        self._telemetry_pub.publish(telem)
++
++        self.get_logger().info(
++            "raw_action=[" + ", ".join(f"{a:+.3f}" for a in raw_action) + "]"
++            f"  ball_base=({ball_pos[0]:+.3f},{ball_pos[1]:+.3f},{ball_pos[2]:+.3f})"
++            f"  pass_through={self._obs_builder.pass_through_count}",
++            throttle_duration_sec=0.5,
++        )
++
++        self._prev_action = raw_action  # feedback as observation component 9
++
++
++def main(args=None) -> None:
++    rclpy.init(args=args)
++    node = LiveCatchNode()
++    try:
++        rclpy.spin(node)
++    except KeyboardInterrupt:
++        pass
++    finally:
++        node.destroy_node()
++        rclpy.try_shutdown()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/observation.py b/src/ur3e_live_catch/ur3e_live_catch/observation.py
+new file mode 100644
+index 0000000..1acfe82
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/observation.py
+@@ -0,0 +1,158 @@
++"""33-D observation reconstruction — mirror of ``firsttraining_env`` (archi §6).
++
++Exact order (sum = 6+6+3+3+3+1+3+1+6+1 = 33), with slice indices:
++
++    [ 0: 6]  1  joint_pos        (rad)
++    [ 6:12]  2  joint_vel        (rad/s)
++    [12:15]  3  disk_pos_local   (m)   hoop centre in base   <- needs Isaac geom
++    [15:18]  4  ball_pos_local   (m)   ball in base
++    [18:21]  5  direction        (m)   ball - disk
++    [21:22]  6  distance         (m)   ||direction||
++    [22:25]  7  ball_vel_w       (m/s) filtered
++    [25:26]  8  prev_signed_dist > 0   (0/1)               <- needs Isaac sign
++    [26:32]  9  actions          raw previous policy action (NOT clipped)
++    [32:33] 10  pass_through_count                          <- needs Isaac logic
++
++Units are strict: rad, rad/s, m, m/s — no degrees anywhere (archi §6).
++
++Components 3, 8 and 10 depend on the disk/ball geometry of the trained task.
++They are isolated below and parameterised by a disk pose + normal so they can be
++made bit-exact against ``_read_disk_pose_in_body_frame`` / ``detect_pass_through``
++once the Isaac source lands. Everything else (1, 2, 4, 5, 6, 7, 9) is exact now.
++"""
++
++from __future__ import annotations
++
++import math
++from typing import Optional, Sequence
++
++Vec3 = tuple[float, float, float]
++
++OBS_DIM = 33
++
++# Slice layout (start indices), kept as named constants for tests and telemetry.
++IDX_JOINT_POS = 0
++IDX_JOINT_VEL = 6
++IDX_DISK_POS = 12
++IDX_BALL_POS = 15
++IDX_DIRECTION = 18
++IDX_DISTANCE = 21
++IDX_BALL_VEL = 22
++IDX_SIGNED_FLAG = 25
++IDX_ACTIONS = 26
++IDX_PASS_THROUGH = 32
++
++
++def _sub(a: Sequence[float], b: Sequence[float]) -> Vec3:
++    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
++
++
++def _norm(v: Sequence[float]) -> float:
++    return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
++
++
++def _dot(a: Sequence[float], b: Sequence[float]) -> float:
++    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
++
++
++class ObservationBuilder:
++    """Stateful builder: keeps the signed-distance sign and pass-through count.
++
++    ``prev_action`` (component 9) is supplied per tick by the caller (the last
++    *raw* policy action), matching how the policy was trained (archi §6, decision
++    "faithful": comp 9 is the unclipped action).
++    """
++
++    def __init__(self, disk_radius: float = 0.0) -> None:
++        # disk_radius gates pass-through to crossings *inside* the hoop; 0 disables
++        # the gate (pure plane crossing). Final value comes from the Isaac cfg.
++        self.disk_radius = float(disk_radius)
++        self._prev_signed_dist: float = 0.0
++        self._pass_through_count: int = 0
++
++    def reset(self) -> None:
++        self._prev_signed_dist = 0.0
++        self._pass_through_count = 0
++
++    @property
++    def pass_through_count(self) -> int:
++        return self._pass_through_count
++
++    # --- geometry-dependent pieces (to finalise from the Isaac source) --------
++
++    @staticmethod
++    def disk_pos_local(disk_pos_base: Sequence[float]) -> Vec3:
++        """Component 3. In sim, "local" = world - env_origin = base, so the hoop
++        centre expressed in base IS disk_pos_local (archi §6, §7)."""
++        return (float(disk_pos_base[0]), float(disk_pos_base[1]), float(disk_pos_base[2]))
++
++    @staticmethod
++    def signed_distance(ball_base: Sequence[float], disk_base: Sequence[float],
++                        disk_normal: Sequence[float]) -> float:
++        """Signed distance of the ball to the disk plane along its normal.
++
++        TODO(isaac): confirm the normal convention / sign against
++        ``_read_disk_pose_in_body_frame`` so component 8 matches exactly.
++        """
++        return _dot(_sub(ball_base, disk_base), disk_normal)
++
++    def _update_pass_through(self, signed_dist: float, ball_base: Sequence[float],
++                             disk_base: Sequence[float]) -> None:
++        """Component 10. Count a +->- crossing of the disk plane (archi §6).
++
++        TODO(isaac): mirror ``detect_pass_through`` (env.py:327) exactly,
++        including the in-hoop radius gate and the velocity direction test.
++        """
++        crossed = self._prev_signed_dist > 0.0 and signed_dist <= 0.0
++        if crossed and self.disk_radius > 0.0:
++            # Reject crossings outside the hoop disc.
++            radial = _sub(ball_base, disk_base)
++            if _norm(radial) > self.disk_radius:
++                crossed = False
++        if crossed:
++            self._pass_through_count += 1
++
++    # --- full observation -----------------------------------------------------
++
++    def build(
++        self,
++        *,
++        joint_pos: Sequence[float],
++        joint_vel: Sequence[float],
++        disk_pos: Sequence[float],
++        disk_normal: Sequence[float],
++        ball_pos: Sequence[float],
++        ball_vel: Sequence[float],
++        prev_action: Sequence[float],
++    ) -> list[float]:
++        if len(joint_pos) != 6 or len(joint_vel) != 6 or len(prev_action) != 6:
++            raise ValueError("joint_pos, joint_vel and prev_action must each have 6 elements")
++
++        disk_local = self.disk_pos_local(disk_pos)
++        ball_local = (float(ball_pos[0]), float(ball_pos[1]), float(ball_pos[2]))
++        direction = _sub(ball_local, disk_local)
++        distance = _norm(direction)
++
++        # Component 8 reads the *previous* tick's sign (archi §6 "prev_disk_signed_dist").
++        signed_flag = 1.0 if self._prev_signed_dist > 0.0 else 0.0
++
++        obs: list[float] = []
++        obs.extend(float(v) for v in joint_pos)          # 1
++        obs.extend(float(v) for v in joint_vel)          # 2
++        obs.extend(disk_local)                            # 3
++        obs.extend(ball_local)                            # 4
++        obs.extend(direction)                             # 5
++        obs.append(distance)                              # 6
++        obs.extend(float(v) for v in ball_vel)           # 7
++        obs.append(signed_flag)                           # 8
++        obs.extend(float(v) for v in prev_action)        # 9 (raw)
++        obs.append(float(self._pass_through_count))       # 10
++
++        # Advance internal state AFTER emitting comp 8/10 for this tick.
++        current_signed = self.signed_distance(ball_local, disk_local, disk_normal)
++        self._update_pass_through(current_signed, ball_local, disk_local)
++        self._prev_signed_dist = current_signed
++
++        if len(obs) != OBS_DIM:
++            raise AssertionError(f"observation length {len(obs)} != {OBS_DIM}")
++        return obs
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/policy_runtime.py b/src/ur3e_live_catch/ur3e_live_catch/policy_runtime.py
+new file mode 100644
+index 0000000..4edc408
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/policy_runtime.py
+@@ -0,0 +1,110 @@
++"""Policy runtime: load the exported PPO policy and run inference (archi §4.3.3).
++
++Backends are imported lazily so this module imports fine with neither torch nor
++onnxruntime installed (the pure-logic tests and the dry-run wiring can be
++exercised without them). The live node calls :meth:`PolicyRunner.infer`.
++
++THE SCALER (critical, archi §4.3.3): SKRL PPO wraps observations in a
++``RunningStandardScaler``. If the export does NOT embed it, we must apply the
++saved ``mean`` / ``var`` BEFORE the network — feeding the raw net unnormalised
++observations is a major sim-to-real divergence. ``policy_metadata.json`` here
++carries no mean/var, so either the ``.ts`` embeds the scaler or a sidecar
++``policy_scaler.json`` must provide it. The policy-equivalence test
++(``test/test_policy_equivalence.py``) decides this empirically on the ROS machine.
++"""
++
++from __future__ import annotations
++
++import json
++import math
++from pathlib import Path
++from typing import Optional, Sequence
++
++
++class ObsScaler:
++    """``RunningStandardScaler``: ``(obs - mean) / sqrt(var + eps)``."""
++
++    def __init__(self, mean: Sequence[float], var: Sequence[float], eps: float = 1e-8) -> None:
++        if len(mean) != len(var):
++            raise ValueError("mean and var length mismatch")
++        self.mean = [float(m) for m in mean]
++        self.std = [math.sqrt(float(v) + eps) for v in var]
++
++    def __call__(self, obs: Sequence[float]) -> list[float]:
++        if len(obs) != len(self.mean):
++            raise ValueError(f"obs dim {len(obs)} != scaler dim {len(self.mean)}")
++        return [(float(o) - m) / s for o, m, s in zip(obs, self.mean, self.std)]
++
++    @classmethod
++    def from_json(cls, path: Path | str) -> "ObsScaler":
++        data = json.loads(Path(path).read_text())
++        return cls(data["mean"], data["var"], float(data.get("eps", 1e-8)))
++
++
++class PolicyRunner:
++    """Load ``policy_deterministic.ts`` (torch) or ``.onnx`` and infer 6 actions."""
++
++    def __init__(
++        self,
++        model_path: Path | str,
++        *,
++        backend: str = "auto",
++        scaler: Optional[ObsScaler] = None,
++    ) -> None:
++        self.model_path = Path(model_path)
++        self.scaler = scaler
++        self._backend = self._resolve_backend(backend)
++        self._model = None  # loaded lazily on first infer / explicit load()
++
++    def _resolve_backend(self, backend: str) -> str:
++        if backend != "auto":
++            return backend
++        suffix = self.model_path.suffix.lower()
++        if suffix == ".onnx":
++            return "onnx"
++        return "torch"  # .ts / .pt default
++
++    def load(self) -> "PolicyRunner":
++        if self._model is not None:
++            return self
++        if not self.model_path.exists():
++            raise FileNotFoundError(f"policy not found: {self.model_path}")
++        if self._backend == "torch":
++            import torch  # lazy
++
++            self._torch = torch
++            self._model = torch.jit.load(str(self.model_path), map_location="cpu").eval()
++        elif self._backend == "onnx":
++            import onnxruntime  # lazy
++
++            self._model = onnxruntime.InferenceSession(
++                str(self.model_path), providers=["CPUExecutionProvider"]
++            )
++            self._onnx_input = self._model.get_inputs()[0].name
++        else:
++            raise ValueError(f"unknown backend {self._backend!r}")
++        return self
++
++    def infer(self, obs: Sequence[float]) -> list[float]:
++        if self._model is None:
++            self.load()
++        scaled = self.scaler(obs) if self.scaler is not None else [float(o) for o in obs]
++        if self._backend == "torch":
++            torch = self._torch
++            with torch.no_grad():
++                tensor = torch.tensor([scaled], dtype=torch.float32)
++                out = self._model(tensor)
++                if isinstance(out, (tuple, list)):
++                    out = out[0]
++                return [float(x) for x in out.reshape(-1).tolist()]
++        else:
++            import numpy as np  # onnxruntime already pulls numpy
++
++            inp = np.asarray([scaled], dtype=np.float32)
++            out = self._model.run(None, {self._onnx_input: inp})[0]
++            return [float(x) for x in out.reshape(-1).tolist()]
++
++
++def load_metadata(path: Path | str) -> dict:
++    """Read ``policy_metadata.json`` (obs/action dims, action_scale, dt, joints)."""
++    return json.loads(Path(path).read_text())
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/safety.py b/src/ur3e_live_catch/ur3e_live_catch/safety.py
+new file mode 100644
+index 0000000..7c3d753
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/safety.py
+@@ -0,0 +1,117 @@
++"""Safety layer: clip + rate-limit + watchdog (archi §4.3.5, §9), wired at step 6.
++
++Independent of the simulation: the policy emits aggressive targets, so these
++bounds are enforced robot-side regardless of the action mode (defense in depth).
++``v_safe = URDF_limit * 0.5`` (sim-to-real §2.1) is supplied by the caller from
++``ur_description/.../joint_limits.yaml``.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass, field
++from typing import Optional, Sequence
++
++Vec = Sequence[float]
++
++
++def _clip(value: float, lo: float, hi: float) -> float:
++    return lo if value < lo else hi if value > hi else value
++
++
++@dataclass(frozen=True)
++class JointBound:
++    min_position: float
++    max_position: float
++    v_safe: float          # rad/s
++    a_safe: float          # rad/s^2
++
++
++@dataclass
++class SafetyReport:
++    target: list[float]
++    position_clamped: list[bool] = field(default_factory=list)
++    rate_limited: list[bool] = field(default_factory=list)
++    accel_limited: list[bool] = field(default_factory=list)
++
++    @property
++    def any_limited(self) -> bool:
++        return any(self.position_clamped) or any(self.rate_limited) or any(self.accel_limited)
++
++
++class SafetyLimiter:
++    """Clip to joint range, then rate-limit to v_safe*dt and accel to a_safe*dt."""
++
++    def __init__(self, bounds: Sequence[JointBound], dt: float) -> None:
++        if len(bounds) != 6:
++            raise ValueError("expected 6 joint bounds")
++        self.bounds = list(bounds)
++        self.dt = float(dt)
++        self._prev_vel: list[float] = [0.0] * 6
++
++    def reset(self) -> None:
++        self._prev_vel = [0.0] * 6
++
++    def limit(self, target: Vec, q: Vec) -> SafetyReport:
++        if len(target) != 6 or len(q) != 6:
++            raise ValueError("target and q must each have 6 elements")
++        report = SafetyReport(target=[0.0] * 6,
++                              position_clamped=[False] * 6,
++                              rate_limited=[False] * 6,
++                              accel_limited=[False] * 6)
++        for i, b in enumerate(self.bounds):
++            desired = float(target[i])
++            # 1) position clip
++            clipped = _clip(desired, b.min_position, b.max_position)
++            report.position_clamped[i] = clipped != desired
++
++            # 2) velocity (rate) limit: |delta| <= v_safe * dt
++            max_step = b.v_safe * self.dt
++            delta = clipped - q[i]
++            if delta > max_step:
++                delta = max_step
++                report.rate_limited[i] = True
++            elif delta < -max_step:
++                delta = -max_step
++                report.rate_limited[i] = True
++
++            # 3) acceleration limit: |vel - prev_vel| <= a_safe * dt
++            vel = delta / self.dt if self.dt > 0 else 0.0
++            max_dvel = b.a_safe * self.dt
++            dvel = vel - self._prev_vel[i]
++            if dvel > max_dvel:
++                vel = self._prev_vel[i] + max_dvel
++                report.accel_limited[i] = True
++            elif dvel < -max_dvel:
++                vel = self._prev_vel[i] - max_dvel
++                report.accel_limited[i] = True
++
++            delta = vel * self.dt
++            self._prev_vel[i] = vel
++            report.target[i] = q[i] + delta
++        return report
++
++
++class Watchdog:
++    """Dead-man checks: stale perception, blown loop budget, tracking error (§9)."""
++
++    def __init__(self, stale_after_s: float, loop_budget_s: float, max_tracking_error: float) -> None:
++        self.stale_after_s = float(stale_after_s)
++        self.loop_budget_s = float(loop_budget_s)
++        self.max_tracking_error = float(max_tracking_error)
++
++    def check(
++        self,
++        *,
++        perception_age_s: float,
++        loop_time_s: float,
++        tracking_error: Optional[float] = None,
++    ) -> tuple[bool, list[str]]:
++        """Return ``(ok, reasons)``. ``ok=False`` => caller triggers a controlled stop."""
++        reasons: list[str] = []
++        if perception_age_s > self.stale_after_s:
++            reasons.append(f"stale_perception({perception_age_s:.3f}s>{self.stale_after_s:.3f}s)")
++        if loop_time_s > self.loop_budget_s:
++            reasons.append(f"loop_overrun({loop_time_s:.4f}s>{self.loop_budget_s:.4f}s)")
++        if tracking_error is not None and tracking_error > self.max_tracking_error:
++            reasons.append(f"tracking_error({tracking_error:.4f}>{self.max_tracking_error:.4f})")
++        return (not reasons), reasons
+diff --git a/src/ur3e_live_catch/ur3e_live_catch/test_ball_node.py b/src/ur3e_live_catch/ur3e_live_catch/test_ball_node.py
+new file mode 100644
+index 0000000..5e2cd91
+--- /dev/null
++++ b/src/ur3e_live_catch/ur3e_live_catch/test_ball_node.py
+@@ -0,0 +1,174 @@
++"""Artificial ball source for testing the whole chain WITHOUT a camera (archi §4.2).
++
++Publishes ``BallState`` in the SAME contract as the real tracker (stamped,
++``frame_id`` always set). Two source modes:
++
++  parabola : analytic p(t) = p0 + v0 t + 1/2 g t^2, defined in the z-up ``base``
++             frame (no axis conversion needed, archi §4.2).
++  csv      : replay ground-truth, e.g. sequences/<seq>/labels/ground_truth.csv
++             (columns ball_*_world_m and ball_*_cam_m).
++
++``publish_frame`` selects the DECLARED frame (header.frame_id):
++  - "base": publish base coordinates directly (short-circuits the hand-eye, lets
++    you isolate policy/obs errors from extrinsic-calibration errors);
++  - "<camera_frame>": publish camera-frame coordinates (exercises the full TF /
++    hand-eye path). For the parabola this applies the inverse of the configured
++    camera pose in base (``camera_translation`` / ``camera_quaternion``); for csv
++    it uses the recorded camera columns directly.
++
++Injectable Gaussian ``noise_std`` and ``dropout_prob`` stress the velocity filter
++and staleness handling.
++"""
++
++from __future__ import annotations
++
++import csv
++import math
++import random
++from pathlib import Path
++from typing import Optional
++
++import rclpy
++from rclpy.node import Node
++
++from ur3e_catch_msgs.msg import BallState
++from ur3e_live_catch.ball_frame import RigidTransform
++
++
++class TestBallNode(Node):
++    def __init__(self) -> None:
++        super().__init__("test_ball_node")
++        self.declare_parameter("output_topic", "ball_state")
++        self.declare_parameter("publish_frame", "base")
++        self.declare_parameter("base_frame", "base")
++        self.declare_parameter("rate_hz", 30.0)
++        self.declare_parameter("source", "parabola")  # parabola | csv
++        self.declare_parameter("noise_std", 0.0)
++        self.declare_parameter("dropout_prob", 0.0)
++        # parabola params (base frame, z-up, metres / m·s⁻¹ / m·s⁻²)
++        self.declare_parameter("p0", [-1.0, 1.5, 0.4])
++        self.declare_parameter("v0", [1.5, -1.0, 2.5])
++        self.declare_parameter("gravity", [0.0, 0.0, -9.81])
++        self.declare_parameter("restart_after_s", 2.0)
++        # camera pose in base (base<-camera), used only when publish_frame != base
++        self.declare_parameter("camera_translation", [0.0, 0.0, 0.0])
++        self.declare_parameter("camera_quaternion", [0.0, 0.0, 0.0, 1.0])
++        # csv params
++        self.declare_parameter("csv_path", "")
++
++        self._frame = str(self.get_parameter("publish_frame").value)
++        self._base_frame = str(self.get_parameter("base_frame").value)
++        self._noise = float(self.get_parameter("noise_std").value)
++        self._dropout = float(self.get_parameter("dropout_prob").value)
++        self._source = str(self.get_parameter("source").value)
++        self._restart = float(self.get_parameter("restart_after_s").value)
++        self._base_to_cam = self._build_camera_transform()
++
++        self._csv_rows: list[tuple[float, tuple, tuple]] = []
++        self._csv_idx = 0
++        if self._source == "csv":
++            self._load_csv(str(self.get_parameter("csv_path").value))
++
++        self._pub = self.create_publisher(BallState, str(self.get_parameter("output_topic").value), 10)
++        rate = float(self.get_parameter("rate_hz").value)
++        self._t0 = self.get_clock().now()
++        self._timer = self.create_timer(1.0 / rate, self._tick)
++        self.get_logger().info(
++            f"test_ball_node: source={self._source}, publish_frame={self._frame!r}, rate={rate} Hz"
++        )
++
++    # --- setup helpers --------------------------------------------------------
++
++    def _build_camera_transform(self) -> Optional[RigidTransform]:
++        if self._frame == self._base_frame:
++            return None
++        t = [float(x) for x in self.get_parameter("camera_translation").value]
++        q = [float(x) for x in self.get_parameter("camera_quaternion").value]
++        if t == [0.0, 0.0, 0.0] and q == [0.0, 0.0, 0.0, 1.0]:
++            self.get_logger().warn(
++                "publish_frame != base but camera transform is identity; "
++                "camera-frame output will equal base coordinates"
++            )
++        return RigidTransform(translation=(t[0], t[1], t[2]), quaternion=(q[0], q[1], q[2], q[3]))
++
++    def _load_csv(self, path: str) -> None:
++        if not path or not Path(path).is_file():
++            self.get_logger().error(f"csv source selected but csv_path invalid: {path!r}")
++            return
++        with open(path, newline="") as handle:
++            for row in csv.DictReader(handle):
++                if int(float(row.get("visible", "1"))) == 0:
++                    continue
++                t = float(row["timestamp_s"])
++                world = (float(row["ball_x_world_m"]), float(row["ball_y_world_m"]), float(row["ball_z_world_m"]))
++                cam = (float(row["ball_x_cam_m"]), float(row["ball_y_cam_m"]), float(row["ball_z_cam_m"]))
++                self._csv_rows.append((t, world, cam))
++        self.get_logger().info(f"loaded {len(self._csv_rows)} csv samples from {path}")
++
++    # --- per-tick -------------------------------------------------------------
++
++    def _elapsed(self) -> float:
++        return (self.get_clock().now() - self._t0).nanoseconds * 1e-9
++
++    def _parabola_point(self, t: float):
++        p0 = [float(x) for x in self.get_parameter("p0").value]
++        v0 = [float(x) for x in self.get_parameter("v0").value]
++        g = [float(x) for x in self.get_parameter("gravity").value]
++        base_pt = tuple(p0[i] + v0[i] * t + 0.5 * g[i] * t * t for i in range(3))
++        if self._base_to_cam is None:
++            return base_pt
++        # Express a base point in the camera frame: P^cam = R^T (P^base - t).
++        tx, ty, tz = self._base_to_cam.translation
++        shifted = (base_pt[0] - tx, base_pt[1] - ty, base_pt[2] - tz)
++        qx, qy, qz, qw = self._base_to_cam.quaternion
++        inv = RigidTransform(translation=(0.0, 0.0, 0.0), quaternion=(-qx, -qy, -qz, qw))
++        return inv.apply(shifted)
++
++    def _next_point(self):
++        if self._source == "csv":
++            if not self._csv_rows:
++                return None
++            t, world, cam = self._csv_rows[self._csv_idx % len(self._csv_rows)]
++            self._csv_idx += 1
++            return cam if self._base_to_cam is not None else world
++        # parabola
++        t = self._elapsed()
++        if self._restart > 0:
++            t = math.fmod(t, self._restart)
++        return self._parabola_point(t)
++
++    def _tick(self) -> None:
++        if self._dropout > 0.0 and random.random() < self._dropout:
++            return  # simulated detection gap
++
++        point = self._next_point()
++        msg = BallState()
++        msg.header.stamp = self.get_clock().now().to_msg()
++        msg.header.frame_id = self._frame
++        if point is None:
++            msg.valid = False
++            msg.confidence = 0.0
++        else:
++            n = self._noise
++            msg.position.x = point[0] + (random.gauss(0.0, n) if n > 0 else 0.0)
++            msg.position.y = point[1] + (random.gauss(0.0, n) if n > 0 else 0.0)
++            msg.position.z = point[2] + (random.gauss(0.0, n) if n > 0 else 0.0)
++            msg.valid = True
++            msg.confidence = 1.0
++        self._pub.publish(msg)
++
++
++def main(args=None) -> None:
++    rclpy.init(args=args)
++    node = TestBallNode()
++    try:
++        rclpy.spin(node)
++    except KeyboardInterrupt:
++        pass
++    finally:
++        node.destroy_node()
++        rclpy.try_shutdown()
++
++
++if __name__ == "__main__":
++    main()
+-- 
+2.43.0
+
