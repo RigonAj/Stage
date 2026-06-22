@@ -18,10 +18,23 @@ live_catch_node:
     disk_pos_fallback: [0.0, 0.0, 0.5]
     disk_normal_fallback: [0.0, 0.0, 1.0]
 
-    # --- reserved for step 6 (ActionMapper / safety / streaming), unused in dry-run ---
+    # --- step 6: ActionMapper / safety / streaming (archi §4.3.4-§4.3.6, §8, §9) ---
+    enable_command: false         # false => DRY-RUN, no robot command. true => stream to robot.
+    dry_run_simulate: true        # dry-run: integrate a virtual arm tracking the policy so
+                                  # the ghost moves (closed-loop preview). false => open loop.
     action_mode: "faithful"       # faithful | safe (user decision; default faithful)
-    # v_safe = URDF joint limit × 0.5 (sim-to-real §2.1); loaded from
-    # ur_description/config/ur3e/joint_limits.yaml when safety is wired.
+    command_topic: "/forward_position_controller/commands"
+    command_controller: "forward_position_controller"
+    trajectory_controller: "scaled_joint_trajectory_controller"
+    auto_switch_controller: true  # switch traj->forward controller before streaming (archi §8)
+    command_substeps: 1           # >1 upsamples 60 Hz targets (hardware also interpolates)
+    # v_safe = URDF max_velocity × v_safe_factor (sim-to-real §2.1); loaded from
+    # joint_limits_path, falling back to the documented UR3e nominal limits.
+    v_safe_factor: 0.5            # -> 1.571/1.571/1.571/3.142/3.142/3.142 rad/s
+    a_safe: 10.0                  # rad/s^2 acceleration cap (tune on hardware)
+    loop_budget_s: 0.02           # watchdog: per-tick compute budget (archi §9)
+    max_tracking_error: 0.5       # rad; |q_measured - last_command| watchdog threshold
+    joint_limits_path: "/opt/ros/humble/share/ur_description/config/ur3e/joint_limits.yaml"
 
 test_ball_node:
   ros__parameters:
@@ -30,6 +43,7 @@ test_ball_node:
     base_frame: "base"
     rate_hz: 30.0                 # perception cadence
     source: "parabola"            # parabola | csv
+    trigger_mode: false           # true => idle until ~/throw (web UI "Launch virtual ball")
     noise_std: 0.0                # inject Gaussian position noise (m) to stress filtering
     dropout_prob: 0.0             # simulate detection gaps
     p0: [-1.0, 1.5, 0.4]

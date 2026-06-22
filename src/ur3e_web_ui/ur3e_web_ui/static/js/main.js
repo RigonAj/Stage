@@ -1,9 +1,10 @@
 import { api } from "./api.js";
-import { Viewer3D } from "./viewer3d.js?v=exec-target-ghost";
+import { Viewer3D } from "./viewer3d.js?v=catch-flight-time";
 import { JogPanel } from "./jog_panel.js";
 import { TargetPanel } from "./target_panel.js?v=tcp-target-base-frame";
 import { RolloutPanel } from "./rollout_panel.js?v=exec-target-ghost";
 import { CalibrationPanel } from "./calibration_panel.js";
+import { CatchPanel } from "./catch_panel.js?v=catch-flight-time";
 
 const RAD_TO_DEG = 180 / Math.PI;
 
@@ -106,6 +107,7 @@ async function boot() {
   const targetPanel = new TargetPanel({ viewer, onError });
   const rolloutPanel = new RolloutPanel({ viewer, onError });
   const calibrationPanel = new CalibrationPanel({ viewer, onError });
+  const catchPanel = new CatchPanel({ viewer, onError });
 
   try {
     const { text, source } = await api.urdf();
@@ -124,10 +126,10 @@ async function boot() {
 
   rolloutPanel.load();
   calibrationPanel.load();
-  connectWebSocket(viewer, jogPanel, targetPanel, rolloutPanel, calibrationPanel);
+  connectWebSocket(viewer, jogPanel, targetPanel, rolloutPanel, calibrationPanel, catchPanel);
 }
 
-function connectWebSocket(viewer, jogPanel, targetPanel, rolloutPanel, calibrationPanel) {
+function connectWebSocket(viewer, jogPanel, targetPanel, rolloutPanel, calibrationPanel, catchPanel) {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   const socket = new WebSocket(`${protocol}://${location.host}/ws`);
   let gotMessage = false;
@@ -139,6 +141,7 @@ function connectWebSocket(viewer, jogPanel, targetPanel, rolloutPanel, calibrati
     const state = message.type === "goal_event" ? { goal: message.goal } : message;
     if (message.type === "state") {
       if (state.joints) viewer.setLiveJoints(state.joints.names, state.joints.positions_rad);
+      viewer.setCatch(state.catch);
       updateStatusTab(state);
       updateBadges(state);
       const driver = state.driver || {};
@@ -151,13 +154,14 @@ function connectWebSocket(viewer, jogPanel, targetPanel, rolloutPanel, calibrati
     targetPanel.update(state.driver ? state : { ...state, driver: lastDriver });
     rolloutPanel.update(state.driver ? state : { ...state, driver: lastDriver });
     calibrationPanel.update(state.driver ? state : { ...state, driver: lastDriver });
+    catchPanel.update(state.driver ? state : { ...state, driver: lastDriver });
     if (state.driver) lastDriver = state.driver;
   };
 
   socket.onclose = () => {
     showBanner("connection to server lost — reconnecting…");
     setTimeout(
-      () => connectWebSocket(viewer, jogPanel, targetPanel, rolloutPanel, calibrationPanel),
+      () => connectWebSocket(viewer, jogPanel, targetPanel, rolloutPanel, calibrationPanel, catchPanel),
       gotMessage ? 1000 : 3000,
     );
   };

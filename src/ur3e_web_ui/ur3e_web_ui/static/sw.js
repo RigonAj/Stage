@@ -1,16 +1,17 @@
-const CACHE_NAME = "ur3e-web-ui-v1";
+const CACHE_NAME = "ur3e-web-ui-v5";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
   "/favicon.svg",
   "/static/css/app.css",
   "/static/js/api.js",
-  "/static/js/main.js?v=exec-target-ghost",
-  "/static/js/viewer3d.js?v=exec-target-ghost",
+  "/static/js/main.js?v=catch-flight-time",
+  "/static/js/viewer3d.js?v=catch-flight-time",
   "/static/js/jog_panel.js",
   "/static/js/target_panel.js?v=tcp-target-base-frame",
   "/static/js/rollout_panel.js?v=exec-target-ghost",
   "/static/js/calibration_panel.js",
+  "/static/js/catch_panel.js?v=catch-flight-time",
   "/static/icons/ur3e-web-ui.svg",
 ];
 

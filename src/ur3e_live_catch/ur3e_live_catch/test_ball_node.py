@@ -30,6 +30,7 @@ from typing import Optional
 
 import rclpy
 from rclpy.node import Node
+from std_srvs.srv import Trigger
 
 from ur3e_catch_msgs.msg import BallState
 from ur3e_live_catch.ball_frame import RigidTransform
@@ -43,6 +44,11 @@ class TestBallNode(Node):
         self.declare_parameter("base_frame", "base")
         self.declare_parameter("rate_hz", 30.0)
         self.declare_parameter("source", "parabola")  # parabola | csv
+        # trigger_mode=False (default): publish continuously (back-compat, used by the
+        # chain test). trigger_mode=True: idle (valid=False) until the ``~/throw`` service
+        # is called, then fly ONE parabola for restart_after_s and idle again — this is
+        # what the web UI "Launch virtual ball" button drives.
+        self.declare_parameter("trigger_mode", False)
         self.declare_parameter("noise_std", 0.0)
         self.declare_parameter("dropout_prob", 0.0)
         # parabola params (base frame, z-up, metres / m·s⁻¹ / m·s⁻²)
@@ -62,6 +68,7 @@ class TestBallNode(Node):
         self._dropout = float(self.get_parameter("dropout_prob").value)
         self._source = str(self.get_parameter("source").value)
         self._restart = float(self.get_parameter("restart_after_s").value)
+        self._trigger_mode = bool(self.get_parameter("trigger_mode").value)
         self._base_to_cam = self._build_camera_transform()
 
         self._csv_rows: list[tuple[float, tuple, tuple]] = []
@@ -71,10 +78,14 @@ class TestBallNode(Node):
 
         self._pub = self.create_publisher(BallState, str(self.get_parameter("output_topic").value), 10)
         rate = float(self.get_parameter("rate_hz").value)
-        self._t0 = self.get_clock().now()
+        self._throw_t0 = self.get_clock().now()
+        # Continuous mode is always armed; trigger mode waits for the first throw.
+        self._armed = not self._trigger_mode
+        self._throw_srv = self.create_service(Trigger, "~/throw", self._on_throw)
         self._timer = self.create_timer(1.0 / rate, self._tick)
         self.get_logger().info(
-            f"test_ball_node: source={self._source}, publish_frame={self._frame!r}, rate={rate} Hz"
+            f"test_ball_node: source={self._source}, publish_frame={self._frame!r}, "
+            f"rate={rate} Hz, trigger_mode={self._trigger_mode}"
         )
 
     # --- setup helpers --------------------------------------------------------
@@ -108,7 +119,7 @@ class TestBallNode(Node):
     # --- per-tick -------------------------------------------------------------
 
     def _elapsed(self) -> float:
-        return (self.get_clock().now() - self._t0).nanoseconds * 1e-9
+        return (self.get_clock().now() - self._throw_t0).nanoseconds * 1e-9
 
     def _parabola_point(self, t: float):
         p0 = [float(x) for x in self.get_parameter("p0").value]
@@ -125,17 +136,39 @@ class TestBallNode(Node):
         return inv.apply(shifted)
 
     def _next_point(self):
+        if not self._armed:
+            return None  # trigger mode, waiting for a ~/throw call
         if self._source == "csv":
             if not self._csv_rows:
+                return None
+            if self._trigger_mode and self._csv_idx >= len(self._csv_rows):
+                self._armed = False  # one full replay per throw, then idle
                 return None
             t, world, cam = self._csv_rows[self._csv_idx % len(self._csv_rows)]
             self._csv_idx += 1
             return cam if self._base_to_cam is not None else world
         # parabola
         t = self._elapsed()
-        if self._restart > 0:
-            t = math.fmod(t, self._restart)
+        # Re-read each tick (like p0/v0) so the web UI "flight time" slider takes
+        # effect live via set_parameters, without restarting the node.
+        restart = float(self.get_parameter("restart_after_s").value)
+        if self._trigger_mode:
+            if restart > 0 and t >= restart:
+                self._armed = False  # flight finished; idle until the next throw
+                return None
+        elif restart > 0:
+            t = math.fmod(t, restart)
         return self._parabola_point(t)
+
+    def _on_throw(self, request, response):
+        """Arm a single flight from now (``~/throw`` Trigger service)."""
+        self._throw_t0 = self.get_clock().now()
+        self._csv_idx = 0
+        self._armed = True
+        response.success = True
+        response.message = f"ball thrown (source={self._source})"
+        self.get_logger().info("throw: armed a new flight")
+        return response
 
     def _tick(self) -> None:
         if self._dropout > 0.0 and random.random() < self._dropout:

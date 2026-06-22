@@ -157,6 +157,25 @@ input[type="number"] {
   font-size: 11px;
 }
 
+.vector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.vector-grid label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.vector-grid input {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
 .check-row {
   display: flex;
   align-items: center;

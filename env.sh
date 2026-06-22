@@ -91,6 +91,7 @@ alias compile-report='compile_report'
 
 export DV_ROSWS_ROOT="${DV_ROSWS_ROOT:-${SCRIPT_DIR}}"
 export UR3E_STACK_SCRIPT="${UR3E_STACK_SCRIPT:-${DV_ROSWS_ROOT}/scripts/launch_ur3e_stack.sh}"
+export UR3E_CATCH_STACK_SCRIPT="${UR3E_CATCH_STACK_SCRIPT:-${DV_ROSWS_ROOT}/scripts/launch_ur3e_virtual_ball_stack.sh}"
 
 dvros_source() {
   local ros_setup="/opt/ros/humble/setup.bash"
@@ -131,6 +132,14 @@ ur3e_stack_lan() {
 
 ur3e_stop() {
   DV_ROSWS_ROOT="${DV_ROSWS_ROOT}" "${UR3E_STACK_SCRIPT}" --stop "$@"
+}
+
+ur3e_catch_stack() {
+  DV_ROSWS_ROOT="${DV_ROSWS_ROOT}" "${UR3E_CATCH_STACK_SCRIPT}" "$@"
+}
+
+ur3e_catch_stop() {
+  DV_ROSWS_ROOT="${DV_ROSWS_ROOT}" "${UR3E_CATCH_STACK_SCRIPT}" --stop "$@"
 }
 
 ur3e_ui() {

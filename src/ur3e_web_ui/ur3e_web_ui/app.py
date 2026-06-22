@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 import random
+import sys
 from threading import Lock
 import time
 
@@ -58,6 +59,9 @@ TCP_IK_FALLBACK_TIMEOUT_S = 1.0
 TCP_IK_FALLBACK_ATTEMPTS = 3
 TCP_EXECUTE_MATCH_TOLERANCE_RAD = 0.05
 CALIBRATION_MOVE_MIN_DURATION_S = 4.0
+BALL_POSITION_BOUNDS_M = ((-2.0, 2.0), (-2.0, 2.0), (0.0, 2.5))
+BALL_VELOCITY_BOUNDS_M_S = ((-6.0, 6.0), (-6.0, 6.0), (-6.0, 6.0))
+BALL_FLIGHT_BOUNDS_S = (0.2, 10.0)  # test_ball_node restart_after_s (flight duration)
 
 REPLAY_PRESETS = {
     "safe": SafetyLimits(
@@ -110,6 +114,17 @@ class ReplaySettingsRequest(BaseModel):
 
 class CalibrationPoseRequest(BaseModel):
     name: str | None = None
+
+
+class CatchCommandRequest(BaseModel):
+    enable: bool = False
+    confirm: bool = False
+
+
+class CatchBallConfigRequest(BaseModel):
+    p0: list[float] | None = None
+    v0: list[float] | None = None
+    flight_s: float | None = None
 
 
 class TcpTargetRequest(BaseModel):
@@ -554,6 +569,64 @@ def create_app(bridge: RosBridge, settings: Settings) -> FastAPI:
             "duration_s": plan.time_from_start_s[-1],
         }
 
+    # ------------------------------------------------------------------ live-catch test
+    # Test tab: trigger a virtual ball (test_ball_node ~/throw) and toggle real-robot
+    # commanding on the live-catch node (~/enable_command). The policy ghost in the
+    # viewer is driven by CatchTelemetry.joint_target streamed over the websocket.
+
+    @app.post("/api/catch/throw")
+    async def catch_throw(body: CatchBallConfigRequest | None = None) -> dict:
+        if body is not None and (body.p0 is not None or body.v0 is not None):
+            p0, v0, flight_s = _validate_ball_config(body, require_all=True)
+            try:
+                success, message = await bridge.set_test_ball_config(p0, v0, flight_s)
+            except ActionServerUnavailable as exc:
+                raise HTTPException(status_code=503, detail=str(exc))
+            except RuntimeError as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            if not success:
+                raise HTTPException(status_code=409, detail=message)
+        try:
+            success, message = await bridge.throw_ball()
+        except ActionServerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        return {"ok": success, "message": message}
+
+    @app.get("/api/catch/ball_config")
+    async def catch_ball_config_get() -> dict:
+        try:
+            config = await bridge.get_test_ball_config()
+        except ActionServerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return {"p0": list(config["p0"]), "v0": list(config["v0"]), "flight_s": config["flight_s"]}
+
+    @app.post("/api/catch/ball_config")
+    async def catch_ball_config_set(body: CatchBallConfigRequest) -> dict:
+        p0, v0, flight_s = _validate_ball_config(body, require_all=True)
+        try:
+            success, message = await bridge.set_test_ball_config(p0, v0, flight_s)
+        except ActionServerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        if not success:
+            raise HTTPException(status_code=409, detail=message)
+        return {"ok": True, "message": message, "p0": list(p0), "v0": list(v0), "flight_s": flight_s}
+
+    @app.post("/api/catch/command")
+    async def catch_command(body: CatchCommandRequest) -> dict:
+        if body.enable and not body.confirm:
+            raise HTTPException(status_code=400, detail="confirm must be true to command the real robot")
+        try:
+            success, message = await bridge.set_catch_command(body.enable)
+        except ActionServerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        if not success:
+            raise HTTPException(status_code=409, detail=message)
+        return {"enabled": body.enable, "message": message}
+
     @app.post("/api/cancel")
     async def cancel() -> dict:
         return {"canceled": await bridge.cancel_active()}
@@ -718,11 +791,33 @@ def _state_message(bridge: RosBridge) -> dict:
             "rpy_rad": list(snapshot.tcp_rpy),
             "quat_xyzw": list(snapshot.tcp_quat_xyzw),
         }
+    catch = None
+    if snapshot.catch_alive:
+        catch = {
+            "ball_base": list(snapshot.ball_base),
+            "ball_vel_base": list(snapshot.ball_vel_base or (0.0, 0.0, 0.0)),
+            "raw_action": list(snapshot.catch_raw_action or ()),
+            "joint_target": list(snapshot.catch_joint_target or ()),
+            "joint_names": list(DEFAULT_JOINT_NAMES),  # so the viewer maps the ghost by name
+            "perception_age_s": snapshot.catch_perception_age_s,
+            "loop_compute_s": snapshot.catch_loop_compute_s,
+        }
+    # Always present (unlike `catch`, which is None when telemetry is stale) so the
+    # Test tab can enable/disable its buttons even before the first ball flight.
+    catch_status = {
+        "alive": snapshot.catch_alive,
+        "throw_ready": snapshot.catch_throw_ready,
+        "config_ready": snapshot.catch_config_ready,
+        "command_ready": snapshot.catch_command_ready,
+        "command_enabled": snapshot.catch_command_enabled,
+    }
     return {
         "type": "state",
         "stamp": time.time(),
         "joints": joints,
         "tcp": tcp,
+        "catch": catch,
+        "catch_status": catch_status,
         "goal": bridge.goal_to_dict(snapshot.goal),
         "driver": {
             "joint_states_alive": snapshot.joint_states_alive,
@@ -747,6 +842,46 @@ def _coerce_vector(values: list[float], expected_len: int, label: str) -> tuple[
     if not all(math.isfinite(value) for value in result):
         raise HTTPException(status_code=400, detail=f"{label} must contain finite values")
     return result
+
+
+def _validate_ball_config(
+    body: CatchBallConfigRequest,
+    *,
+    require_all: bool,
+) -> tuple[tuple[float, float, float], tuple[float, float, float], float | None]:
+    if body.p0 is None or body.v0 is None:
+        if require_all:
+            raise HTTPException(status_code=400, detail="p0 and v0 are required")
+        raise HTTPException(status_code=400, detail="no ball launch parameters provided")
+    p0 = _coerce_vector(body.p0, 3, "p0")
+    v0 = _coerce_vector(body.v0, 3, "v0")
+    _ensure_vector_bounds(p0, BALL_POSITION_BOUNDS_M, "p0")
+    _ensure_vector_bounds(v0, BALL_VELOCITY_BOUNDS_M_S, "v0")
+    flight_s: float | None = None
+    if body.flight_s is not None:
+        flight_s = float(body.flight_s)
+        lo, hi = BALL_FLIGHT_BOUNDS_S
+        if not (lo <= flight_s <= hi):
+            raise HTTPException(status_code=400, detail=f"flight_s must be within [{lo}, {hi}] s")
+    return (
+        (p0[0], p0[1], p0[2]),
+        (v0[0], v0[1], v0[2]),
+        flight_s,
+    )
+
+
+def _ensure_vector_bounds(
+    values: tuple[float, ...],
+    bounds: tuple[tuple[float, float], ...],
+    label: str,
+) -> None:
+    axes = ("x", "y", "z")
+    for axis, value, (lower, upper) in zip(axes, values, bounds, strict=True):
+        if value < lower or value > upper:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label}.{axis} must be between {lower} and {upper}",
+            )
 
 
 def _rpy_to_quat(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
@@ -828,10 +963,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _strip_ros_args(argv: list[str] | None) -> list[str]:
+    args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        from rclpy.utilities import remove_ros_args
+    except ImportError:
+        return args
+    return remove_ros_args(args=args)
+
+
 def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
-    args = build_parser().parse_args(argv)
+    args = build_parser().parse_args(_strip_ros_args(argv))
     home = tuple(float(part.strip()) for part in args.home_joints.split(","))
     if len(home) != len(DEFAULT_JOINT_NAMES):
         print(f"ERROR: --home-joints must contain {len(DEFAULT_JOINT_NAMES)} values")

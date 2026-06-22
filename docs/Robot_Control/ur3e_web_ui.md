@@ -11,6 +11,11 @@ A browser UI for the UR3e served by the `ur3e_web_ui` ROS 2 package:
   - Compare (realized vs target): a second preview that overlays the two sources for the selected episode — blue = `realized` (the simulated motion), orange = `target` (the policy command). Both have one sample per control step, so they are played frame-synchronized and slowed to a fixed, watchable duration (the raw episode is only a fraction of a second): the orange ghost whips far while the blue ghost stays small and smooth, visualizing exactly the command-vs-realized gap described in `docs/Robot_Control/ur3e_real_robot_replay.md`. Ghost-only (no robot motion); works without a connected driver.
   - Live execution overlay: while a rollout actually executes, the solid robot model follows `/joint_states` (the real measured motion) and two ghosts are overlaid, advanced by the execution progress fraction (`elapsed_s`/`total_s`) so they track the real move — blue = the commanded trajectory being executed (the selected source, incl. the live approach; it should hug the real robot, deviations are the tracking error) and orange = the other source (the raw policy command by default), both built from the same current pose so they share a start and then diverge through the episode. The overlay clears when the goal reaches a terminal state.
 - Calibration tab: records the current joints as named poses (stored in `calibration/calibration_poses.json`, override with `--calibration-poses`), replays them identically for the hand-eye calibration session ("Go" / "Go to next pose", ghost preview + confirmation, same motion gates as TCP targets), and can display the phone-support ghost (`static/models/Support3D.glb`, mount transform in `static/models/support_mount.json`) on `tool0`. Poses are joint-space on purpose — no IK branch surprises (see `docs/Robot_Control/ur3e_camera_base_calibration.md` §7).
+- Test tab: supervises the live-catch chain. It can trigger one virtual ball
+  through `/test_ball_node/throw`, display the ball marker, predicted flight arc
+  and green policy ghost from `CatchTelemetry.joint_target`, and toggle real
+  robot commanding through `/live_catch_node/enable_command` after an explicit
+  E-stop/workspace confirmation.
 - Dashboard buttons (play/stop/power on/off/brake release) appear automatically when the real driver's dashboard client is available.
 
 Troubleshooting history for the original real-robot motion issue is documented in `docs/Robot_Control/ur3e_motion_issue_resolution.md`.
@@ -23,7 +28,7 @@ Architecture and function-level documentation for the robot-control stack is in 
 python3 -m pip install --user fastapi "uvicorn[standard]"
 cd ~/Dv-Rosws/Dv-Rosws
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-select ur3e_rollout_replay ur3e_web_ui
+colcon build --symlink-install --packages-select ur3e_catch_msgs ur3e_rollout_replay ur3e_web_ui
 source env.sh
 ```
 
@@ -125,6 +130,9 @@ Things to try safely with mock hardware:
 1. Jog each joint with the +/- buttons (hold for continuous motion).
 2. Move Home, then press CANCEL MOTION mid-move.
 3. In the Rollout tab: Validate episode 0, Preview it (only the blue ghost moves), then Execute it.
+4. In the Test tab, after launching `ur3e_live_catch` with
+   `use_test_ball:=true trigger_mode:=true`, press Launch virtual ball and
+   verify the ball marker / policy ghost without enabling command.
 
 ## Run Against the Real Robot
 
@@ -167,6 +175,11 @@ The backend also exposes a JSON API (interactive docs at `/docs`):
 - `GET /api/calibration/camera` — hand-eye result (`--camera-calibration`,
   default `calibration/handeye_result.yaml`); the Calibration tab can draw the
   calibrated camera frame in the viewer from it
+- `POST /api/catch/throw` — calls `/test_ball_node/throw`
+  (`std_srvs/Trigger`) to launch one virtual ball in trigger mode
+- `POST /api/catch/command {"enable": true|false, "confirm": true|false}` —
+  calls `/live_catch_node/enable_command` (`std_srvs/SetBool`) to toggle
+  streaming to the real robot; enabling requires `confirm: true`
 - `GET /api/rollout?source=realized`, `GET /api/rollout/{i}/plan?approach=true&source=realized` (`source` is `realized` or `target`; default `realized`)
 - `POST /api/jog {"joint": "...", "direction": 1, "step_rad": 0.05}`
 - `POST /api/move_home {"confirm": true}`, `POST /api/cancel`
@@ -177,6 +190,9 @@ The backend also exposes a JSON API (interactive docs at `/docs`):
 ## Notes / Limitations
 
 - The 3D model uses the URDF published by the running driver, so it includes the extracted kinematics calibration. Without a driver it falls back to the default `ur3e` xacro (badge shows `xacro`).
-- Replaying the policy live (closed-loop) is out of scope; the Rollout tab replays recorded rollout joint sequences, with `joint_position_before_rad` as the default realized source (see `docs/Robot_Control/ur3e_real_robot_replay.md`).
+- The Rollout tab remains open-loop replay of recorded joint sequences. The Test
+  tab is the live-catch supervisor; it only calls the live-catch services and
+  displays telemetry. The actual 60 Hz policy/safety/streaming path lives in
+  `ur3e_live_catch` (see `docs/Robot_Control/ur3e_live_catch_implementation_status.md`).
 - TCP target motion uses MoveIt only for inverse kinematics; the UI still sends the final motion through the UR scaled joint trajectory controller.
 - One motion goal at a time; jog requests are rejected while a rollout/home/TCP goal is active.

@@ -314,9 +314,12 @@ Le passage au reel demande cependant de corriger l'ecart simulation-reel :
 - la balle simulee est trop rapide pour une enveloppe sure du UR3e ;
 - l'observation de la politique doit etre reconstruite exactement en live.
 
-La future boucle fermee live n'est pas encore implementee dans les docs au
-statut du 17 juin 2026. L'architecture retenue est un noeud Python
-mono-processus pour limiter la latence :
+La boucle fermee live est maintenant amorcee dans le workspace ROS. Au
+2026-06-22, les paquets `ur3e_catch_msgs` et `ur3e_live_catch` existent, le
+chemin perception -> observation 33-D -> policy -> safety -> streaming est
+cable, et la commande robot est protegee par `enable_command=false` par defaut.
+L'architecture retenue reste un noeud Python mono-processus pour limiter la
+latence :
 
 ```text
 BallState + /joint_states
@@ -329,15 +332,19 @@ BallState + /joint_states
   -> streaming vers forward_position_controller
 ```
 
-Deux nouveaux paquets sont prevus :
+Deux paquets portent cette boucle :
 
 - `ur3e_catch_msgs` : messages `BallState` et `CatchTelemetry` ;
 - `ur3e_live_catch` : boucle live, source de balle test, observation, inference,
   action, securite et streaming.
 
-Le message `BallState` devra etre horodate au temps d'evenement, exprime en
-metres et accompagne d'un `frame_id` clair. C'est indispensable pour mesurer la
-latence et appliquer correctement la transformation TF.
+Le message `CatchTelemetry` expose maintenant l'observation, l'action brute, la
+cible articulaire sure, la balle en `base`, la vitesse balle, l'age perception,
+le temps de calcul de boucle et l'etat `command_enabled`. La question du scaler
+de l'export courant est tranchee : le TorchScript reproduit les actions
+enregistrees sans scaler externe. Le point encore ouvert cote perception reelle
+est le timestamp d'evenement de `BallState`, indispensable pour un budget de
+latence fiable.
 
 ## Etat actuel synthetique
 
@@ -348,23 +355,27 @@ Les elements deja bien couverts par le depot sont :
 - la methode Trace, avec documentation visuelle et interface de diagnostic ;
 - les scripts de calibration intrinseque par mire clignotante ;
 - les outils de preparation hand-eye camera-base robot ;
-- le stack UR3e avec driver, UI web, jog, TCP target, replay et calibration tab ;
+- le stack UR3e avec driver, UI web, jog, TCP target, replay, calibration tab et
+  onglet `Test` pour la balle virtuelle/live catch ;
 - la validation/replay de rollouts Isaac Lab ;
-- les documents d'architecture pour le sim-to-real et la boucle live.
+- les documents d'architecture et d'etat d'implementation pour le sim-to-real et
+  la boucle live.
 
 Les points qui restent critiques ou a finaliser sont :
 
 - valider physiquement la calibration hand-eye `T_base_camera` ;
 - publier une position de balle native, typee et horodatee, plutot qu'un tableau
   vide ou non structure ;
-- figer le repere camera utilise par le tracker, la calibration et TF ;
-- reconstruire exactement l'observation 33-D attendue par la politique PPO ;
-- verifier si le scaler d'observation SKRL est embarque dans l'export de la
-  politique ou doit etre applique separement ;
+- publier les TF statiques `base -> <camera_frame>` et
+  `wrist_3_link -> hoop_center` avec la vraie geometrie ;
+- figer les composantes observation 3 / 8 / 10 avec la source Isaac et la
+  geometrie reelle du montage ;
+- tester sur robot reel avec balle virtuelle avant toute vraie balle ;
+- brancher la vraie perception C++ en `BallState` horodate au temps d'evenement ;
 - reentrainer ou adapter la simulation avec vitesses, efforts, latences et bruit
   realistes ;
-- implementer la boucle live fermee avec watchdog et controleur streaming ;
-- mesurer la latence bout-en-bout avant tout essai dynamique reel.
+- mesurer la latence bout-en-bout avec perception reelle avant tout essai
+  dynamique avec vraie balle.
 
 ## Documents utiles par sujet
 
@@ -382,8 +393,9 @@ Les points qui restent critiques ou a finaliser sont :
 - Driver UR3e : `docs/Robot_Control/ur3e_current_driver_setup.md`
 - Probleme de mouvement UR3e : `docs/Robot_Control/ur3e_motion_issue_resolution.md`
 - Sim-to-real PPO : `docs/Robot_Control/ur3e_ball_catch_sim_to_real.md`
-- Boucle live future : `docs/Robot_Control/ur3e_live_catch_architecture.md`
+- Architecture boucle live : `docs/Robot_Control/ur3e_live_catch_architecture.md`
 - État d'implémentation boucle live : `docs/Robot_Control/ur3e_live_catch_implementation_status.md`
+- Reste a faire : `docs/reste_a_faire.md`
 - Compilation du rapport : `docs/latex_compilation.md`
 - Contexte historique : `docs/Antonio_Stage.pdf`
 - Consignes de rapport : `docs/Consignes pour le rapport M1_M2MTN-1.pdf`

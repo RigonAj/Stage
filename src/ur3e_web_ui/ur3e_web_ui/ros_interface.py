@@ -8,8 +8,9 @@ import time
 from typing import Any, Callable, Sequence
 
 import rclpy
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.action import ActionClient
-from rclpy.executors import SingleThreadedExecutor
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
@@ -18,10 +19,12 @@ from control_msgs.action import FollowJointTrajectory
 from controller_manager_msgs.srv import ListControllers, SwitchController
 from geometry_msgs.msg import PoseStamped
 from moveit_msgs.srv import GetPositionIK
+from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+from rcl_interfaces.srv import GetParameters, SetParameters
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64
 from std_msgs.msg import String as StringMsg
-from std_srvs.srv import Trigger
+from std_srvs.srv import SetBool, Trigger
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from tf2_ros import (
@@ -31,6 +34,8 @@ from tf2_ros import (
     LookupException,
     TransformListener,
 )
+
+from ur3e_catch_msgs.msg import CatchTelemetry
 
 from ur3e_rollout_replay.replay_core import DEFAULT_JOINT_NAMES
 from ur3e_rollout_replay.send import build_joint_trajectory
@@ -49,6 +54,12 @@ IK_PARENT_FRAME = "base_link"
 TCP_PARENT_FRAME = "base"
 TCP_CHILD_FRAME = "tool0"
 JOINT_STATE_STALE_S = 1.0
+CATCH_TELEMETRY_TOPIC = "catch_telemetry"
+CATCH_STALE_S = 0.5  # ball viz vanishes if the live node stops publishing
+THROW_SERVICE = "/test_ball_node/throw"            # std_srvs/Trigger (Test tab "Launch ball")
+TEST_BALL_GET_PARAMETERS_SERVICE = "/test_ball_node/get_parameters"
+TEST_BALL_SET_PARAMETERS_SERVICE = "/test_ball_node/set_parameters"
+ENABLE_COMMAND_SERVICE = "/live_catch_node/enable_command"  # std_srvs/SetBool (real-robot toggle)
 
 DASHBOARD_COMMANDS = ("play", "stop", "power_on", "power_off", "brake_release")
 
@@ -110,12 +121,31 @@ class StateSnapshot:
     ik_service_ready: bool = False
     dashboard_available: bool = False
     goal: GoalRecord | None = None
+    # Live-catch telemetry (CatchTelemetry, archi §4.5; off the hot path).
+    ball_base: tuple[float, float, float] | None = None
+    ball_vel_base: tuple[float, float, float] | None = None
+    catch_monotonic: float = 0.0
+    catch_raw_action: tuple[float, ...] | None = None
+    catch_joint_target: tuple[float, ...] | None = None
+    catch_perception_age_s: float | None = None
+    catch_loop_compute_s: float | None = None
+    catch_command_enabled: bool = False  # live node mode (from telemetry)
+    catch_throw_ready: bool = False      # test_ball ~/throw service reachable
+    catch_config_ready: bool = False     # test_ball parameter services reachable
+    catch_command_ready: bool = False    # live_catch ~/enable_command service reachable
 
     @property
     def joint_states_alive(self) -> bool:
         return (
             self.joint_positions is not None
             and (time.monotonic() - self.joint_state_monotonic) < JOINT_STATE_STALE_S
+        )
+
+    @property
+    def catch_alive(self) -> bool:
+        return (
+            self.ball_base is not None
+            and (time.monotonic() - self.catch_monotonic) < CATCH_STALE_S
         )
 
 
@@ -148,6 +178,10 @@ class RosBridge:
         self._switch_controller_client: Any = None
         self._controller_list_future: Any = None
         self._controller_poll_tick = 0
+        self._throw_client: Any = None
+        self._test_ball_get_params_client: Any = None
+        self._test_ball_set_params_client: Any = None
+        self._enable_command_client: Any = None
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -158,6 +192,7 @@ class RosBridge:
         self._node = node
 
         node.create_subscription(JointState, "/joint_states", self._on_joint_state, 10)
+        node.create_subscription(CatchTelemetry, CATCH_TELEMETRY_TOPIC, self._on_catch_telemetry, 10)
 
         latched = QoSProfile(
             depth=1,
@@ -180,12 +215,16 @@ class RosBridge:
         self._ik_client = node.create_client(GetPositionIK, IK_SERVICE_NAME)
         self._list_controllers_client = node.create_client(ListControllers, LIST_CONTROLLERS_SERVICE)
         self._switch_controller_client = node.create_client(SwitchController, SWITCH_CONTROLLER_SERVICE)
+        self._throw_client = node.create_client(Trigger, THROW_SERVICE)
+        self._test_ball_get_params_client = node.create_client(GetParameters, TEST_BALL_GET_PARAMETERS_SERVICE)
+        self._test_ball_set_params_client = node.create_client(SetParameters, TEST_BALL_SET_PARAMETERS_SERVICE)
+        self._enable_command_client = node.create_client(SetBool, ENABLE_COMMAND_SERVICE)
         for command in DASHBOARD_COMMANDS:
             self._dashboard_clients[command] = node.create_client(Trigger, f"/dashboard_client/{command}")
 
         self._executor = SingleThreadedExecutor()
         self._executor.add_node(node)
-        self._thread = threading.Thread(target=self._executor.spin, daemon=True, name="ros-executor")
+        self._thread = threading.Thread(target=self._spin_executor, daemon=True, name="ros-executor")
         self._thread.start()
 
     def shutdown(self) -> None:
@@ -205,6 +244,13 @@ class RosBridge:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
 
+    def _spin_executor(self) -> None:
+        try:
+            if self._executor is not None:
+                self._executor.spin()
+        except (ExternalShutdownException, RCLError):
+            pass
+
     # ---------------------------------------------------------------- callbacks (executor thread)
 
     def _on_joint_state(self, msg: JointState) -> None:
@@ -218,6 +264,20 @@ class RosBridge:
             self._snapshot.joint_positions = positions
             self._snapshot.joint_velocities = velocities
             self._snapshot.joint_state_monotonic = time.monotonic()
+
+    def _on_catch_telemetry(self, msg: CatchTelemetry) -> None:
+        ball = (float(msg.ball_base.x), float(msg.ball_base.y), float(msg.ball_base.z))
+        vel = (float(msg.ball_vel_base.x), float(msg.ball_vel_base.y), float(msg.ball_vel_base.z))
+        with self._lock:
+            self._snapshot.ball_base = ball
+            self._snapshot.ball_vel_base = vel
+            self._snapshot.catch_monotonic = time.monotonic()
+            self._snapshot.catch_raw_action = tuple(float(v) for v in msg.raw_action)
+            self._snapshot.catch_joint_target = tuple(float(v) for v in msg.joint_target)
+            self._snapshot.catch_perception_age_s = float(msg.perception_age_s)
+            self._snapshot.catch_loop_compute_s = float(msg.loop_compute_s)
+            # command_enabled exists once ur3e_catch_msgs is rebuilt; guard for older builds.
+            self._snapshot.catch_command_enabled = bool(getattr(msg, "command_enabled", False))
 
     def _on_robot_description(self, msg: StringMsg) -> None:
         if msg.data:
@@ -246,6 +306,16 @@ class RosBridge:
         action_ready = self._action_client.server_is_ready()
         ik_ready = self._ik_client.service_is_ready() if self._ik_client is not None else False
         dashboard_ready = self._dashboard_clients["play"].service_is_ready()
+        throw_ready = self._throw_client is not None and self._throw_client.service_is_ready()
+        config_ready = (
+            self._test_ball_get_params_client is not None
+            and self._test_ball_get_params_client.service_is_ready()
+            and self._test_ball_set_params_client is not None
+            and self._test_ball_set_params_client.service_is_ready()
+        )
+        command_ready = (
+            self._enable_command_client is not None and self._enable_command_client.service_is_ready()
+        )
         with self._lock:
             self._snapshot.tcp_xyz = tcp_xyz
             self._snapshot.tcp_rpy = tcp_rpy
@@ -253,6 +323,9 @@ class RosBridge:
             self._snapshot.action_server_ready = action_ready
             self._snapshot.ik_service_ready = ik_ready
             self._snapshot.dashboard_available = dashboard_ready
+            self._snapshot.catch_throw_ready = throw_ready
+            self._snapshot.catch_config_ready = config_ready
+            self._snapshot.catch_command_ready = command_ready
 
         self._controller_poll_tick += 1
         if self._controller_poll_tick >= CONTROLLER_POLL_TICKS:
@@ -516,10 +589,118 @@ class RosBridge:
         response = await self._await_ros_future(client.call_async(Trigger.Request()))
         return bool(response.success), str(response.message)
 
+    # ---------------------------------------------------------------- live-catch test tab
+
+    async def throw_ball(self) -> tuple[bool, str]:
+        """Trigger one virtual-ball flight on test_ball_node (~/throw)."""
+        client = self._throw_client
+        if client is None or not client.service_is_ready():
+            raise ActionServerUnavailable(f"test ball throw service not available: {THROW_SERVICE}")
+        response = await self._await_ros_future(client.call_async(Trigger.Request()))
+        return bool(response.success), str(response.message)
+
+    async def get_test_ball_config(self) -> dict:
+        """Read the virtual ball p0, v0 and flight duration (restart_after_s)."""
+        client = self._test_ball_get_params_client
+        if client is None or not client.service_is_ready():
+            raise ActionServerUnavailable(
+                f"test ball parameter service not available: {TEST_BALL_GET_PARAMETERS_SERVICE}"
+            )
+        request = GetParameters.Request()
+        request.names = ["p0", "v0", "restart_after_s"]
+        response = await self._await_ros_future(client.call_async(request))
+        if len(response.values) != 3:
+            raise RuntimeError("test_ball_node did not return p0, v0 and restart_after_s")
+        return {
+            "p0": _parameter_value_to_vector(response.values[0], "p0"),
+            "v0": _parameter_value_to_vector(response.values[1], "v0"),
+            "flight_s": _parameter_value_to_scalar(response.values[2], "restart_after_s"),
+        }
+
+    async def set_test_ball_config(
+        self,
+        p0: Sequence[float],
+        v0: Sequence[float],
+        flight_s: float | None = None,
+    ) -> tuple[bool, str]:
+        """Update the virtual ball launch point, velocity and flight duration."""
+        client = self._test_ball_set_params_client
+        if client is None or not client.service_is_ready():
+            raise ActionServerUnavailable(
+                f"test ball parameter service not available: {TEST_BALL_SET_PARAMETERS_SERVICE}"
+            )
+        request = SetParameters.Request()
+        request.parameters = [
+            _double_array_parameter("p0", p0),
+            _double_array_parameter("v0", v0),
+        ]
+        if flight_s is not None:
+            request.parameters.append(_double_parameter("restart_after_s", flight_s))
+        response = await self._await_ros_future(client.call_async(request))
+        for result in response.results:
+            if not result.successful:
+                return False, result.reason or "test_ball_node rejected launch parameters"
+        return True, "virtual ball launch frame updated"
+
+    async def set_catch_command(self, enable: bool) -> tuple[bool, str]:
+        """Enable/disable real-robot commanding on live_catch_node (~/enable_command)."""
+        client = self._enable_command_client
+        if client is None or not client.service_is_ready():
+            raise ActionServerUnavailable(
+                f"live-catch command service not available: {ENABLE_COMMAND_SERVICE}"
+            )
+        request = SetBool.Request()
+        request.data = bool(enable)
+        response = await self._await_ros_future(client.call_async(request))
+        return bool(response.success), str(response.message)
+
 
 def _duration_from_seconds(seconds: float) -> Duration:
     whole = int(math.floor(seconds))
     return Duration(sec=whole, nanosec=int((seconds - whole) * 1_000_000_000))
+
+
+def _double_array_parameter(name: str, values: Sequence[float]) -> Parameter:
+    parameter = Parameter()
+    parameter.name = name
+    parameter.value = ParameterValue(
+        type=ParameterType.PARAMETER_DOUBLE_ARRAY,
+        double_array_value=[float(value) for value in values],
+    )
+    return parameter
+
+
+def _double_parameter(name: str, value: float) -> Parameter:
+    parameter = Parameter()
+    parameter.name = name
+    parameter.value = ParameterValue(
+        type=ParameterType.PARAMETER_DOUBLE,
+        double_value=float(value),
+    )
+    return parameter
+
+
+def _parameter_value_to_scalar(value: ParameterValue, name: str) -> float:
+    if value.type == ParameterType.PARAMETER_DOUBLE:
+        return float(value.double_value)
+    if value.type == ParameterType.PARAMETER_INTEGER:
+        return float(value.integer_value)
+    raise RuntimeError(f"test_ball_node parameter {name} is not a number")
+
+
+def _parameter_value_to_vector(
+    value: ParameterValue,
+    name: str,
+) -> tuple[float, float, float]:
+    if value.type == ParameterType.PARAMETER_DOUBLE_ARRAY:
+        data = tuple(float(item) for item in value.double_array_value)
+    elif value.type == ParameterType.PARAMETER_INTEGER_ARRAY:
+        data = tuple(float(item) for item in value.integer_array_value)
+    else:
+        raise RuntimeError(f"test_ball_node parameter {name} is not a numeric array")
+    if len(data) != 3:
+        raise RuntimeError(f"test_ball_node parameter {name} must contain 3 values")
+    return (data[0], data[1], data[2])
 
 
 def _base_pose_to_base_link(

@@ -37,7 +37,7 @@ The Trace algorithm measures the trail width perpendicular to the motion from ma
 
 10. Filter 3D outliers and fit the trajectory, then publish the ball position on the ROS 2 topic `ball_position_3d_mm`.
 
-The full algorithm is documented visually in `trace_algorithm_explanation.html` (detailed explanation, parameters, diagnostics) and `algo_trace_graph.html` (C++ pipeline graph).
+The full algorithm is documented visually in `docs/trace_algorithm_explanation.html` (detailed explanation, parameters, diagnostics) and `docs/Context/algo_trace_graph.html` (C++ pipeline graph).
 
 ## Trajectory Fit
 
@@ -59,7 +59,7 @@ The original tracker is enabled with the `Circle fit` toggle (off by default). I
 Z = fx * R / r
 ```
 
-It works well when the ball projection stays close to a circle, but its depth depends directly on a single radius value (`dZ/dr = -Z/r`), which is why the Trace method replaced it for fast throws. Its pipeline is documented in `algo_circle_fitting_graph.html`.
+It works well when the ball projection stays close to a circle, but its depth depends directly on a single radius value (`dZ/dr = -Z/r`), which is why the Trace method replaced it for fast throws. Its pipeline is documented in `docs/Context/algo_circle_fitting_graph.html`.
 
 ## Views
 
@@ -75,9 +75,9 @@ Simulated sequences (Isaac Sim video converted to events with v2e) live in the l
 .
 ├── env.sh                              build/run/calib/deps shell helpers
 ├── calibration_camera_DVXplorer_*.xml  real camera intrinsics
-├── trace_algorithm_explanation.html    Trace algorithm documentation
-├── algo_trace_graph.html               Trace pipeline graph
-├── algo_circle_fitting_graph.html      circle-fitting pipeline graph
+├── docs/trace_algorithm_explanation.html          Trace algorithm documentation
+├── docs/Context/algo_trace_graph.html             Trace pipeline graph
+├── docs/Context/algo_circle_fitting_graph.html    circle-fitting pipeline graph
 ├── Stage_summary.tex / .pdf            internship report (both methods, validation, calibration)
 ├── images/                             report figures
 ├── scripts/                            calibration and utility scripts
@@ -154,4 +154,4 @@ run
 
 ## Notes
 
-Depth estimation is sensitive to the width measured in pixels: a small pixel error can create a large depth error, especially when the ball is far from the camera. The Trace view exposes every parameter of the supported-edge detector (`Support div/min/max`, `Support radius px`, `Border %`) and of the ribbon fit so this measurement can be inspected and tuned. See `trace_algorithm_explanation.html` for the tuning guide.
+Depth estimation is sensitive to the width measured in pixels: a small pixel error can create a large depth error, especially when the ball is far from the camera. The Trace view exposes every parameter of the supported-edge detector (`Support div/min/max`, `Support radius px`, `Border %`) and of the ribbon fit so this measurement can be inspected and tuned. See `docs/trace_algorithm_explanation.html` for the tuning guide.

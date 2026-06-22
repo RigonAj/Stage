@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = "ur3e_live_catch"
@@ -9,8 +11,8 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
         (f"share/{package_name}", ["package.xml"]),
-        (f"share/{package_name}/config", ["config/live_catch.yaml"]),
-        (f"share/{package_name}/launch", ["launch/test_dry_run.launch.py"]),
+        (f"share/{package_name}/config", glob("config/*.yaml")),
+        (f"share/{package_name}/launch", glob("launch/*.launch.py")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -24,6 +26,7 @@ setup(
             "test_ball_node = ur3e_live_catch.test_ball_node:main",
             "float32_adapter = ur3e_live_catch.float32_adapter:main",
             "live_catch_node = ur3e_live_catch.live_catch_node:main",
+            "latency_report = ur3e_live_catch.latency_report:main",
         ],
     },
 )

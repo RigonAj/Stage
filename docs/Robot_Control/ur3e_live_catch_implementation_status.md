@@ -1,10 +1,31 @@
-# UR3e Ball-Catch — État d'implémentation de la boucle live (passage 1)
+# UR3e Ball-Catch — État d'implémentation de la boucle live (passage 2)
 
-> Statut (2026-06-20) : **étapes 1–5 de la feuille de route §11 implémentées**
-> (contrat de messages, source de balle de test, transform de repère,
-> observation 33-D, runtime policy en **dry-run**). Aucune commande robot n'est
-> émise. ActionMapper / safety / streaming (étape 6+) sont **conçus mais non
-> câblés**.
+> Statut (2026-06-22) : **étapes 1–8 de la feuille de route §11 implémentées et
+> buildées sur la machine ROS Humble** ; **le robot UR3e est désormais disponible**,
+> donc l'étape 9 (bring-up matériel) — outillée (launch + procédure + onglet **Test**
+> du web UI) — est **prête à valider sur le robot réel** (E-stop en main, procédure §8).
+> Le chemin de commande (ActionMapper → SafetyLimiter → CommandStreamer →
+> `forward_position_controller`) est **câblé** derrière un flag `enable_command`
+> (défaut **`false` = dry-run, rien ne bouge**), avec bascule de contrôleur
+> automatique (§8) et watchdog d'arrêt contrôlé (§9), activable **à chaud** depuis
+> l'onglet **Test** du web UI (service `~/enable_command`) ou au lancement. La
+> visualisation balle + **fantôme policy** + télémétrie est ajoutée au web UI
+> (§4.4). La mesure de latence bout-en-bout (§10) est en place.
+>
+> Vérifié **sur cette machine ROS** : `colcon build` des paquets, introspection
+> du message, résolution complète des imports des nœuds, **smoke-test dry-run en
+> process**, **smoke-test ROS des services de l'onglet Test** (`~/throw` arme/désarme
+> un vol ; `~/enable_command` refusé proprement sans modèle), et — avec
+> `torch 2.12.1+cpu` installé dans `.venv` (uv, py3.10) — **toute la chaîne réelle**
+> `test_ball_node` (balle en `base`) → obs → **vraie policy** → safety, en dry-run
+> (238 msgs en 4 s, actions non nulles, pass-through qui s'incrémente, cibles sûres
+> bornées). **Question scaler tranchée** : la policy reproduit `action_normalized` à
+> **max |Δ| = 4.6e-6** sans scaler externe → le `.ts` embarque le scaler, **aucun
+> `policy_scaler.json` requis**. **À valider sur le robot (désormais disponible)** :
+> commande réelle sur `forward_position_controller` (onglet Test ou `enable_command:=true`).
+>
+> Passage 1 (2026-06-20) : étapes 1–5 (dry-run), ActionMapper/safety/streaming
+> conçus mais non câblés.
 
 Ce document décrit **précisément ce qui existe dans le code à ce jour**, ce qui a
 été **vérifié**, ce qui reste **ouvert**, et comment construire/exécuter. Il
@@ -39,15 +60,15 @@ mono-processus retenue (§2 du plan).
 
 | Étape | Sujet | État |
 |---|---|---|
-| 1 | `ur3e_catch_msgs` (`BallState`, `CatchTelemetry`) | ✅ implémenté |
+| 1 | `ur3e_catch_msgs` (`BallState`, `CatchTelemetry`) | ✅ implémenté (+ champs latence/vitesse balle) |
 | 2 | `test_ball_node` + adaptateur `Float32 → BallState` | ✅ implémenté |
 | 3 | `ball_frame` conscient du repère + filtre vitesse | ✅ implémenté (TF statiques à fournir au lancement) |
 | 4 | `ObservationBuilder` 33-D + test d'équivalence | ✅ implémenté ; comps 3/8/10 paramétrées, à figer (source Isaac) |
-| 5 | `PolicyRunner` (question scaler) → action en dry-run | ✅ implémenté ; scaler à trancher (test torch) |
-| 6 | `ActionMapper` + safety + streaming | 🟡 conçu (modules+tests), **non câblé** |
-| 7 | Bascule contrôleur + viz web UI | ⬜ à faire |
-| 8 | Mesure de latence bout-en-bout | ⬜ à faire |
-| 9 | Bring-up robot par étapes | ⬜ à faire |
+| 5 | `PolicyRunner` (question scaler) → action en dry-run | ✅ implémenté ; **scaler tranché** : pas de scaler externe requis (`.ts` l'embarque, Δ=4.6e-6) |
+| 6 | `ActionMapper` + safety + streaming | ✅ **câblé** (flag `enable_command`, défaut dry-run) + `limits.py`/`streaming.py` + tests |
+| 7 | Bascule contrôleur + viz web UI | ✅ bascule auto dans le nœud (§8) ; marqueur balle + arc prédit + télémétrie dans le web UI |
+| 8 | Mesure de latence bout-en-bout | ✅ champs télémétrie + `latency.py` + nœud `latency_report` |
+| 9 | Bring-up robot par étapes | 🟡 outillé (`live_catch.launch.py` + onglet **Test** du web UI + procédure §8) ; **robot disponible — à valider sur le robot réel** |
 
 ---
 
@@ -111,19 +132,24 @@ Arborescence effective :
 ur3e_live_catch/
   package.xml, setup.py, setup.cfg, pytest.ini, resource/ur3e_live_catch
   config/live_catch.yaml
-  launch/test_dry_run.launch.py
+  launch/test_dry_run.launch.py   launch/live_catch.launch.py
   ur3e_live_catch/
     joint_order.py       ball_frame.py     observation.py
     policy_runtime.py    action.py         safety.py
+    limits.py            streaming.py      latency.py
     float32_adapter.py   test_ball_node.py live_catch_node.py
+    latency_report.py
   test/
     conftest.py
     test_observation_equivalence.py  test_ball_frame.py
     test_action_mapper.py            test_safety.py
+    test_streaming.py                test_limits.py
+    test_command_pipeline.py         test_latency.py
     test_policy_equivalence.py
 ```
 
-Entry points (`setup.py`) : `test_ball_node`, `float32_adapter`, `live_catch_node`.
+Entry points (`setup.py`) : `test_ball_node`, `float32_adapter`, `live_catch_node`,
+`latency_report`.
 
 ### 4.1 Modules de logique pure (sans rclpy / sans numpy → testables hors ROS)
 
@@ -174,23 +200,45 @@ l'ordre exact, avec les indices de tranche exposés en constantes (`IDX_*`) :
 - `ObsScaler(mean, var)` : `(obs − mean)/√(var+eps)`, chargeable depuis
   `policy_scaler.json` ; appliqué **avant** le réseau **si fourni**.
 - `infer(obs33) -> action6`. `load_metadata()` lit `policy_metadata.json`.
-- ⚠️ **Question scaler ouverte** : `policy_metadata.json` ne porte pas mean/var →
-  soit le `.ts` embarque le scaler, soit il faut un sidecar. **Tranché par le test
-  d'équivalence policy** (§6 ci-dessous) sur la machine ROS.
+- **Scaler résolu pour l'export courant** : `policy_metadata.json` ne porte pas
+  mean/var, mais le test d'équivalence policy (§6) confirme que le `.ts`
+  embarque la normalisation nécessaire ; aucun sidecar n'est requis pour ce
+  modèle.
 
-**`action.py`** (§4.3.4, **conçu, non câblé**) — `ActionMapper(mode)` :
+**`action.py`** (§4.3.4, **câblé**) — `ActionMapper(mode)` :
 - `faithful` : `target = action × 0.5` (absolu, non clippé) ; mémorise l'action
   **brute** pour comp 9.
 - `safe` : `target = q + clamp(action,−1,1)·v_safe·dt` ; mémorise l'action
   **clippée**. Nécessite `v_safe`.
 - Ne **fait pas** respecter les bornes — c'est le rôle de `safety.py`.
 
-**`safety.py`** (§4.3.5, §9, **conçu, non câblé**) :
+**`safety.py`** (§4.3.5, §9, **câblé**) :
 - `SafetyLimiter(bounds, dt)` : **clip** position (URDF) → **rate-limit**
   `|Δ| ≤ v_safe·dt` → **accel-limit** `|Δv| ≤ a_safe·dt` ; renvoie un `SafetyReport`
-  (quelles contraintes ont mordu).
+  (quelles contraintes ont mordu). `reset()` remet la mémoire de vitesse à zéro
+  (appelé à chaque arrêt contrôlé pour redémarrer la rampe à l'arrêt).
 - `Watchdog(stale_after_s, loop_budget_s, max_tracking_error)` : `check(...)`
   renvoie `(ok, reasons)` ; `ok=False` ⇒ arrêt contrôlé. `v_safe = limite URDF × 0.5`.
+
+**`limits.py`** (§4.3.5, §9 ; nouveau) — bornes `SafetyLimiter` depuis les limites
+articulaires :
+- `build_joint_bounds(limits_by_name, v_safe_factor=0.5, a_safe)` → liste ordonnée
+  de `JointBound` (`v_safe = max_velocity × facteur`, sim-to-real §2.1). Lève si un
+  joint manque — **jamais** de borne silencieuse.
+- `load_ur3e_joint_limits(path)` : lit `ur_description/.../joint_limits.yaml`
+  (PyYAML paresseux, tag `!degrees`) ; **fallback** sur les limites nominales UR3e
+  documentées (3.142 / 6.283 rad/s) si le fichier est absent → paquet autonome.
+
+**`streaming.py`** (§4.3.6 ; nouveau) — `CommandStreamer` :
+- `format(target)` → commande 6-D dans l'**ordre canonique** (payload
+  `Float64MultiArray`). `stream(target)` peut sur-échantillonner (substeps,
+  interpolation linéaire) ; le matériel interpole déjà 60 Hz → 500 Hz.
+- `hold(fallback=q)` → répète la dernière commande (arrêt contrôlé : un
+  contrôleur de position tient sa dernière consigne).
+
+**`latency.py`** (§10, étape 8 ; nouveau) — `LatencyStats` : agrégats exacts
+(count/mean/min/max) + percentiles p50/p95/p99 sur fenêtre glissante bornée, sans
+numpy.
 
 ### 4.2 Nœuds rclpy (exécutables sur la machine ROS)
 
@@ -208,23 +256,72 @@ l'ordre exact, avec les indices de tranche exposés en constantes (`IDX_*`) :
   (`camera_translation`/`camera_quaternion`) → permet le **test de parité** §12 ;
 - `noise_std` (bruit gaussien) et `dropout_prob` (trous) injectables.
 
-**`live_catch_node.py`** (§2, §4.3) — **boucle live DRY-RUN, 60 Hz** :
+**`live_catch_node.py`** (§2, §4.3) — **boucle live 60 Hz, dry-run OU commande** :
 - abonne `/joint_states` (cache réordonné) et `ball_state` ; tf2 `Buffer`+`Listener` ;
 - par tick : `ball_frame.process` (TF `frame_id→base`) → pose disque (TF
   `base→hoop_center`, sinon **fallback config**) → `ObservationBuilder.build` →
-  `PolicyRunner.infer` → **log de l'action brute** + publication `CatchTelemetry` ;
-- **aucune commande robot** ; l'action brute est réinjectée comme **composante 9**
-  au tick suivant ;
-- modèle chargé depuis `data/models/` puis **fallback** sur l'export daté ; si
-  aucun modèle, tourne en observation-seule (action = zéros) avec un warning.
+  `PolicyRunner.infer` → `ActionMapper.map` → `SafetyLimiter.limit` → publication
+  `CatchTelemetry` (obs, action brute, **cible sûre**, balle base+vitesse, latence) ;
+- **`enable_command` (défaut `false`)** : tout le pipeline tourne (la cible sûre
+  est calculée et publiée en télémétrie) mais **aucune commande n'est émise**.
+  `true` : `CommandStreamer` publie sur `forward_position_controller/commands`
+  (`Float64MultiArray`, ordre canonique) ;
+- **bascule de contrôleur** (§8) : si `auto_switch_controller`, le nœud appelle
+  `controller_manager/switch_controller` (−`scaled_joint_trajectory_controller`
+  +`forward_position_controller`) et **ne stream qu'une fois le contrôleur actif**
+  (vérifié par `list_controllers`) ;
+- **watchdog** (§9) : perception périmée / budget de boucle dépassé / erreur de
+  suivi `|q − dernière commande|` ⇒ **arrêt contrôlé** (hold + `safety.reset()`) ;
+- **garde-fou** : sans modèle policy chargé, le nœud **refuse de commander** (une
+  action nulle serait une cible absolue dangereuse) et reste en dry-run ;
+- l'action mémorisée par l'`ActionMapper` (brute en `faithful`, clippée en `safe`)
+  est réinjectée comme **composante 9** au tick suivant ;
+- modèle chargé **eagerly** depuis `data/models/` puis **fallback** sur l'export
+  daté ; échec de chargement (torch/onnx absent, export invalide) → observation-
+  seule (action = zéros) avec un warning, **au démarrage** (pas dans le timer).
+
+**`latency_report.py`** (§10, étape 8) — abonne `catch_telemetry`, agrège
+`perception_age_s` et `loop_compute_s` via `LatencyStats`, imprime un résumé
+périodique (et final à l'arrêt) en ms. À comparer au budget de latence modélisé à
+l'entraînement (sim-to-real §5.6).
 
 ### 4.3 Config & launch
 - `config/live_catch.yaml` : sections `live_catch_node`, `test_ball_node`,
   `ball_float32_adapter`. Contient `loop_hz: 60`, repères, géométrie disque
-  **placeholder**, `model_path`, et les clés safety/`action_mode` **réservées**
-  (étape 6).
+  **placeholder**, `model_path`, et les clés étape 6 **actives** : `enable_command`
+  (défaut `false`), `action_mode`, `command_topic`, noms de contrôleurs,
+  `auto_switch_controller`, `v_safe_factor`, `a_safe`, `loop_budget_s`,
+  `max_tracking_error`, `joint_limits_path`.
 - `launch/test_dry_run.launch.py` : `test_ball_node` (`publish_frame=base`) +
   `live_catch_node` ; argument CLI `publish_frame:=camera_optical` pour la parité.
+- `launch/live_catch.launch.py` (nouveau) : point d'entrée unique de bring-up
+  (§9). Arguments : `enable_command` (défaut `false`), `action_mode`, `model_path`,
+  `use_adapter` (bridge tracker C++), `use_test_ball` (balle simulée),
+  `publish_frame`. La **même** config sert du dry-run sim au robot réel.
+
+### 4.4 Visualisation web UI (étape 7, paquet `ur3e_web_ui`)
+**Hors chemin critique** : pure télémétrie. Le bridge `ros_interface.py` abonne
+`catch_telemetry` (`CatchTelemetry`) et range balle/vitesse/action/cible/latence
+dans le `StateSnapshot` (drapeau `catch_alive`, péremption 0,5 s). `app.py` ajoute
+une section `catch` au payload WebSocket. `viewer3d.js` rend un **marqueur balle**
+(sphère) dans le repère `base` (même conversion base→three.js `(-x, z, y)` que les
+repères TCP/caméra) et un **arc balistique prédit** (intégration `p + v t +
+½ g t²`). `main.js` appelle `viewer.setCatch(state.catch)`.
+
+**Onglet « Test » (étape 9 / UI).** Deux boutons pilotent la chaîne depuis l'UI :
+- **Launch virtual ball** → service `~/throw` (`std_srvs/Trigger`) de `test_ball_node`
+  (param `trigger_mode` : nœud inactif entre deux lancers, **un** vol de parabole par
+  appel). Un **fantôme vert** (`policyGhost` de `viewer3d.js`) suit `joint_target` — la
+  pose commandée par le réseau — superposé au robot live.
+- **Run on real robot** (case de confirmation) → service `~/enable_command`
+  (`std_srvs/SetBool`) de `live_catch_node` : bascule la commande **à chaud** (refus si
+  aucun modèle chargé) ; **Stop / back to safe** restaure
+  `scaled_joint_trajectory_controller`. `CatchTelemetry.command_enabled` remonte l'état
+  réel ; le badge `catch:` de l'en-tête le reflète.
+
+Backend : `POST /api/catch/throw` et `/api/catch/command` (`app.py`) ; clients de
+service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plomberie
+`switch_controller` historique reste disponible pour un usage manuel.
 
 ---
 
@@ -241,48 +338,91 @@ l'ordre exact, avec les indices de tranche exposés en constantes (`IDX_*`) :
 
 ## 6. Vérification
 
-### Exécuté **ici** (Python stdlib, sans ROS/torch/numpy) — **19 tests OK**
+### Tests de logique pure (Python stdlib, sans ROS/torch/numpy) — **42 OK, 1 skip**
 - `test_observation_equivalence.py` — rejoue les rollouts ; vérifie longueur 33,
-  ordre, et **bit-proximité** sur comp 1/2 (vs `joint_position_before_rad` /
-  `velocity`), comp 5/6 (dérivations), **comp 9 (action brute précédente)**.
-  → **Confirme** que la donnée enregistrée correspond à notre reconstruction.
+  ordre, **bit-proximité** comp 1/2, comp 5/6, **comp 9 (action brute précédente)**.
 - `test_ball_frame.py` — identité si `base`, mm→m, rotation+translation, rejet
-  frame vide/inconnu, vitesse par différence finie + invariance par translation,
-  staleness.
+  frame vide/inconnu, vitesse par différence finie + invariance, staleness.
 - `test_action_mapper.py` — faithful (`target=action×0.5`, comp 9 brute) ; safe
   (incrémental + clip, comp 9 clippée) ; **faithful reproduit
   `joint_position_target_rad`** des rollouts.
-- `test_safety.py` — clip position, rate-limit, accel-limit, watchdog (stale /
-  overrun / tracking error).
-- `py_compile` **OK** sur **tous** les fichiers, y compris les nœuds rclpy
-  (validation de syntaxe ; les imports ROS se résolvent sur la machine ROS).
+- `test_safety.py` — clip position, rate-limit, accel-limit, watchdog.
+- `test_streaming.py` — `format`/`stream` (interpolation)/`hold` du `CommandStreamer`.
+- `test_limits.py` — `v_safe = max_vel × 0.5` (1.571/…/3.142), ordre canonique,
+  joint manquant ⇒ lève.
+- `test_command_pipeline.py` — **pipeline composé** ActionMapper→Safety→Streamer :
+  une cible **absolue agressive** (faithful) est **rate-limitée sans saut** et
+  converge vers `action×0.5` ; clip position ; mode safe.
+- `test_latency.py` — agrégats + percentiles nearest-rank + fenêtre bornée.
+- `test_policy_equivalence.py` — **`skip` ici** (torch non installé sur cette
+  machine) : voir point ouvert #1.
 
-### À exécuter **sur la machine ROS Humble** (différé ici)
-- `test_policy_equivalence.py` (**`skip` si torch absent**) — charge le `.ts`,
-  alimente l'`observation` enregistrée, compare à `action_normalized`. Un écart
-  serré ⇒ scaler OK ; un écart large ⇒ **scaler manquant** → fournir
-  `policy_scaler.json` et passer un `ObsScaler` au `PolicyRunner`.
-- `colcon build` des deux paquets ; lancement du dry-run ; `ros2 topic echo` ;
-  **parité de repère** (base vs caméra, §12).
+### Exécuté **sur cette machine ROS Humble** (nouveau dans ce passage)
+- `colcon build --packages-select ur3e_catch_msgs ur3e_live_catch` ✅ (puis
+  `ur3e_rollout_replay`, `ur3e_web_ui` pour la viz).
+- `ros2 interface show ur3e_catch_msgs/msg/CatchTelemetry` ✅ — champs
+  `ball_vel_base`, `perception_age_s`, `loop_compute_s`, `command_enabled` présents.
+- **Résolution complète des imports** de `live_catch_node`, `latency_report`,
+  `ur3e_web_ui.ros_interface`, `ur3e_web_ui.app` ✅ (rclpy, `controller_manager_msgs`,
+  `std_msgs/Float64MultiArray`, `ur3e_catch_msgs`, modules `limits`/`streaming`).
+- **Smoke-test dry-run en process** (nœud réel + stub `/joint_states`/`ball_state`)
+  ✅ : `CatchTelemetry` publiée, obs 33-D, action 6-D, **cible sûre 6-D**, balle
+  transformée (identité `base`), `ball_vel_base` par différence finie cohérente
+  (≈ v0), `perception_age_s`/`loop_compute_s` renseignés. Fallback policy gracieux
+  (torch absent → action zéros, pas de crash).
+- `node --check` sur `viewer3d.js` / `main.js` / `catch_panel.js` ✅.
+- **Smoke-test ROS de l'onglet Test** ✅ : `test_ball_node trigger_mode:=true` +
+  `live_catch_node`, puis appels de service — `~/throw` arme un vol (balle
+  `valid=False` → `True` avec parabole → `False` après `restart_after_s`),
+  `~/enable_command(true)` **refusé** (`success=false`) faute de modèle en python
+  système, `~/enable_command(false)` OK. Tests web UI : **24 OK** ; logique pure
+  live-catch : **42 OK / 1 skip**.
+
+### Exécuté **avec torch** (`.venv` uv, torch 2.12.1+cpu)
+- **Équivalence policy** ✅ : la policy reproduit `action_normalized` enregistré à
+  **max |Δ| = 4.6e-6** (50 échantillons) **sans scaler externe** → le `.ts`
+  embarque le scaler, `test_policy_equivalence.py` passerait (`< 1e-2`).
+- **Chaîne complète en process** ✅ : `test_ball_node` (parabole en `base`) →
+  `live_catch_node` dry-run avec la **vraie policy** → 238 `CatchTelemetry` en 4 s,
+  **toutes** avec action non nulle, `pass_through` 0→1→2, `joint_target` borné par
+  la safety (action brute jusqu'à −16 → pas articulaire minuscule), `loop_compute`
+  ≈ 1 ms, `perception_age` ≈ 31 ms.
+- Note venv : `torch` est dans `.venv` (py3.10, compat ROS Humble) ; `rclpy` vient
+  du `PYTHONPATH` ROS. PyYAML absent du venv → `load_ur3e_joint_limits` retombe sur
+  les **limites nominales** (vitesses identiques à l'URDF ; positions ±2π). Ajouter
+  `pyyaml` au venv pour des bornes de position exactes si on lance depuis le venv.
+
+### À valider **sur le robot** (désormais disponible)
+- Bring-up par étapes (séquence §8) avec **E-stop en main** ; `ros2 topic echo` ;
+  **parité de repère** (base vs caméra, §12) ; **test watchdog** (couper la
+  perception → hold) ; **commande réelle** sur `forward_position_controller`,
+  déclenchée depuis l'onglet **Test** du web UI (*Run on real robot*) ou
+  `enable_command:=true`. Vérifier la bascule (`ros2 control list_controllers` →
+  `forward_position_controller` actif) et le retour au contrôleur de trajectoire au *Stop*.
 
 ---
 
 ## 7. Points ouverts / à finaliser
 
-1. **Scaler SKRL** (§4.3.3) — trancher via `test_policy_equivalence.py` (torch).
-   *Risque de divergence sim-to-real majeur si non résolu.*
+1. ~~**Scaler SKRL**~~ — **RÉSOLU** (2026-06-22, torch dans `.venv`) : la policy
+   reproduit `action_normalized` à Δ=4.6e-6 **sans scaler externe** ; le `.ts`
+   l'embarque. Aucun `policy_scaler.json` requis. *(Risque sim-to-real majeur levé.)*
 2. **Composantes obs 3 / 8 / 10** — figer d'après la **source Isaac**
    (`_read_disk_pose_in_body_frame`, signe `(ball−disk)·normale`,
    `detect_pass_through`) ; renseigner la géométrie disque réelle (montage). Voir
    les `TODO(isaac)` dans `observation.py`.
 3. **TF statiques** — publier `base → <camera_frame>` (hand-eye) et
    `wrist_3_link → hoop_center` (montage) avant tout test réaliste.
-4. **Étape 6** — câbler `ActionMapper` (flag `action_mode`) + `SafetyLimiter` +
-   streaming vers `forward_position_controller` (bascule de contrôleur via la
-   plomberie existante de `ros_interface.py`).
-5. **Horodatage événement** — `BallState.header.stamp` est pour l'instant le temps
-   de réception (adaptateur/test node) ; migrer vers le temps d'événement pour le
-   budget de latence (étape 8).
+4. **`a_safe` / `loop_budget_s`** — valeurs par défaut conservatrices à **caler sur
+   le matériel** (l'accélération sûre n'est pas dans l'URDF ; le budget de boucle
+   dépend du temps d'inférence torch réel).
+5. **Étape 9 — bring-up matériel** — **robot disponible, à valider** : enchaîner
+   perception seule → dry-run → balle lente E-stop en main → montée en vitesse
+   (séquence §8 ci-dessous, pilotable depuis l'onglet **Test**). Vérifier
+   `forward_position_controller` **spawné** (`ros2 control list_controllers`).
+6. **Horodatage événement** — `BallState.header.stamp` est pour l'instant le temps
+   de réception (adaptateur/test node) ; migrer vers le temps d'événement pour
+   resserrer le budget de latence (sim-to-real §5.6).
 
 ---
 
@@ -297,14 +437,43 @@ source install/setup.bash
 ln -s ../ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts \
       data/models/policy_deterministic.ts
 
-# Dry-run (fournir /joint_states via use_fake_hardware/URSim séparément) :
-ros2 launch ur3e_live_catch test_dry_run.launch.py
-ros2 topic echo /catch_telemetry
-ros2 topic echo /ball_state
+# Démarrer le driver UR (robot réel) pour fournir /joint_states + contrôleurs ;
+# en l'absence de robot, use_fake_hardware / URSim font l'affaire.
+ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur3e robot_ip:=<IP> launch_rviz:=false
 
-# Tests de logique pure (stdlib) :
-cd src/ur3e_live_catch && python3 -m pytest test/ -q
+# Dry-run (rien ne bouge) :
+ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true enable_command:=false
+ros2 topic echo /catch_telemetry
+ros2 run ur3e_live_catch latency_report          # budget de latence (§10)
+
+# Bring-up par étapes (§8, ci-dessous) — GARDER L'E-STOP en main :
+#  a) commande sur le robot (ou fake hardware / URSim), balle simulée :
+ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true enable_command:=true
+#  b) perception réelle (tracker C++ -> adaptateur) + commande :
+ros2 launch ur3e_live_catch live_catch.launch.py use_adapter:=true enable_command:=true
+#  c) piloté depuis le web UI (onglet Test) — balle à la demande + activation à chaud :
+#     IMPORTANT : lancer live_catch sous le .venv (torch) pour que la policy infère.
+ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true trigger_mode:=true
+ros2 run ur3e_web_ui ur3e_web_ui   # onglet "Test" : Launch virtual ball / Run on real robot
+
+# Tests de logique pure (stdlib) — note: le pytest système entre en conflit avec
+# des plugins ROS, d'où PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 :
+cd src/ur3e_live_catch && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q
 ```
+
+### Étape 9 — séquence de bring-up (procédure du plan §9, §11.9)
+1. **Perception seule** : vérifier `ball_state` (echo + marqueur balle web UI).
+2. **Dry-run** (`enable_command:=false`) : inspecter `catch_telemetry`
+   (obs/action/cible sûre), vérifier la latence ≤ budget modélisé.
+3. **Approche** vers la pose de départ avec le `scaled_joint_trajectory_controller`
+   (web UI / `ur3e_rollout_replay`), déjà sûr.
+4. **Commande, fake hardware / URSim** (`enable_command:=true`, ou bouton *Run on
+   real robot* de l'onglet Test) : le nœud bascule sur `forward_position_controller`
+   et stream ; **tester le watchdog** (couper la perception → hold) ; *Stop* restaure
+   `scaled_joint_trajectory_controller`.
+5. **Robot réel** (désormais disponible) **, vitesse réduite, E-stop en main, sans
+   vraie balle** (balle virtuelle via l'onglet Test), puis balle lente, puis montée
+   en vitesse de balle.
 
 ---
 

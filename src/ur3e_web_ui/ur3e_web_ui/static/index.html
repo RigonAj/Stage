@@ -29,6 +29,7 @@
       <span class="badge" id="badge-speed">speed: –</span>
       <span class="badge" id="badge-ik">ik: –</span>
       <span class="badge" id="badge-urdf">urdf: –</span>
+      <span class="badge" id="badge-catch">catch: –</span>
     </div>
   </header>
 
@@ -44,6 +45,7 @@
         <button class="tab" data-tab="target">Target</button>
         <button class="tab" data-tab="rollout">Rollout</button>
         <button class="tab" data-tab="calibration">Calibration</button>
+        <button class="tab" data-tab="catch">Test</button>
       </nav>
 
       <div class="tab-page active" id="tab-status">
@@ -251,6 +253,79 @@
         </label>
         <div id="calib-camera-status" class="hint"></div>
       </div>
+
+      <div class="tab-page" id="tab-catch">
+        <h2>Virtual ball</h2>
+        <p class="hint">Throws one simulated ball at the live-catch policy. The
+        <b style="color:#35d39a">green ghost</b> is the pose the network commands
+        (<code>joint_target</code>); the red marker and arc are the ball and its predicted
+        flight. Needs the <code>live_catch</code> + <code>test_ball</code> nodes running
+        (<code>trigger_mode</code>).</p>
+        <h2>Launch frame</h2>
+        <div class="vector-grid">
+          <label>X m<input id="catch-p0-x" type="number" step="0.01" min="-2" max="2"></label>
+          <label>Y m<input id="catch-p0-y" type="number" step="0.01" min="-2" max="2"></label>
+          <label>Z m<input id="catch-p0-z" type="number" step="0.01" min="0" max="2.5"></label>
+        </div>
+        <div class="vector-grid">
+          <label>Vx m/s<input id="catch-v0-x" type="number" step="0.05" min="-6" max="6"></label>
+          <label>Vy m/s<input id="catch-v0-y" type="number" step="0.05" min="-6" max="6"></label>
+          <label>Vz m/s<input id="catch-v0-z" type="number" step="0.05" min="-6" max="6"></label>
+        </div>
+        <div class="vector-grid">
+          <label>Flight s<input id="catch-flight-s" type="number" step="0.1" min="0.2" max="10"></label>
+        </div>
+        <div class="row gap" id="catch-launch-mode">
+          <span class="hint" style="align-self:center">Mouse drag:</span>
+          <button class="mode-button" data-launch-mode="move">Move p0</button>
+          <button class="mode-button" data-launch-mode="aim">Aim v0</button>
+          <button class="mode-button" data-launch-mode="speed">Speed |v0|</button>
+        </div>
+        <p class="hint">Drag the cyan gizmo to place the throw point. Switch to
+        <b>Aim v0</b> to rotate the yellow velocity arrow's direction, or
+        <b>Speed |v0|</b> to scale its magnitude — the predicted arc updates live.</p>
+        <div class="row gap">
+          <button id="btn-catch-apply-ball">Apply frame</button>
+          <button id="btn-catch-reset-ball">Reset</button>
+          <button id="btn-catch-throw">Launch virtual ball</button>
+          <label class="check-row">
+            <input type="checkbox" id="catch-show-launch-frame" checked>
+            Show launch frame
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="catch-show-ghost" checked>
+            Show policy ghost
+          </label>
+        </div>
+        <div id="catch-status" class="goal-status">idle</div>
+
+        <h2>Policy telemetry</h2>
+        <table id="catch-table">
+          <tbody>
+            <tr><th>Ball (base)</th><td id="catch-ball">–</td></tr>
+            <tr><th>Ball vel</th><td id="catch-ball-vel">–</td></tr>
+            <tr><th>Perception age</th><td id="catch-age">–</td></tr>
+            <tr><th>Loop compute</th><td id="catch-loop">–</td></tr>
+            <tr><th>Raw action</th><td id="catch-raw">–</td></tr>
+            <tr><th>Joint target</th><td id="catch-target">–</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Real robot</h2>
+        <p class="hint">Repeats the throw but lets the policy <b>command the physical
+        UR3e</b>: the live node switches to <code>forward_position_controller</code> and
+        streams the safe joint target. While active, the other tabs' motion is unavailable.
+        Keep an operator at the E-stop.</p>
+        <label class="confirm-row">
+          <input type="checkbox" id="catch-confirm">
+          Workspace clear and an operator is at the E-stop.
+        </label>
+        <div class="row gap">
+          <button id="btn-catch-command-on" class="danger" disabled>Run on real robot</button>
+          <button id="btn-catch-command-off" class="warn">Stop / back to safe</button>
+        </div>
+        <div id="catch-command-status" class="goal-status">command: off</div>
+      </div>
     </aside>
   </main>
 
@@ -269,7 +344,7 @@
     </div>
   </div>
 
-  <script type="module" src="/static/js/main.js?v=exec-target-ghost"></script>
+  <script type="module" src="/static/js/main.js?v=catch-flight-time"></script>
   <script>
     if ("serviceWorker" in navigator && window.isSecureContext) {
       window.addEventListener("load", () => {

@@ -9,16 +9,46 @@ const THREE_TO_ROS_Q = ROS_TO_THREE_Q.clone().invert();
 const BASE_TO_BASE_LINK_Q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, Math.PI, "XYZ"));
 const BASE_LINK_TO_BASE_Q = BASE_TO_BASE_LINK_Q.clone().invert();
 
+// Velocity gizmo: zero-rotation reference points along base +Z (THREE +Y = up), and
+// the throwable speed is clamped so the ball stays in a sane range (m/s).
+const VEL_REF_DIR = new THREE.Vector3(0, 1, 0);
+const VEL_SPEED_MIN = 0.2;
+const VEL_SPEED_MAX = 9.0;
+
 export class Viewer3D {
   constructor(container) {
     this.container = container;
     this.robot = null;
     this.ghost = null;
     this.replayGhost = null;
+    this.policyGhost = null;
+    this.policyGhostEnabled = true;
     this.toolMesh = null;
     this.cameraFrame = null;
+    this.ballGroup = null;
+    this.ballMarker = null;
+    this.ballPath = null;
+    this.ballLaunchFrame = null;
+    this.ballLaunchControls = null;
+    this.ballLaunchCallback = null;
+    this.ballLaunchUpdateMuted = false;
+    this.ballLaunchVelocity = null;
+    this.ballLaunchPath = null;
+    // Mouse control of v0: "move" drags p0 (translate), "aim" rotates the velocity
+    // direction (rotate gizmo), "speed" scales its norm (scale gizmo). Only one
+    // gizmo is shown at a time. _velDir is a unit vector in THREE space, _velSpeed
+    // its magnitude in m/s; together they encode v0 (base) via _velBase().
+    this.ballVelocityHandle = null;
+    this.ballVelocityControls = null;
+    this.ballLaunchMode = "move";
+    this._velDir = new THREE.Vector3(0, 1, 0);
+    this._velSpeed = 0;
+    this._velScaleRefSpeed = 0;
+    this._velDragging = false;
+    this._flightHorizon = 2.0;  // predicted-arc length = test_ball restart_after_s (s)
     this.ghostMaterialApplied = false;
     this.replayGhostMaterialApplied = false;
+    this.policyGhostMaterialApplied = false;
     this.preview = null; // {plan, referencePlan, startMs, onProgress, onDone}
     this.targetFrame = null;
     this.targetCallback = null;
@@ -46,6 +76,8 @@ export class Viewer3D {
     this.scene.add(grid);
 
     this.buildTargetFrame();
+    this.buildBall();
+    this.buildBallLaunchFrame();
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -77,6 +109,11 @@ export class Viewer3D {
     this.replayGhost.rotation.x = -Math.PI / 2;
     this.replayGhost.visible = false;
     this.scene.add(this.replayGhost);
+
+    this.policyGhost = loader.parse(urdfText);
+    this.policyGhost.rotation.x = -Math.PI / 2;
+    this.policyGhost.visible = false;
+    this.scene.add(this.policyGhost);
   }
 
   buildTargetFrame() {
@@ -281,14 +318,327 @@ export class Viewer3D {
     this.scene.add(this.cameraFrame);
   }
 
+  // base (x,y,z) -> three.js (-x, z, y): the base->base_link (pi about Z) then
+  // ROS Z-up -> three.js Y-up convention used by the TCP/camera frames above.
+  baseToThree(x, y, z) {
+    return new THREE.Vector3(-x, z, y);
+  }
+
+  baseVectorToThree(x, y, z) {
+    return new THREE.Vector3(-x, z, y);
+  }
+
+  buildBall() {
+    this.ballGroup = new THREE.Group();
+    this.ballGroup.visible = false;
+
+    const ballMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff5d5d,
+      emissive: 0x4a0000,
+      roughness: 0.4,
+    });
+    this.ballMarker = new THREE.Mesh(new THREE.SphereGeometry(0.03, 24, 16), ballMaterial);
+    this.ballGroup.add(this.ballMarker);
+
+    const pathMaterial = new THREE.LineBasicMaterial({ color: 0xff9d5d, transparent: true, opacity: 0.85 });
+    this.ballPath = new THREE.Line(new THREE.BufferGeometry(), pathMaterial);
+    this.ballGroup.add(this.ballPath);
+
+    this.scene.add(this.ballGroup);
+  }
+
+  buildBallLaunchFrame() {
+    this.ballLaunchFrame = new THREE.Group();
+    this.ballLaunchFrame.visible = false;
+
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: 0x59d7ff,
+      emissive: 0x063047,
+      roughness: 0.38,
+    });
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.026, 24, 16), coreMaterial);
+    this.ballLaunchFrame.add(core);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({ color: 0x59d7ff, transparent: true, opacity: 0.65 });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.003, 8, 48), ringMaterial);
+    ring.rotation.x = Math.PI / 2;
+    this.ballLaunchFrame.add(ring);
+
+    const axes = [
+      { label: "X", direction: new THREE.Vector3(1, 0, 0), color: 0xff4b4b, labelPosition: [0.18, 0, 0] },
+      { label: "Y", direction: new THREE.Vector3(0, 1, 0), color: 0x41c97f, labelPosition: [0, 0.18, 0] },
+      { label: "Z", direction: new THREE.Vector3(0, 0, 1), color: 0x4fa3ff, labelPosition: [0, 0, 0.18] },
+    ];
+    for (const axis of axes) {
+      this.ballLaunchFrame.add(new THREE.ArrowHelper(axis.direction, new THREE.Vector3(), 0.16, axis.color, 0.04, 0.022));
+      const label = this.makeAxisLabel(axis.label, axis.color);
+      label.position.set(...axis.labelPosition);
+      label.scale.set(0.052, 0.052, 0.052);
+      this.ballLaunchFrame.add(label);
+    }
+
+    this.ballLaunchVelocity = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(),
+      0.25,
+      0xffd166,
+      0.07,
+      0.035,
+    );
+    this.ballLaunchFrame.add(this.ballLaunchVelocity);
+
+    const pathMaterial = new THREE.LineBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.55 });
+    this.ballLaunchPath = new THREE.Line(new THREE.BufferGeometry(), pathMaterial);
+    this.scene.add(this.ballLaunchPath);
+    this.scene.add(this.ballLaunchFrame);
+
+    this.ballLaunchControls = new TransformControls(this.camera, this.renderer.domElement);
+    this.ballLaunchControls.setSize(0.65);
+    this.ballLaunchControls.setMode("translate");
+    this.ballLaunchControls.setSpace("world");
+    this.ballLaunchControls.attach(this.ballLaunchFrame);
+    this.ballLaunchControls.visible = false;
+    this.ballLaunchControls.addEventListener("dragging-changed", (event) => {
+      this.controls.enabled = !event.value;
+    });
+    this.ballLaunchControls.addEventListener("objectChange", () => {
+      if (!this.ballLaunchCallback || this.ballLaunchUpdateMuted) return;
+      this.ballLaunchCallback(this.getBallLaunchConfig());
+    });
+    this.scene.add(this.ballLaunchControls);
+
+    // Velocity gizmo: rotate => aim v0, scale => set |v0|. Attached to an invisible
+    // handle kept at the launch-frame origin; the yellow arrow stays the visual.
+    this.ballVelocityHandle = new THREE.Object3D();
+    this.scene.add(this.ballVelocityHandle);
+    this.ballVelocityControls = new TransformControls(this.camera, this.renderer.domElement);
+    this.ballVelocityControls.setSize(0.85);
+    this.ballVelocityControls.setSpace("local");
+    this.ballVelocityControls.setMode("rotate");
+    this.ballVelocityControls.attach(this.ballVelocityHandle);
+    this.ballVelocityControls.visible = false;
+    this.ballVelocityControls.addEventListener("dragging-changed", (event) => {
+      this.controls.enabled = !event.value;
+      this._velDragging = event.value;
+      if (!event.value) this._onVelocityDragEnd();
+    });
+    this.ballVelocityControls.addEventListener("objectChange", () => this._onVelocityGizmoChange());
+    this.scene.add(this.ballVelocityControls);
+  }
+
+  // move | aim | speed — pick which gizmo drives the launch frame (one at a time).
+  setBallLaunchMode(mode) {
+    this.ballLaunchMode = mode === "aim" || mode === "speed" ? mode : "move";
+    if (this.ballLaunchMode === "speed" && this.ballVelocityControls) {
+      this.ballVelocityControls.setMode("scale");
+      this._velScaleRefSpeed = this._velSpeed || VEL_SPEED_MIN;
+      this.ballVelocityHandle.scale.set(1, 1, 1);
+    } else if (this.ballLaunchMode === "aim" && this.ballVelocityControls) {
+      this.ballVelocityControls.setMode("rotate");
+    }
+    this._syncVelocityHandle();
+    this._applyLaunchControlsVisibility();
+  }
+
+  _applyLaunchControlsVisibility() {
+    const shown = !!(this.ballLaunchFrame && this.ballLaunchFrame.visible);
+    const moveOn = shown && this.ballLaunchMode === "move";
+    const velOn = shown && (this.ballLaunchMode === "aim" || this.ballLaunchMode === "speed");
+    if (this.ballLaunchControls) {
+      this.ballLaunchControls.visible = moveOn;
+      this.ballLaunchControls.enabled = moveOn; // only the active gizmo grabs the mouse
+    }
+    if (this.ballVelocityControls) {
+      this.ballVelocityControls.visible = velOn;
+      this.ballVelocityControls.enabled = velOn;
+    }
+  }
+
+  // Keep the (invisible) velocity handle co-located with the frame and oriented to
+  // _velDir. Skipped mid-drag so the rotate gizmo's twist is not snapped under the user.
+  _syncVelocityHandle() {
+    if (!this.ballVelocityHandle || !this.ballLaunchFrame) return;
+    this.ballVelocityHandle.position.copy(this.ballLaunchFrame.position);
+    if (!this._velDragging) {
+      this.ballVelocityHandle.quaternion.setFromUnitVectors(VEL_REF_DIR, this._velDir);
+      this.ballVelocityHandle.scale.set(1, 1, 1);
+    }
+    this.ballVelocityHandle.updateMatrixWorld();
+  }
+
+  _onVelocityGizmoChange() {
+    if (this.ballLaunchUpdateMuted) return;
+    if (this.ballLaunchMode === "aim") {
+      this._velDir = VEL_REF_DIR.clone().applyQuaternion(this.ballVelocityHandle.quaternion).normalize();
+    } else if (this.ballLaunchMode === "speed") {
+      const scale = this.ballVelocityHandle.scale;
+      const s = (Math.abs(scale.x) + Math.abs(scale.y) + Math.abs(scale.z)) / 3;
+      this._velSpeed = THREE.MathUtils.clamp(this._velScaleRefSpeed * s, VEL_SPEED_MIN, VEL_SPEED_MAX);
+    }
+    this.updateBallLaunchVelocity(this._velBase());
+    if (this.ballLaunchFrame) {
+      const p = this.ballLaunchFrame.position;
+      this.updateBallLaunchPath([-p.x, p.z, p.y], this._velBase());
+    }
+    if (this.ballLaunchCallback) this.ballLaunchCallback(this.getBallLaunchConfig());
+  }
+
+  _onVelocityDragEnd() {
+    if (this.ballLaunchMode === "speed") {
+      this._velScaleRefSpeed = this._velSpeed;
+      this.ballVelocityHandle.scale.set(1, 1, 1);
+    }
+    this._syncVelocityHandle();
+  }
+
+  // v0 in base coords from the current direction/speed (THREE<->base is an involution).
+  _velBase() {
+    const v = this._velDir.clone().multiplyScalar(this._velSpeed);
+    return [-v.x, v.z, v.y];
+  }
+
+  enableBallLaunchFrame(callback) {
+    this.ballLaunchCallback = callback;
+    if (this.ballLaunchFrame) {
+      this.ballLaunchFrame.visible = true;
+      if (this.ballLaunchPath) this.ballLaunchPath.visible = true;
+      this._syncVelocityHandle();
+      this._applyLaunchControlsVisibility();
+    }
+  }
+
+  setBallLaunchFrameVisible(visible) {
+    if (this.ballLaunchFrame) this.ballLaunchFrame.visible = visible;
+    if (this.ballLaunchPath) this.ballLaunchPath.visible = visible;
+    this._applyLaunchControlsVisibility();
+  }
+
+  setBallLaunchConfig(config) {
+    if (!this.ballLaunchFrame || !config || !config.p0 || !config.v0) return;
+    this.ballLaunchUpdateMuted = true;
+    if (config.flight_s != null) this._flightHorizon = config.flight_s;
+    const [x, y, z] = config.p0;
+    this.ballLaunchFrame.position.copy(this.baseToThree(x, y, z));
+    // During a velocity-gizmo drag the gizmo owns _velDir/_velSpeed; only ingest v0
+    // from config when set programmatically (panel inputs, reset, initial load).
+    if (!this._velDragging) {
+      const vThree = this.baseVectorToThree(config.v0[0], config.v0[1], config.v0[2]);
+      this._velSpeed = vThree.length();
+      this._velDir = this._velSpeed > 1e-6 ? vThree.clone().normalize() : new THREE.Vector3(0, 1, 0);
+      this._velScaleRefSpeed = this._velSpeed;
+    }
+    this.updateBallLaunchVelocity(config.v0);
+    this.updateBallLaunchPath(config.p0, config.v0);
+    this.ballLaunchFrame.visible = true;
+    if (this.ballLaunchPath) this.ballLaunchPath.visible = true;
+    this._syncVelocityHandle();
+    this._applyLaunchControlsVisibility();
+    this.ballLaunchUpdateMuted = false;
+  }
+
+  updateBallLaunchVelocity(v0) {
+    if (!this.ballLaunchVelocity) return;
+    const [vx, vy, vz] = v0;
+    const velocity = this.baseVectorToThree(vx, vy, vz);
+    const speed = velocity.length();
+    const direction = speed > 1e-6 ? velocity.clone().normalize() : new THREE.Vector3(0, 1, 0);
+    this.ballLaunchVelocity.setDirection(direction);
+    this.ballLaunchVelocity.setLength(Math.max(0.08, Math.min(0.65, speed * 0.12)), 0.07, 0.035);
+  }
+
+  updateBallLaunchPath(p0, v0) {
+    if (!this.ballLaunchPath) return;
+    const [x, y, z] = p0;
+    const [vx, vy, vz] = v0;
+    const points = [];
+    const horizon = this._flightHorizon || 1.2;  // arc spans the configured flight time
+    const steps = Math.max(36, Math.round(horizon * 24));
+    const g = -9.81;
+    for (let i = 0; i <= steps; i++) {
+      const t = (i / steps) * horizon;
+      points.push(this.baseToThree(
+        x + vx * t,
+        y + vy * t,
+        z + vz * t + 0.5 * g * t * t,
+      ));
+    }
+    this.ballLaunchPath.geometry.setFromPoints(points);
+  }
+
+  getBallLaunchConfig() {
+    const position = this.ballLaunchFrame.position;
+    return {
+      p0: [-position.x, position.z, position.y],
+      v0: this._velBase(),
+    };
+  }
+
+  // catch: {ball_base:[x,y,z], ball_vel_base:[vx,vy,vz]} in the robot base frame
+  // (CatchTelemetry). Draws the ball marker and a short ballistic prediction arc.
+  setCatch(catchInfo) {
+    if (!catchInfo || !catchInfo.ball_base) {
+      this.setBallVisible(false);
+      this.setPolicyGhostVisible(false);
+      return;
+    }
+    if (!this.ballGroup) this.buildBall();
+    const [bx, by, bz] = catchInfo.ball_base;
+    this.ballMarker.position.copy(this.baseToThree(bx, by, bz));
+
+    const v = catchInfo.ball_vel_base || [0, 0, 0];
+    const points = [];
+    const horizon = 1.0;
+    const steps = 30;
+    const g = -9.81;
+    for (let i = 0; i <= steps; i++) {
+      const t = (i / steps) * horizon;
+      const px = bx + v[0] * t;
+      const py = by + v[1] * t;
+      const pz = bz + v[2] * t + 0.5 * g * t * t;
+      points.push(this.baseToThree(px, py, pz));
+    }
+    this.ballPath.geometry.setFromPoints(points);
+    this.ballGroup.visible = true;
+
+    // Policy ghost: the joint pose the network commands this tick (joint_target),
+    // overlaid on the live robot so you watch it react to the thrown ball.
+    if (catchInfo.joint_target && catchInfo.joint_target.length && catchInfo.joint_names) {
+      this.applyGhostMaterial("policy");
+      this.setGhostJoints(catchInfo.joint_names, catchInfo.joint_target, this.policyGhost);
+      this.setPolicyGhostVisible(this.policyGhostEnabled);
+    }
+  }
+
+  setBallVisible(visible) {
+    if (this.ballGroup) this.ballGroup.visible = visible;
+  }
+
+  setPolicyGhostVisible(visible) {
+    if (this.policyGhost) this.policyGhost.visible = visible;
+  }
+
+  setPolicyGhostEnabled(enabled) {
+    this.policyGhostEnabled = enabled;
+    if (!enabled) this.setPolicyGhostVisible(false);
+  }
+
   applyGhostMaterial(kind = "primary") {
-    const ghost = kind === "reference" ? this.replayGhost : this.ghost;
-    const flagName = kind === "reference" ? "replayGhostMaterialApplied" : "ghostMaterialApplied";
+    const ghost =
+      kind === "reference" ? this.replayGhost : kind === "policy" ? this.policyGhost : this.ghost;
+    const flagName =
+      kind === "reference"
+        ? "replayGhostMaterialApplied"
+        : kind === "policy"
+          ? "policyGhostMaterialApplied"
+          : "ghostMaterialApplied";
     if (!ghost || this[flagName]) return;
+    // policy = green (the pose the network commands), reference = amber, primary = blue.
+    const color = kind === "reference" ? 0xe0a93e : kind === "policy" ? 0x35d39a : 0x4fa3ff;
+    const opacity = kind === "policy" ? 0.5 : kind === "reference" ? 0.3 : 0.35;
     const material = new THREE.MeshStandardMaterial({
-      color: kind === "reference" ? 0xe0a93e : 0x4fa3ff,
+      color,
       transparent: true,
-      opacity: kind === "reference" ? 0.3 : 0.35,
+      opacity,
       depthWrite: false,
     });
     let meshCount = 0;

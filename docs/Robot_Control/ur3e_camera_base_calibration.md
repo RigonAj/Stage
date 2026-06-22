@@ -272,11 +272,16 @@ Les fichiers ajoutés dans `docs/Robot_Control/3D_model/` sont utilisables comme
 
 ```text
 docs/Robot_Control/3D_model/Support3D.step   source CAD Onshape, STEP AP242, unités en mètres
-docs/Robot_Control/3D_model/Support3D.obj    mesh exporté en mètres, utile comme intermédiaire
+docs/Robot_Control/3D_model/Support3D.glb    mesh glTF versionné, utilisable par le viewer web
+docs/Robot_Control/3D_model/Support3D_meters.glb  variante glTF en mètres
 docs/Robot_Control/3D_model/Support3D.mtl    matériau associé à l'OBJ
 ```
 
-L'OBJ annonce `Units = meters` et son encombrement approximatif est :
+Un export local `Support3D.obj` peut exister comme intermédiaire, mais il n'est
+pas suivi par Git car `.gitignore` ignore `*.obj`. Ne pas en faire une
+dependance obligatoire d'un clone propre sans le forcer explicitement dans Git
+ou le regenerer depuis le STEP. L'OBJ local annonce `Units = meters` et son
+encombrement approximatif est :
 
 ```text
 X : 244.0 mm
@@ -287,13 +292,14 @@ Z : 85.0 mm
 Ces dimensions sont cohérentes avec un support de smartphone monté au poignet du
 UR3e. Pour le viewer web, garder le STEP comme source de vérité CAO, mais exporter
 une version `Support3D.glb` en mètres à partir du STEP/OBJ. L'OBJ peut rester comme
-format intermédiaire lisible ; il référence maintenant correctement
+format intermédiaire local lisible ; il référence maintenant correctement
 `Support3D.mtl`.
 
 La photo de montage réel est :
 
 ```text
-docs/Smartphone_Sur_Support.jpeg
+docs/Robot_Control/Smartphone_Sur_Support.jpeg
+docs/Robot_Control/Smartphone_Sur_Support_vue_coté.jpeg
 ```
 
 Elle confirme que le téléphone est bien maintenu face à la caméra, avec la mire

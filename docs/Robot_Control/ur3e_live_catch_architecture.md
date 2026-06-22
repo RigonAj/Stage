@@ -6,8 +6,12 @@ lancée** avec la politique PPO entraînée en simulation. Il détaille chaque n
 interfaces (topics, messages, repères, taux), les contraintes techniques, une feuille de route
 d'implémentation, la vérification, et des architectures alternatives.
 
-> Statut (2026-06-17) : **design, pas encore implémenté.** Les paquets `ur3e_catch_msgs` et
-> `ur3e_live_catch` n'existent pas encore. Ce document est la référence d'exécution.
+> Statut de ce document : **conception initiale** (2026-06-17). L'état
+> d'execution a evolue : au 2026-06-22, `ur3e_catch_msgs` et `ur3e_live_catch`
+> existent, les etapes 1-8 sont implementees, le streaming est cable derriere
+> `enable_command`, l'onglet web UI `Test` existe, et le scaler de l'export
+> courant est resolu. Pour le statut operationnel, utiliser
+> `ur3e_live_catch_implementation_status.md`.
 
 Documents liés :
 - `ur3e_ball_catch_sim_to_real.md` — contraintes sim/entraînement/inférence (ce document
@@ -67,8 +71,10 @@ sérialisation ni saut DDS, sur le chemin critique 60 Hz. Les topics ROS ne serv
 
 **Le retour « Observation » du schéma initial** se réalise sans topic :
 - (a) l'état articulaire via l'abonnement `/joint_states` (callback qui met à jour un cache) ;
-- (b) l'**action policy clippée précédente**, stockée comme attribut du nœud (c'est la composante 9 de
-  l'observation, cf. §6) et réinjectée à l'itération suivante.
+- (b) l'**action policy précédente**, stockée comme attribut du nœud (composante 9 de
+  l'observation, cf. §6) et réinjectée à l'itération suivante. Dans
+  l'implementation actuelle, elle est brute en mode `faithful` et clippee en mode
+  `safe`.
 
 ### Nuance rclpy (à connaître)
 
@@ -184,19 +190,21 @@ Reconstruit l'observation **dans l'ordre et les unités exacts** de
 - Charge l'export déterministe
   `$DV_ROSWS_ROOT/data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts`
   (+ `policy_metadata.json` ; `.onnx` disponible en alternative runtime).
-- **Risque de correction critique — le scaler.** Le PPO SKRL utilise un `RunningStandardScaler`
-  sur les observations. Il faut **vérifier si l'export embarque le scaler** ou s'il faut appliquer
-  `mean`/`var` sauvegardés **avant** le réseau. Inspecter le script d'export du dépôt Isaac
-  (`<ISAAC_REPO>/scripts/skrl/play.py`) et `policy_metadata.json`. Alimenter le réseau brut avec
-  une observation non normalisée serait
-  une source majeure de divergence sim-to-real.
-- **Sortie = action policy (6)**, clippée dans `[-1, 1]` avant mapping. C'est aussi ce qui est
-  mémorisé pour la composante 9 de l'obs suivante.
+- **Scaler.** Risque critique identifie dans la conception : le PPO SKRL utilise
+  un `RunningStandardScaler`. Etat 2026-06-22 : le test d'equivalence policy
+  confirme que l'export TorchScript courant reproduit `action_normalized` sans
+  sidecar (`max |delta| = 4.6e-6`) ; aucun `policy_scaler.json` n'est requis pour
+  ce modele.
+- **Sortie = action policy (6)**. En mode `faithful`, l'action brute est
+  memorisee pour la composante 9 de l'obs suivante ; en mode `safe`, l'action
+  clippee est memorisee.
 
 #### 4.3.4 `action.py` (ActionMapper) — cible articulaire
-- `joint_target = q + clamp(action, -1, 1) * v_safe * dt_step`, puis limite d'accélération
-  `a_safe` et clamp articulaire. **Cible de position incrémentale bornée** (pas vitesse/couple).
-- Mémorise l'action policy **clippée** pour l'obs suivante.
+- Mode `faithful` (defaut pour l'export courant) : `joint_target = action * 0.5`
+  avant la couche safety ; memorise l'action brute pour l'observation suivante.
+- Mode `safe` : `joint_target = q + clamp(action, -1, 1) * v_safe * dt_step` ;
+  memorise l'action clippee.
+- Les bornes position/vitesse/acceleration restent appliquees par `safety.py`.
 
 #### 4.3.5 `safety.py` (SafetyLimiter + watchdog) — défense en profondeur
 - **Clip** aux bornes articulaires URDF + **bornes de workspace** (rejet hors zone sûre).
@@ -275,15 +283,15 @@ Ordre **exact** (somme = 6+6+3+3+3+1+3+1+6+1 = **33**), miroir de `firsttraining
 | 6 | `distance` | 1 | `‖direction‖` | dérivé |
 | 7 | `ball_vel_w` | 3 | vitesse balle **filtrée** | **critique** (bruit) |
 | 8 | flag `prev_disk_signed_dist > 0` | 1 | recalculé (projection balle sur normale disque) | moyen |
-| 9 | `actions` (action policy clippée précédente) | 6 | attribut mémorisé avant mapping cible | facile |
+| 9 | `actions` (action policy précédente) | 6 | attribut mémorisé avant mapping cible | facile |
 | 10 | `pass_through_count` | 1 | recalculé (`detect_pass_through`, env.py:327) | moyen |
 
 Points d'attention :
 - **`ball_vel_w` est une vitesse « monde ».** Comme le passage en `base` n'est qu'une translation
   constante (origine d'environnement), la **vitesse est invariante** : la différence finie filtrée
   des positions `base` donne directement `ball_vel_w`.
-- **Composante 9 = action policy clippée**, pas la cible articulaire après `v_safe`/`a_safe`.
-  C'est le retour interne décrit en §2.
+- **Composante 9 = action policy précédente**, pas la cible articulaire après
+  `v_safe`/`a_safe`. Elle est brute en mode `faithful` et clippee en mode `safe`.
 - **Composantes 8 et 10** dépendent de la **géométrie disque/balle** (centre + normale du hoop).
   Elles doivent reproduire `detect_pass_through` et le signe de `(balle − disque)·normale`.
 - **Unités strictes** : rad, rad/s, m, m/s. Aucune conversion en degrés ne doit traîner.
@@ -387,21 +395,22 @@ exclusifs** ; l'exposer clairement dans l'UI/launch.
    visualisation), vérifié en parité base/caméra (§12).
 4. **`ObservationBuilder`** 33-D + **test d'équivalence** : rejouer un épisode
    `rollouts_10_episodes.json`, reconstruire l'obs, comparer bit-à-bit à l'obs sim.
-5. **`PolicyRunner`** (trancher la question du scaler) → action policy en **dry-run** (logs, aucune
-   commande robot).
-6. **`ActionMapper` + `safety` + `streaming`** vers `forward_position_controller` sur
-   **fake hardware/URSim**.
+5. **`PolicyRunner`** (scaler resolu pour l'export courant) → action policy en **dry-run**.
+6. **`ActionMapper` + `safety` + `streaming`** vers `forward_position_controller`.
 7. **Bascule de contrôleur** + mode « live catch » dans le web UI + **visualisation balle**.
 8. **Mesure de latence** bout-en-bout ; vérifier ≤ latence modélisée.
-9. **Bring-up robot par étapes** : perception seule → dry-run → balle lente E-stop en main →
+9. **Bring-up robot par étapes** : perception seule → dry-run → balle virtuelle robot reel
+   E-stop en main → balle lente →
    montée en vitesse de balle.
 
 ---
 
 ## 12. Vérification
 
-- **Équivalence d'observation** : obs reconstruite par le nœud vs obs sim (ordre, dims, unités,
-  **scaler**, repères) sur un épisode rejoué — tolérance serrée.
+- **Équivalence d'observation/policy** : obs reconstruite par le nœud vs obs sim
+  (ordre, dims, unités, repères), puis sortie policy vs `action_normalized` sur
+  un épisode rejoué — tolérance serrée. Le scaler est resolu pour l'export
+  courant.
 - **Bornes physiques** : `vitesse réalisée ≤ v_safe` par joint (réutiliser l'analyse de vitesse du
   sim-to-real §1).
 - **Dry-run** : enregistrer obs/actions sans envoi robot ; inspecter `BallState` (base) via la
@@ -444,5 +453,6 @@ et la composition rclcpp en réserve si la latence mesurée (§10) l'exige.
 | Calibration caméra + extrinsèque | `Dv-Rosws/calibration_camera_DVXplorer_*.xml`, `Dv-Rosws/scripts/solve_handeye.py`, `ur3e_camera_base_calibration.md`, `handeye_result.yaml` |
 
 > Source de vérité des limites de vitesse : documentation constructeur UR3e et
-> `ur_description/config/ur3e/joint_limits.yaml` du driver réellement lancé ; `v_safe` utilise les
-> limites nominales par joint (cf. sim-to-real §1, §2.1).
+> `ur_description/config/ur3e/joint_limits.yaml` du driver réellement lancé. Le
+> live catch actuel utilise `v_safe_factor=0.5` pour les premiers essais reels ;
+> noter explicitement ce facteur dans toute comparaison sim-to-real.

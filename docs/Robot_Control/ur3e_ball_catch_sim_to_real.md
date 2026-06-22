@@ -191,7 +191,7 @@ Dans les deux cas :
   politique apprenne à anticiper, pas seulement à réagir.
 
 ### 2.5 Fréquence de contrôle
-- Conserver **60 Hz** (= `dt_step`), aligné sur la future boucle live.
+- Conserver **60 Hz** (= `dt_step`), aligné sur la boucle live ROS 2.
 - Documenter le taux exact de l'interface streaming choisie (`servoj`/RTDE/driver, typiquement
   plus rapide que 60 Hz selon robot et driver) : à l'inférence on **interpole** entre deux
   commandes de politique à 60 Hz pour alimenter ce contrôleur (voir §5).
