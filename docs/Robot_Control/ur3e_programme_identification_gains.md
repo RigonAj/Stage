@@ -73,8 +73,8 @@ partager le même chemin action→cible→mouvement.)
 
 | Signal | Paramètres typiques | Ce qu'il donne |
 |---|---|---|
-| **Échelon** | amplitude 0.05–0.20 rad, plusieurs amplitudes | temps de montée, **dépassement**, temps d'établissement → `(ωn, ζ)` |
-| **Chirp** (sinus balayé) | f : 0.1 → ~10–15 Hz, amplitude 0.02–0.10 rad | **FRF**, bande passante −3 dB, phase → `(ωn, ζ, L)` |
+| **Échelon** | 0.02–0.05 rad (épaule/coude), 0.02–0.06 rad (poignet) ; plusieurs amplitudes | temps de montée, **dépassement**, temps d'établissement → `(ωn, ζ)` |
+| **Chirp** (sinus balayé) | **départ prudent** : 0.1→3 Hz (épaule/coude) / 0.1→5 Hz (poignet), A 0.01–0.03 rad ; **monter seulement si logs propres** | **FRF**, bande passante −3 dB, phase → `(ωn, ζ, L)` |
 | **Rampe vitesse** | vitesses 0.05 → `v_safe`, par paliers | **frottement** (Coulomb + visqueux) depuis le couple stationnaire |
 | (option) PRBS / multisine | bande large, faible amplitude | excitation riche pour `least_squares` |
 
@@ -82,6 +82,15 @@ Toutes les excitations sont **centrées sur une pose sûre mi-course**, **loin d
 butées** (rappel : coude `±π`), des **singularités** et de l'**auto-collision**, à
 **charge/outil fixés et documentés** (les gains en dépendent), avec le **scaling
 vitesse réduit** au pendant.
+
+> ⚠️ **Contrainte de vitesse / accélération de pointe (chirp).** Pour un sinus
+> d'amplitude `A` à la fréquence `f` : `q̇_pic = 2π·f·A` et `q̈_pic = (2π·f)²·A`. Ex.
+> `f = 15 Hz, A = 0.10` → `q̇_pic ≈ 9.4 rad/s` = **3× la limite épaule/coude** (`π`)
+> → protective stop / risque. D'où le **départ prudent** ci-dessus ; ne monter en
+> fréquence **que** si les logs restent propres. Pour viser une bande passante plus
+> haute **en sécurité**, **réduire `A ∝ 1/f`** (chirp à `q̇_pic` constant). Garde-fou
+> **obligatoire** avant tout sweep : `assert 2π·f1·A < 0.5 · velocity_limit[joint]`
+> (cf. pseudo-code §6.1).
 
 ---
 
@@ -108,6 +117,11 @@ ajuster un **2nd ordre + retard pur** `H(jω) = ωn² / (−ω² + 2ζωn·jω +
 par moindres carrés (`scipy.optimize.least_squares` sur `|H|` et `arg H`) →
 `(ωn, ζ, L)`. Le **retard L** alimente la modélisation de latence (`L_a`/`L_o`,
 propositions §4.7).
+
+**Filtrer par cohérence** : n'ajuster la FRF **que** sur les fréquences où
+`scipy.signal.coherence(q_cmd, q) > 0.8` **et** dans la bande réellement excitée
+`[f0, f1]` — ailleurs la FRF est dominée par le bruit et tirerait le fit vers des
+points aberrants.
 
 ### 4.4 Moindres carrés direct K/D (option, si le couple est fiable)
 
@@ -147,7 +161,7 @@ commande/réponse. Séparer la latence de transport (réseau/driver) de la dynam
 | Streaming 60 Hz `forward_position_controller` | `ur3e_live_catch/streaming.py`, topic `/forward_position_controller/commands` | **chirp sur le chemin de déploiement** |
 | Clamp limites + gates moteur | `app.py` (`_clamp_to_limit`, `_ensure_joint_target_within_limits`, `ensure_motion_enabled`) | sécurité d'excitation — **réutiliser, ne pas contourner** |
 | Pattern service single-shot | `test_ball_node` `~/throw` (`std_srvs/Trigger`) | exposer un `~/run_sweep` analogue |
-| Flux d'état | web UI `/ws` (15 Hz) | trop lent pour le fit ⇒ **souscrire `/joint_states` directement** (à la **fréquence système 500 Hz**, officiel, *UR3e User Manual* §2.1) |
+| Flux d'état | web UI `/ws` (15 Hz) | trop lent pour le fit ⇒ **souscrire `/joint_states` directement**. ⚠️ Le **500 Hz** du manuel est la **fréquence système UR**, pas une garantie de débit ROS → **mesurer `fs` réel** depuis les timestamps (`fs = 1/median(diff(t))`) |
 | Dashboard (play/stop/e-stop) | `ros_interface.py` `DASHBOARD_COMMANDS` | arrêt d'urgence intégré |
 
 ---
@@ -173,7 +187,7 @@ décomposition logique, pas du code à copier tel quel.
 ```python
 # ── run_sweep : excitation + enregistrement (robot réel ou mock) ────────────────
 JOINTS         = ["shoulder_pan","shoulder_lift","elbow","wrist_1","wrist_2","wrist_3"]
-EFFORT_LIMIT   = [56, 56, 28, 12, 12, 12]            # Nm  (datasheet, vérifié)
+EFFORT_LIMIT   = [56, 56, 28, 12, 12, 12]            # Nm — ur_description (PAS le User Manual); poignets 12 vs 9 du projet → à reconfirmer
 VELOCITY_LIMIT = [PI, PI, PI, 2*PI, 2*PI, 2*PI]      # rad/s
 ID_POSE        = [0, -PI/2, PI/2, -PI/2, -PI/2, 0]   # pose mi-course, loin des butées
 
@@ -190,7 +204,11 @@ def run_sweep(joint, signal, p):                     # p = paramètres du signal
         send_trajectory(traj); wait_until_done()
     elif signal == "chirp":                          # CHEMIN DE DÉPLOIEMENT (§1)
         switch_controller(to="forward_position_controller")
-        q0 = current_q(joint)
+        q0 = current_q(joint);  k = JOINTS.index(joint)
+        v_peak = 2*PI * p.f1 * p.amplitude           # garde-fou (§3) : pic de vitesse
+        assert v_peak < 0.5 * VELOCITY_LIMIT[k]                  # ≤ 50 % de la limite
+        assert q_min(joint) + 0.1 < q0 - p.amplitude            # reste dans les butées
+        assert q0 + p.amplitude < q_max(joint) - 0.1
         for t in clock(rate=60):                     # 60 Hz, comme streaming.py
             if t > p.duration: break
             f  = p.f0 + (p.f1 - p.f0) * t / p.duration              # balayage linéaire
@@ -234,10 +252,12 @@ def fit_step(log):                                   # échelon → (wn, ζ)    
     return wn, ze, r2
 
 def fit_chirp(log):                                  # FRF → (wn, ζ, latence)   (§4.3)
-    fs = 1 / mean_diff(log.t)
+    fs = 1 / mean_diff(log.t)                         # NE PAS supposer 500 Hz (§5)
     f, Suu = welch(log.q_cmd, fs);  _, Suy = csd(log.q_cmd, log.q, fs)
-    H = Suy / Suu                                     # tfestimate = Suy / Suu
-    w = 2*PI*f;  band = (f >= log.f0) & (f <= log.f1) # bande réellement excitée
+    _, coh = coherence(log.q_cmd, log.q, fs)          # fiabilité de la FRF par fréquence
+    H = Suy / Suu                                      # tfestimate = Suy / Suu
+    w = 2*PI*f
+    band = (f >= log.f0) & (f <= log.f1) & (coh > 0.8)   # bande excitée ET fiable
 
     def model(th, w):                                # 2nd ordre + retard pur
         wn, ze, L = th
@@ -298,12 +318,15 @@ Comme l'onglet **Test** pilote `~/throw` via `POST /api/catch/throw`, ajouter :
 ## 9. Sécurité (⚠️ ça bouge le VRAI robot)
 
 - **Une articulation à la fois**, faibles amplitudes, pose mi-course, **scaling vitesse
-  réduit** au pendant.
+  réduit au pendant (démarrer ~10–20 %)**.
 - Vérifier que **toute l'excitation ⊂ `joint_limits` avec marge** (coude `±π`), loin des
   singularités / auto-collision.
 - **E-stop matériel** à portée ; détecter le **protective stop** → abort + log ;
   watchdog par tick.
-- **Charge / outil FIXES et documentés** (les gains dépendent de la configuration).
+- **Charge / outil FIXES, et RÉGLÉS sur le contrôleur** (payload + centre de gravité +
+  inertie outil) **avant** l'identification — les gains en dépendent directement.
+- **Température** : au-dessus de **35 °C**, l'UR3e peut réduire vitesse/performance
+  (manuel §2.1) → identifier et déployer dans des conditions thermiques comparables.
 - **Montage rigide** : un support compliant ajoute un **mode basse fréquence** qui
   pollue la FRF articulaire (le *UR3e User Manual* exige une résonance de stand
   **≥ 45 Hz**). Identifier sur le **montage final**, pas sur un bâti provisoire.
@@ -344,7 +367,7 @@ joints:
   shoulder_pan_joint:
     stiffness: 0.0        # K = I_eff * wn^2
     damping: 0.0          # D = 2*zeta*wn*I_eff
-    effort_limit: 56.0    # vérifié, datasheet UR3e
+    effort_limit: 56.0    # source ur_description (pas le User Manual); à reconfirmer
     velocity_limit: 3.1416
     latency_s: 0.0        # L (retard FRF)
     friction_coulomb_Nm: 0.0
@@ -366,6 +389,12 @@ modèle de latence ; frottement → DR.
 ---
 
 ## 12. Validation / critères d'acceptation
+
+> **Les gains fermés `K = I_eff·ωn²`, `D = 2ζωn·I_eff` (§4.1) sont une INITIALISATION,
+> pas la valeur finale.** Étape de **calibration** : rejouer la même excitation dans
+> Isaac et **optimiser** `(K, D, L, frottement, armature)` pour **minimiser le RMSE
+> réel↔sim** (`scipy.optimize.least_squares` / Nelder-Mead). Les critères ci-dessous
+> valident le **résultat de cette optimisation**, pas le premier jet.
 
 - **R²** échelon et chirp **≥ ~0.95** par joint.
 - **RMSE sim↔réel** sur la même excitation < seuil (ex. quelques % de l'amplitude).

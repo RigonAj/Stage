@@ -49,7 +49,8 @@ Conversions : `180°/s = π = 3.1416 rad/s` · `360°/s = 2π = 6.2832 rad/s` ·
 §2.1 *Technical Specifications UR3e* (p. 17) confirme : vitesses **180°/s**
 (épaule/coude) et **360°/s** (poignets) ; **outil ≈ 1 m/s** ; **plages articulaires
 ±360°** (bride d'outil illimitée) ; charge **3 kg** ; masse **11.1 kg** ; **fréquence
-système 500 Hz** (= cadence de remontée `/joint_states`). Conforme à `ur_description`,
+système 500 Hz** (fréquence système UR ; le débit ROS `/joint_states` réel est à
+**mesurer** dans les logs — driver-dépendant). Conforme à `ur_description`,
 sauf le coude que `ur_description` **borne logiciellement** à ±180° (le matériel
 autorise ±360°).
 
@@ -108,6 +109,19 @@ nombres) :
 `D ≈ 2√(K·I_eff)`, avec des `K` **plus faibles** (robot plus léger), puis affiner par
 system-id. Ne pas garder le `800/40` uniforme.
 
+> 📌 **Donnée terrain — IsaacLab Discussion #4124 (nov. 2025).** Un utilisateur applique
+> ces **mêmes** gains `1320 / 600 / 216` (damping `72.66 / 34.64 / 29.39`, groupes
+> `shoulder / elbow / wrist`, `action_scale = 0.5`) **tels quels à un UR3e** → confirme
+> qu'ils servent de **défaut UR réutilisé sans ré-identification**. Le fil rapporte des
+> **instabilités** (oscillations après contact) et conclut qu'**« il n'existe pas de
+> règle empirique »** (le réglage dépend de la charge, des gains IK, de la masse, de la
+> vitesse) → **exactement l'argument pour le system-id** (§4) plutôt que le copier-coller.
+>
+> Deux leviers *sim* utiles au-delà des gains : (1) **itérations du solveur PhysX**
+> (position 64 / vitesse 16) pour la stabilité au contact ; (2) **raideur du joint de
+> fixation** de tout ce qui est monté sur `wrist_3` — ici le **cerceau/disque** (pas une
+> pince) : un montage trop souple en sim oscille. À retenir pour la config Isaac du ball-catch.
+
 ---
 
 ## 4. Méthode pour identifier les gains UR3e (system-id)
@@ -143,6 +157,9 @@ Pour estimer `I_eff` par joint (dans `D ≈ 2√(K·I)`), utiliser les inerties 
 - **Sim2Real Deployment of Policies Trained in Isaac Lab** (doc officielle).
 - **Isaac ROS — UR DNN Policy tutorial** (UR10e, exemple sim2real complet).
 - **Isaac Lab — actuators API** (`ImplicitActuatorCfg` : stiffness/damping → PhysX).
+- **IsaacLab — Discussion #4124** (nov. 2025) — UR3e + Robotiq : config actionneur par
+  groupe (`1320/600/216`), instabilité au contact, « pas de règle empirique », itérations
+  solveur PhysX (64/16) + raideur du joint de fixation `wrist_3`.
 
 ### Universal Robots (specs UR3e)
 - **UR3e User Manual** — `docs/Robot_Control/UR3e_Official_doc.pdf` (dans le repo,
@@ -181,6 +198,8 @@ Pour estimer `I_eff` par joint (dans `D ≈ 2√(K·I)`), utiliser les inerties 
   <https://nvidia-isaac-ros.github.io/reference_workflows/isaac_for_manipulation/tutorials/sim_to_real/tutorial_gear_assembly.html>
 - Isaac Lab — actuators API :
   <https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.actuators.html>
+- IsaacLab — Discussion #4124 (UR3e gains actionneur `1320/600/216`, stabilité PhysX) :
+  <https://github.com/isaac-sim/IsaacLab/discussions/4124>
 - Isaac Lab — `universal_robots.py` (gabarit UR10e, à transposer) :
   <https://github.com/isaac-sim/IsaacLab/blob/main/source/isaaclab_assets/isaaclab_assets/robots/universal_robots.py>
 - Tune to Learn: How Controller Gains Shape Robot Policy Learning :
