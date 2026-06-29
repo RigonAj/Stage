@@ -104,7 +104,8 @@ avec `qd_des = 0` par défaut. La cible est posée dans `_apply_action()` via
     pas 800). C'est le levier n°1 du réalisme.
   - `damping` : ~2·√(stiffness·inertie) comme point de départ, puis ajuster sur le
     dépassement mesuré.
-  - `effort_limit_sim = [54, 54, 28, 9, 9, 9]` Nm (déjà appliqué).
+  - `effort_limit_sim = [56, 56, 28, 12, 12, 12]` Nm, cible à aligner avec
+    `ur_description` (remplace l'ancienne valeur projet `[54, 54, 28, 9, 9, 9]`).
   - `velocity_limit_sim` = limites nominales UR3e `[3.1416×3, 6.2832×3]` rad/s.
 - Espace d'action (`_pre_physics_step` / `firsttraining_env_cfg.py`) :
   - `Δ = v_safe · dt_step` (incrémental), `clip_actions: True`.
@@ -156,7 +157,7 @@ La policy sort une **cible de vitesse** `qd_des`. Deux mises en œuvre :
 
 ### 4.4 Paramétrage Isaac Lab (cas vitesse)
 - Variante (a) actionneur vitesse : `ImplicitActuatorCfg(stiffness=0.0, damping=K_d,
-  effort_limit_sim=[54,54,28,9,9,9])`, `set_joint_velocity_target`. `K_d` règle la
+  effort_limit_sim=[56,56,28,12,12,12])`, `set_joint_velocity_target`. `K_d` règle la
   raideur de suivi de vitesse (à system-id).
 - Variante (b) intégrée (recommandée si on veut « vitesse ») : garder l'actionneur
   position (§3.4), action = vitesse normalisée, `qd_des = action · v_safe`,
@@ -206,7 +207,7 @@ Il n'existe **pas** de « set_joint_acceleration » direct en physique. Trois vo
 
 ### 5.4 Paramétrage Isaac Lab (cas accélération)
 - Voie (a/b) : `ImplicitActuatorCfg(stiffness=0.0, damping=0.0,
-  effort_limit_sim=[54,54,28,9,9,9])`, `set_joint_effort_target`. Pour (b),
+  effort_limit_sim=[56,56,28,12,12,12])`, `set_joint_effort_target`. Pour (b),
   récupérer masse/biais via l'articulation (dynamique inverse) — non trivial.
 - Voie (c) : actionneur position (§3.4) ; action = accélération normalisée,
   `a_des = action · a_safe` ; `qd_des = clip(qd + a_des·dt, ±v_safe)` ;

@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ur3e_sysid</name>
+  <version>0.1.0</version>
+  <description>
+    UR3e actuator system identification (Option B): an online sweep stage that
+    excites one joint at a time (step/ramp via the trajectory action, chirp via
+    forward_position_controller @60Hz) and records /joint_states, plus an offline
+    estimator that fits the closed-loop surrogate gains (K, D), pure delay L,
+    effective inertia and friction into ur3e_actuator_identified.yaml for Isaac.
+    See docs/Robot_Control/ur3e_programme_identification_gains.md.
+  </description>
+  <maintainer email="rigon@example.com">rigon</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>ur3e_live_catch</exec_depend>
+  <exec_depend>ur3e_rollout_replay</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_pytest</test_depend>
+  <test_depend>pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

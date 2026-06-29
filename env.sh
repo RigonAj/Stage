@@ -23,6 +23,9 @@ fi
 build() {
   colcon build \
     --symlink-install \
+    --packages-select ur3e_catch_msgs && \
+  colcon build \
+    --symlink-install \
     --packages-select ball_tracking_cpp \
     --cmake-args \
     -DCMAKE_C_COMPILER=gcc-13 \

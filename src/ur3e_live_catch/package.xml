@@ -5,7 +5,8 @@
   <description>
     Single-process live closed-loop ball-catch node for the UR3e: ball-frame
     transform, 33-D observation reconstruction, PPO policy runtime, plus an
-    artificial test-ball source and a Float32MultiArray-&gt;BallState adapter.
+    artificial test-ball source, native ball_tracking_cpp launch support, and a
+    legacy Float32MultiArray-&gt;BallState adapter.
     See docs/Robot_Control/ur3e_live_catch_architecture.md §4.3.
   </description>
   <maintainer email="rigon@example.com">rigon</maintainer>
@@ -22,6 +23,7 @@
   <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>controller_manager_msgs</exec_depend>
   <exec_depend>ur3e_catch_msgs</exec_depend>
+  <exec_depend>ball_tracking_cpp</exec_depend>
 
   <test_depend>ament_pytest</test_depend>
   <test_depend>pytest</test_depend>

@@ -1,6 +1,6 @@
 # UR3e Ball-Catch — Architecture des nœuds ROS 2 (boucle live closed-loop)
 
-Ce document est le **plan d'architecture** des nœuds ROS 2 à construire pour connecter la
+Ce document est le **plan d'architecture** des nœuds ROS 2 construits ou à finaliser pour connecter la
 perception (caméra événementielle DVXplorer) à la commande du UR3e, afin d'**attraper une balle
 lancée** avec la politique PPO entraînée en simulation. Il détaille chaque nœud/module, les
 interfaces (topics, messages, repères, taux), les contraintes techniques, une feuille de route
@@ -91,7 +91,7 @@ option future en §13.
 
 ## 3. Paquets ROS 2 et placement
 
-Deux nouveaux paquets à créer plus tard dans `$DV_ROSWS_ROOT/src/` :
+Deux paquets existent maintenant dans `$DV_ROSWS_ROOT/src/` :
 
 | Paquet | Type | Rôle |
 |---|---|---|
@@ -99,9 +99,9 @@ Deux nouveaux paquets à créer plus tard dans `$DV_ROSWS_ROOT/src/` :
 | `ur3e_live_catch` | `ament_python` | Nœud live mono-processus, nœud de test, launch, sécurité, runtime politique |
 
 **Workspace ROS unique.** Le tracker `ball_tracking_cpp`, les paquets robot existants
-(`ur3e_web_ui`, `ur3e_rollout_replay`) et les futurs paquets live doivent être buildés dans
+(`ur3e_web_ui`, `ur3e_rollout_replay`) et les paquets live doivent être buildés dans
 `Dv-Rosws`. Cela évite de devoir sourcer deux overlays et rend `ur3e_catch_msgs` visible à la fois
-par le tracker C++ qui publiera `BallState` et par le nœud live qui le consommera.
+par le tracker C++ qui publie nativement `BallState` et par le nœud live qui le consomme.
 
 Le code Isaac/training peut rester hors du workspace ROS, mais les paquets ROS et les exports
 nécessaires au rejeu doivent rester dans `Dv-Rosws`. L'ancien `ros2_ws/src/` du dépôt Isaac n'est
@@ -111,26 +111,29 @@ plus un emplacement cible.
 
 ## 4. Spécification des nœuds et processus
 
-### 4.1 `ball_tracking_cpp` — perception (existant, `Dv-Rosws`, à adapter)
+### 4.1 `ball_tracking_cpp` — perception (existant, `Dv-Rosws`, BallState natif)
 
 - **Rôle.** Estimer la position 3D de la balle dans le flux événementiel (méthode **Trace** :
   largeur de traînée → profondeur monoculaire `Z = f_eff·D / w_px`), puis ajuster une trajectoire
   (régression pondérée `x,y` linéaires, `z` quadratique).
-- **État actuel.** `Dv-Rosws/src/Ball_Tracking_Cpp/src/publisher_member_function.cpp` crée un
-  publisher `ball_position_3d_mm` (`std_msgs/Float32MultiArray`, repère caméra, **mm**) mais **ne
-  le peuple pas** (`publishBallPose()` laisse `msg.data` vide). Première chose à corriger.
-- **Cible.** Publier `ur3e_catch_msgs/BallState` :
-  - **horodaté au temps d'événement** (pas au temps de réception) — crucial pour la
-    synchronisation et le calcul de latence ;
-  - dans un **repère caméra nommé** fixe (`frame_id`), en **mètres** ;
-  - convention d'axes **figée** = celle que résout le hand-eye. Aujourd'hui le code convertit
-    caméra(mm)→monde(m) via `util.hpp::ToMeters` : `world = (x, z, −y)·10⁻³`. Il faut que la
-    transformée `{}^{B}T_C` (§7) soit résolue **pour ce même repère** : un seul repère, partout.
+- **État actuel.** `Dv-Rosws/src/Ball_Tracking_Cpp/src/publisher_member_function.cpp` publie
+  directement `ur3e_catch_msgs/BallState` sur `ball_state` :
+  - `header.stamp` est dérivé du timestamp événement `BallPose3D.timestampUs`, ancré sur
+    l'horloge ROS du nœud pour garder un `perception_age_s` exploitable ;
+  - `header.frame_id` vient du paramètre `camera_frame_id` (défaut `camera_optical`) ;
+  - `position` est `[x, y, z]` en **mètres** depuis `pose.positionMm`.
+- **Compatibilité.** Le topic legacy `ball_position_3d_mm`
+  (`std_msgs/Float32MultiArray`, repère caméra, **mm**) peut encore être publié via
+  `publish_legacy_pose=true` pour les anciens outils.
+- **Contrat repère.** La convention d'axes du `BallState` natif est celle de `pose.positionMm`.
+  Le code d'affichage 3D convertit encore caméra(mm)→monde(m) via `util.hpp::ToMeters` :
+  `world = (x, z, −y)·10⁻³`. Il faut que la transformée `{}^{B}T_C` (§7) soit résolue pour le
+  repère déclaré dans `BallState.header.frame_id`.
 - **Entrée :** caméra DVXplorer (`dv-processing`) ou séquences enregistrées. **Sortie :**
   `BallState` (~30 Hz, cadence perception).
-- **Intérim (feuille de route).** Pour démarrer sans toucher au build C++, un **adaptateur
-  Python** (dans `ur3e_live_catch`) abonne `ball_position_3d_mm` et republie `BallState`
-  (stamp = réception, repère = constante). On migre ensuite vers la publication native horodatée.
+- **Fallback legacy.** L'adaptateur Python `float32_adapter.py` peut encore abonner
+  `ball_position_3d_mm` et republier `BallState` (stamp = réception, repère = constante) si un
+  ancien build du tracker ne publie pas le message natif.
 
 ### 4.2 `test_ball_node` — source de balle artificielle (nouveau)
 
@@ -213,8 +216,11 @@ Reconstruit l'observation **dans l'ordre et les unités exacts** de
   **3.142 rad/s** (180 °/s), poignets **6.283 rad/s** (360 °/s). Identique au clamp côté sim
   (sim-to-real §2.2) : même borne des deux côtés.
 - **Watchdog/dead-man** : arrêt contrôlé si perception périmée, dépassement du budget temps de
-  boucle, ou écart commande/réalisé trop grand. Réutilise les **gates** existants de `app.py`
-  (External Control actif, speed scaling > 0, contrôleur actif).
+  boucle, ou écart commande/réalisé trop grand. L'implémentation actuelle vérifie surtout la
+  présence du modèle policy et l'activation du `forward_position_controller`; les gates
+  External Control / speed scaling restent appliqués par l'UI pour les mouvements trajectoire
+  et doivent rester un pré-check opérateur pour le live tant qu'ils ne sont pas câblés
+  directement dans `live_catch_node`.
 
 #### 4.3.6 `streaming.py` — sortie vers le contrôleur
 - **Interpole** la cible 60 Hz vers le taux du `forward_position_controller` et publie sur
@@ -257,10 +263,14 @@ float32 confidence              # qualité (résidu/visibilité)
 
 ```
 # CatchTelemetry.msg — debug/visualisation (hors chemin critique)
-float32[]  observation   # 33
-float32[]  raw_action    # 6
-float32[]  joint_target  # 6 (après clip + rate-limit)
-geometry_msgs/Point ball_base   # balle dans le repère base
+float32[]             observation       # 33
+float32[]             raw_action        # 6
+float32[]             joint_target      # 6, cible sûre après clip/rate/accel ; renseignée même en dry-run
+geometry_msgs/Point   ball_base         # balle dans le repère base
+geometry_msgs/Vector3 ball_vel_base     # vitesse balle filtrée
+float32               perception_age_s  # now - BallState.stamp
+float32               loop_compute_s    # temps de calcul du tick
+bool                  command_enabled   # true si le nœud émet des commandes robot
 ```
 
 > Alternative rapide pour le debug : `std_msgs/Float32MultiArray`. Mais pour `BallState` on
@@ -363,8 +373,10 @@ exclusifs** ; l'exposer clairement dans l'UI/launch.
 - **Bornes** : positions URDF + workspace (rejet hors zone sûre).
 - **Watchdog/dead-man** : perception périmée, boucle qui dépasse son budget, ou écart
   commande/réalisé trop grand → **arrêt contrôlé**.
-- **Gates réutilisés** (`app.py`) : External Control en lecture, speed scaling > 0, contrôleur
-  actif.
+- **Gates** : le nœud live refuse de commander sans modèle policy chargé et sans
+  `forward_position_controller` actif. Les checks External Control / speed scaling
+  existent côté web UI pour les trajectoires et doivent rester une précondition
+  opérateur tant qu'ils ne sont pas câblés directement dans `live_catch_node`.
 - **Procédure** : vitesse réduite, opérateur à l'E-stop, **pas de vraie balle** aux premiers
   essais, montée en vitesse progressive.
 
@@ -387,9 +399,9 @@ exclusifs** ; l'exposer clairement dans l'UI/launch.
 
 1. **`ur3e_catch_msgs`** (`BallState`, `CatchTelemetry`) ; buildable et visible par les deux
    workspaces.
-2. **`test_ball_node`** (param `publish_frame` : `base` **ou** `<camera_frame>`) + **adaptateur**
-   `Float32MultiArray → BallState` → chaîne testable sans caméra. Commencer en `publish_frame=base`
-   (sans dépendre du hand-eye), puis passer en `<camera_frame>`.
+2. **`test_ball_node`** (param `publish_frame` : `base` **ou** `<camera_frame>`) + fallback
+   legacy `Float32MultiArray → BallState` → chaîne testable sans caméra. Commencer en
+   `publish_frame=base` (sans dépendre du hand-eye), puis passer en `<camera_frame>`.
 3. **`ball_frame`** **conscient du repère** (transforme selon `header.frame_id`) + TF statiques
    (`base → <camera_frame>`, `wrist_3_link → hoop_center`) → `ball_pos_local` validé (echo +
    visualisation), vérifié en parité base/caméra (§12).

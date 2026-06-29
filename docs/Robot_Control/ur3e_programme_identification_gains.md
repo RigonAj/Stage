@@ -5,8 +5,11 @@
 > **calcule** les paramètres actionneur Isaac Lab : `stiffness` (K), `damping` (D),
 > **latence** L, **frottement** (Coulomb + visqueux), **inertie effective** I, et
 > vérifie `velocity_limit` / `effort_limit`. Sortie = un `ur3e_actuator_identified.yaml`
-> + plages de domain randomization. **Aucun code projet modifié par ce doc** — il
-> spécifie le programme à écrire.
+> + plages de domain randomization. État du workspace (2026-06-24) : une
+> implémentation locale existe déjà dans `src/ur3e_sysid/` (`run_sweep`,
+> `fit_gains`, modules purs et tests), mais ce dossier est actuellement non suivi
+> par Git (`git status` le montre en `??`). Ce document reste la référence de
+> conception et de validation.
 
 Documents liés :
 - `ur3e_parametres_actionneur_reference.md` — §3 hiérarchie K/D, §4 méthode (ce doc en est le détail exécutable).
@@ -168,15 +171,26 @@ commande/réponse. Séparer la latence de transport (réseau/driver) de la dynam
 
 ## 6. Forme du programme (2 options)
 
-- **Option A — nœud dédié `ur3e_sysid`** (nouveau package, ou dans `ur3e_live_catch`),
+- **Option A — nœud dédié `ur3e_sysid`**,
   miroir de `test_ball_node` : paramètres (`joint`, `signal`, `amplitude`, `f0`, `f1`,
   `duration`), service `~/run_sweep`, publie `sysid_telemetry`, écrit **rosbag2 + CSV**,
   puis un script offline `fit_gains.py` (numpy/scipy).
 - **Option B — script autonome `tools/sysid/`** (rclpy minimal) : commande + record +
   fit en une passe. Plus simple pour démarrer.
 
-**Reco : commencer par l'Option B** (rapide, ne touche pas au code des nœuds), puis
-industrialiser en nœud + onglet web (§7) une fois la méthode validée sur mock hardware.
+**État local :** le dossier `src/ur3e_sysid/` implémente une variante intermédiaire :
+un paquet `ament_python` avec deux exécutables ROS (`run_sweep`, `fit_gains`) et sans
+onglet web/service `~/run_sweep` pour l'instant. C'est cohérent avec l'esprit de
+l'Option B, mais déjà placé comme paquet ROS.
+
+Commandes actuelles :
+
+```bash
+colcon build --symlink-install --packages-select ur3e_sysid
+source install/setup.bash
+ros2 run ur3e_sysid run_sweep --joint elbow --signal chirp --amplitude 0.02 --f0 0.1 --f1 3.0
+ros2 run ur3e_sysid fit_gains --in-dir recordings/sysid
+```
 
 ### 6.1 Pseudo-code (end-to-end, Option B)
 

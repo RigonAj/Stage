@@ -127,7 +127,9 @@ system-id. Ne pas garder le `800/40` uniforme.
 ## 4. Méthode pour identifier les gains UR3e (system-id)
 
 > 🛠️ **Programme détaillé** (excitation, enregistrement, fit `K/D/L`, intégration
-> web UI) : `ur3e_programme_identification_gains.md`.
+> web UI) : `ur3e_programme_identification_gains.md`. Une implémentation locale
+> existe dans `src/ur3e_sysid/` (`run_sweep`, `fit_gains`), mais le dossier n'est
+> pas encore suivi par Git dans l'état courant du workspace.
 
 Cf. `ur3e_ball_catch_sim_to_real.md §2.1` et littérature §5 :
 

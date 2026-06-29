@@ -1,0 +1,98 @@
+meta:
+  robot_serial: ''
+  date: '2026-06-25'
+  id_pose_rad:
+  - 0.0
+  - -1.570796
+  - 1.570796
+  - -1.570796
+  - -1.570796
+  - 0.0
+  payload_kg: 0.0
+  interface: forward_position_controller@60Hz
+  source: ur3e_sysid.fit_gains
+joints:
+  shoulder_pan_joint:
+    stiffness: 607.522997
+    damping: 18.603028
+    latency_s: 0.012792
+    inertia_eff: 0.27595949
+    wn: 46.920075
+    zeta: 0.718372
+    friction_coulomb_Nm: 0.0
+    friction_viscous_Nms: 0.0
+    effort_limit: 56.0
+    velocity_limit: 3.1416
+    fit_r2_step: 0.9868
+    fit_r2_chirp: 0.9971
+  shoulder_lift_joint:
+    stiffness: 2883.501142
+    damping: 71.562757
+    latency_s: 0.022402
+    inertia_eff: 0.46695848
+    wn: 78.581612
+    zeta: 0.97512
+    friction_coulomb_Nm: 0.0
+    friction_viscous_Nms: 0.0
+    effort_limit: 56.0
+    velocity_limit: 3.1416
+    fit_r2_step: 0.9968
+    fit_r2_chirp: 0.9895
+  elbow_joint:
+    stiffness: 669.514669
+    damping: 18.774361
+    latency_s: 0.017589
+    inertia_eff: 0.190605
+    wn: 59.266995
+    zeta: 0.830975
+    friction_coulomb_Nm: 0.0
+    friction_viscous_Nms: 0.0
+    effort_limit: 28.0
+    velocity_limit: 3.1416
+    fit_r2_step: 0.998
+    fit_r2_chirp: 0.9976
+  wrist_1_joint:
+    stiffness: 24.703175
+    damping: 0.740417
+    latency_s: 0.013662
+    inertia_eff: 0.01068809
+    wn: 48.075774
+    zeta: 0.720477
+    friction_coulomb_Nm: 0.0
+    friction_viscous_Nms: 0.0
+    effort_limit: 12.0
+    velocity_limit: 6.2832
+    fit_r2_step: 0.9968
+    fit_r2_chirp: 0.999
+  wrist_2_joint:
+    stiffness: 4.92563
+    damping: 0.144034
+    latency_s: 0.015122
+    inertia_eff: 0.00212959
+    wn: 48.093168
+    zeta: 0.703166
+    friction_coulomb_Nm: 0.0
+    friction_viscous_Nms: 0.0
+    effort_limit: 12.0
+    velocity_limit: 6.2832
+    fit_r2_step: 0.984
+    fit_r2_chirp: 0.9994
+  wrist_3_joint:
+    stiffness: 0.320189
+    damping: 0.009552
+    latency_s: 0.01387
+    inertia_eff: 0.0001371
+    wn: 48.326419
+    zeta: 0.720861
+    friction_coulomb_Nm: 0.0
+    friction_viscous_Nms: 0.0
+    effort_limit: 12.0
+    velocity_limit: 6.2832
+    fit_r2_step: 0.9945
+    fit_r2_chirp: 0.999
+domain_randomization:
+  stiffness_pct: 0.25
+  damping_pct: 0.25
+  latency_s_range:
+  - 0.0
+  - 0.022402

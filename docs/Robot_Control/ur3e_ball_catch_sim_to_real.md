@@ -5,12 +5,17 @@ Ce document est le plan de référence pour rendre la politique PPO « attrape-b
 **d'entraînement** et **d'inférence (closed-loop live)**, avec les valeurs numériques ancrées sur
 les vraies limites du robot.
 
-> Statut code (2026-06-20) : les corrections de base côté Isaac Lab sont appliquées dans
-> `<ISAAC_REPO>/source/FirstTraining/...` : actionneur borné par joint, action incrémentale
-> clippée/rate-limitée, `clip_actions: True` côté policy, et métadonnées d'export mises à jour.
-> Le diagnostic chiffré ci-dessous reste celui de l'**ancien** rollout copié dans
-> `$DV_ROSWS_ROOT/data/ur3e_rollouts/...`. La latence, la domain randomization, le reward shaping,
-> la dynamique de balle ralentie et le noeud ROS2 live restent à implémenter/valider.
+> Statut code (mise à jour 2026-06-24) : les corrections de base côté Isaac Lab
+> sont documentées dans `<ISAAC_REPO>/source/FirstTraining/...` : actionneur
+> borné par joint, action incrémentale clippée/rate-limitée, `clip_actions: True`
+> côté policy, et métadonnées d'export mises à jour. Côté ROS, les paquets
+> `ur3e_catch_msgs` et `ur3e_live_catch` existent dans ce workspace : le chemin
+> `BallState` + `/joint_states` -> observation 33-D -> policy -> safety ->
+> streaming est câblé derrière `enable_command=false` par défaut. Le diagnostic
+> chiffré ci-dessous reste celui de l'**ancien** rollout copié dans
+> `$DV_ROSWS_ROOT/data/ur3e_rollouts/...`. Restent à valider/terminer :
+> perception réelle, timestamp d'événement, TF statiques, latence réelle, domain
+> randomization, reward shaping, dynamique de balle ralentie et bring-up robot.
 
 > Décisions cadrant ce plan :
 > 1. **Cible de déploiement = closed-loop live** — la politique tourne sur le robot à la
@@ -32,9 +37,11 @@ Documents liés : `ur3e_real_robot_replay.md` (réalisé vs commande, replay ope
 
 Dans `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining/` :
 
-- `ur_gripper.py` : `effort_limit_sim` par joint =
-  `[54, 54, 28, 9, 9, 9] Nm` pour
-  `[shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3]`.
+- `ur_gripper.py` : historique appliqué au 2026-06-20 :
+  `effort_limit_sim = [54, 54, 28, 9, 9, 9] Nm` pour
+  `[shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3]`. La doc de
+  référence actionneur du 2026-06-23 demande maintenant d'aligner la cible
+  Isaac sur `ur_description` : `[56, 56, 28, 12, 12, 12] Nm`.
 - `ur_gripper.py` : `velocity_limit_sim` nominal UR3e par joint =
   `[3.1416, 3.1416, 3.1416, 6.2832, 6.2832, 6.2832] rad/s`
   (`180 deg/s` autres joints, `360 deg/s` poignets). Les gains restent provisoires :
@@ -136,9 +143,10 @@ réel**, en injectant la physique et les retards réels dans l'entraînement.
 - **Appliqué : `velocity_limit_sim` par joint** = limites UR3e nominales constructeur :
   - base/épaule/coude : `v_safe = 3.142 rad/s` (180 °/s)
   - poignets : `v_safe = 6.283 rad/s` (360 °/s)
-- **Appliqué : `effort_limit_sim` par joint** (ne pas garder 23 Nm uniforme) : `[54, 54, 28,
-  9, 9, 9]` Nm. (Les poignets à 9 Nm sont bien plus faibles que 23 → la sim les survalorise
-  dans l'ancien modèle.)
+- **À aligner : `effort_limit_sim` par joint** (ne pas garder 23 Nm uniforme).
+  La valeur historique du projet était `[54, 54, 28, 9, 9, 9]` Nm ; la cible
+  cohérente avec `ur_description` est `[56, 56, 28, 12, 12, 12]` Nm. Voir
+  `ur3e_parametres_actionneur_reference.md`.
 - **Reste à faire : ré-identifier `stiffness`/`damping`** pour reproduire la **bande passante de suivi réelle**.
   Méthode (system-id) : sur le vrai robot, envoyer un échelon de position et enregistrer la
   réponse via `/joint_states` ; ajuster `k`/`d` en sim pour matcher le temps de montée et le
@@ -271,8 +279,10 @@ Actions :
 
 ## 5. Contraintes d'INFÉRENCE / DÉPLOIEMENT (closed-loop live)
 
-### 5.1 Architecture de la boucle (à implémenter dans un nouveau paquet ROS2)
-Séparée de `ur3e_rollout_replay` (qui reste pour la validation open-loop). Boucle à 60 Hz :
+### 5.1 Architecture de la boucle (implémentée côté ROS, à valider sur robot)
+Séparée de `ur3e_rollout_replay` (qui reste pour la validation open-loop). Le
+paquet local `src/ur3e_live_catch` implémente déjà cette boucle à 60 Hz en
+dry-run ou commande protégée par `enable_command` :
 
 ```
 caméra ─▶ détection balle 3D ─▶ TF base ─▶ construit obs 33-D ─▶ politique (TorchScript/ONNX)
@@ -399,7 +409,7 @@ rollouts ne peuvent pas servir de validation car leur policy commande des cibles
 | `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env.py` | appliqué : action delta/rate-limit (`_pre_physics_step`) ; reste : buffers de latence, reward shaping (`compute_rewards`), bruit d'obs |
 | `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env_cfg.py` | appliqué : `v_safe`/`a_safe`/bornes position/ranges balle ; reste : `episode_length_s`, flags DR |
 | `<ISAAC_REPO>/source/.../firsttraining/agents/skrl_ppo_cfg.yaml` | appliqué : `clip_actions: True` côté policy ; reste : renommage expérience, hyperparams |
-| **nouveau** paquet ROS2 (ex. `ur3e_live_policy`) | nœud closed-loop : perception → obs 33-D → policy → sécurité → contrôleur streaming |
+| `src/ur3e_live_catch` | nœud closed-loop : perception → obs 33-D → policy → sécurité → contrôleur streaming ; câblé derrière `enable_command`, validation robot/perception réelle encore ouverte |
 | `docs/Robot_Control/ur3e_real_robot_replay.md`, `docs/Robot_Control/ur3e_robot_control_architecture.md` | lien croisé vers ce document |
 
 > Source de vérité côté robot : la documentation constructeur UR3e et le

@@ -35,7 +35,7 @@ The Trace algorithm measures the trail width perpendicular to the motion from ma
    Y = ((v - cy) / fy) * Z
    ```
 
-10. Filter 3D outliers and fit the trajectory, then publish the ball position on the ROS 2 topic `ball_position_3d_mm`.
+10. Filter 3D outliers and fit the trajectory, then publish the ball state on the ROS 2 topic `ball_state` (`ur3e_catch_msgs/BallState`). The legacy `ball_position_3d_mm` topic can still be emitted for compatibility.
 
 The full algorithm is documented visually in `docs/trace_algorithm_explanation.html` (detailed explanation, parameters, diagnostics) and `docs/Context/algo_trace_graph.html` (C++ pipeline graph).
 

@@ -9,21 +9,24 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/highgui.hpp>
+#include <builtin_interfaces/msg/time.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
+#include <ur3e_catch_msgs/msg/ball_state.hpp>
 
 using namespace std::chrono_literals;
 
 class Pub : public rclcpp::Node {
 public:
     Pub()
-        : Node("minimal_publisher"),
+        : Node("ball_tracking_cpp"),
           resolution(640, 480),
           box(0, 0, resolution.width, resolution.height),
           camera(),
@@ -40,8 +43,31 @@ public:
             &camera.UndistortedFilteredTimestamps(),
             &camera.UndistortedFilteredPolarities());
 
+        camera_frame_id_ = this->declare_parameter<std::string>("camera_frame_id", "camera_optical");
+        const std::string ball_state_topic =
+            this->declare_parameter<std::string>("ball_state_topic", "ball_state");
+        const std::string legacy_pose_topic =
+            this->declare_parameter<std::string>("legacy_pose_topic", "ball_position_3d_mm");
+        publish_legacy_pose_ = this->declare_parameter<bool>("publish_legacy_pose", true);
+
+        if (camera_frame_id_.empty()) {
+            throw std::runtime_error("camera_frame_id must not be empty");
+        }
+
+        ball_state_publisher_ =
+            this->create_publisher<ur3e_catch_msgs::msg::BallState>(ball_state_topic, 10);
+        if (publish_legacy_pose_) {
+            legacy_pose_publisher_ =
+                this->create_publisher<std_msgs::msg::Float32MultiArray>(legacy_pose_topic, 10);
+        }
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Publishing BallState on '%s' in frame '%s'%s",
+            ball_state_topic.c_str(),
+            camera_frame_id_.c_str(),
+            publish_legacy_pose_ ? " and legacy ball_position_3d_mm" : "");
+
         timer_ = this->create_wall_timer(1ms, std::bind(&Pub::timer_callback, this));
-        pose_publisher_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("ball_position_3d_mm", 10);
     }
 
     ~Pub() override = default;
@@ -53,7 +79,8 @@ private:
 
     void resetTracks();
     void applyInputCalibration();
-    void publishBallPose(const BallPose3D &pose) const;
+    void publishBallPose(const BallPose3D &pose);
+    builtin_interfaces::msg::Time eventStampToRosTime(int64_t eventTimestampUs);
     void draw2DOverlay(const BallPose3D &pose);
     void drawTrackerResult(const BallTrackerResult &result);
     void drawDbscanClusters(const std::vector<BallTrackerClusterInput> &clusters);
@@ -69,7 +96,12 @@ private:
 private:
     Ui ui;
     rclcpp::TimerBase::SharedPtr timer_;
-    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr pose_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr legacy_pose_publisher_;
+    rclcpp::Publisher<ur3e_catch_msgs::msg::BallState>::SharedPtr ball_state_publisher_;
+    std::string camera_frame_id_;
+    bool publish_legacy_pose_ = true;
+    std::optional<int64_t> timestamp_anchor_event_us_;
+    std::optional<rclcpp::Time> timestamp_anchor_ros_time_;
     cv::Size resolution;
     Box box;
 
@@ -472,16 +504,63 @@ void Pub::resetTracks() {
     gui.ClearTraceMotionWindow();
     gui.ResetTraceAccumulation();
     gui.ClearCurrentBall3D();
+    timestamp_anchor_event_us_.reset();
+    timestamp_anchor_ros_time_.reset();
 }
 
-void Pub::publishBallPose(const BallPose3D &pose) const {
-    if (!pose_publisher_) {
+builtin_interfaces::msg::Time Pub::eventStampToRosTime(const int64_t eventTimestampUs) {
+    const rclcpp::Time now = this->get_clock()->now();
+    if (eventTimestampUs <= 0) {
+        return now;
+    }
+
+    if (!timestamp_anchor_event_us_.has_value()
+        || !timestamp_anchor_ros_time_.has_value()
+        || eventTimestampUs < *timestamp_anchor_event_us_) {
+        timestamp_anchor_event_us_ = eventTimestampUs;
+        timestamp_anchor_ros_time_ = now;
+    }
+
+    const int64_t deltaNs = (eventTimestampUs - *timestamp_anchor_event_us_) * 1000;
+    return (*timestamp_anchor_ros_time_ + rclcpp::Duration::from_nanoseconds(deltaNs));
+}
+
+void Pub::publishBallPose(const BallPose3D &pose) {
+    if (!pose.valid) {
         return;
     }
 
-    std_msgs::msg::Float32MultiArray msg;
+    const cv::Point3f &position = pose.positionMm;
+    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
+        return;
+    }
 
-    pose_publisher_->publish(msg);
+    if (ball_state_publisher_) {
+        ur3e_catch_msgs::msg::BallState msg;
+        msg.header.stamp = eventStampToRosTime(pose.timestampUs);
+        msg.header.frame_id = camera_frame_id_;
+        msg.position.x = static_cast<double>(position.x) * 1.0e-3;
+        msg.position.y = static_cast<double>(position.y) * 1.0e-3;
+        msg.position.z = static_cast<double>(position.z) * 1.0e-3;
+        msg.velocity.x = 0.0;
+        msg.velocity.y = 0.0;
+        msg.velocity.z = 0.0;
+        msg.valid = true;
+        msg.confidence = 1.0f;
+        ball_state_publisher_->publish(msg);
+    }
+
+    if (legacy_pose_publisher_) {
+        std_msgs::msg::Float32MultiArray msg;
+        msg.layout.dim.resize(1);
+        msg.layout.dim[0].label = "xyz_mm";
+        msg.layout.dim[0].size = 3;
+        msg.layout.dim[0].stride = 3;
+        msg.layout.data_offset = 0;
+        msg.data = {position.x, position.y, position.z};
+
+        legacy_pose_publisher_->publish(msg);
+    }
 }
 
 void Pub::draw2DOverlay(const BallPose3D &pose) {

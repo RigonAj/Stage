@@ -10,8 +10,8 @@ real robot:
     # 2. Command on fake hardware / URSim with the simulated ball:
     ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true enable_command:=true
 
-    # 3. Real perception (C++ tracker -> adapter) + command (KEEP THE E-STOP):
-    ros2 launch ur3e_live_catch live_catch.launch.py use_adapter:=true enable_command:=true
+    # 3. Real perception (C++ tracker -> native BallState) + command (KEEP THE E-STOP):
+    ros2 launch ur3e_live_catch live_catch.launch.py use_tracker:=true enable_command:=true
 
 ``enable_command:=false`` (the default) keeps it a pure DRY-RUN: the full
 perception->policy->safety pipeline runs and publishes CatchTelemetry, but no
@@ -79,6 +79,7 @@ def generate_launch_description() -> LaunchDescription:
     enable_command = LaunchConfiguration("enable_command")
     action_mode = LaunchConfiguration("action_mode")
     model_path = LaunchConfiguration("model_path")
+    use_tracker = LaunchConfiguration("use_tracker")
     use_adapter = LaunchConfiguration("use_adapter")
     use_test_ball = LaunchConfiguration("use_test_ball")
     publish_frame = LaunchConfiguration("publish_frame")
@@ -97,8 +98,11 @@ def generate_launch_description() -> LaunchDescription:
                               description="faithful | safe (archi §4.3.4)"),
         DeclareLaunchArgument("model_path", default_value="",
                               description="policy export; empty => data/models then dated fallback"),
+        DeclareLaunchArgument("use_tracker", default_value="false",
+                              description="start ball_tracking_cpp native BallState publisher"),
         DeclareLaunchArgument("use_adapter", default_value="false",
-                              description="start the Float32MultiArray->BallState adapter (real tracker)"),
+                              description="start the legacy Float32MultiArray->BallState adapter; "
+                                          "do not combine with use_tracker"),
         DeclareLaunchArgument("use_test_ball", default_value="false",
                               description="start the simulated test_ball_node instead of a real source"),
         DeclareLaunchArgument("publish_frame", default_value="base",
@@ -116,6 +120,14 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[config, overrides],
             prefix=LaunchConfiguration("policy_python"),
             output="screen",
+        ),
+        Node(
+            package="ball_tracking_cpp",
+            executable="talker",
+            name="ball_tracking_cpp",
+            parameters=[config],
+            output="screen",
+            condition=IfCondition(use_tracker),
         ),
         Node(
             package="ur3e_live_catch",

@@ -14,8 +14,8 @@ Ce document complète, sans les remplacer :
 - `incoherences_code_logique.md` — registre des incohérences (laissé inchangé).
 - `reste_a_faire.md` — checklist d'exécution bring-up.
 
-Les constats **déjà** suivis ailleurs (tracker C++ qui publie vide, timestamp
-événement, TF statiques hand-eye/hoop, modèle canonique `data/models/` absent,
+Les constats **déjà** suivis ailleurs (fallback perception legacy, TF statiques
+hand-eye/hoop, modèle canonique `data/models/` absent,
 chemins hand-eye divergents) ne sont **pas redétaillés ici** : voir les deux derniers
 documents. Ce document se concentre sur (a) **des bugs/risques d'inférence
 nouvellement identifiés**, et (b) **des propositions sim-to-real concrètes**.
@@ -312,8 +312,9 @@ entraîner et déployer **au même facteur** (lié à §4.2).
 ### 5.6 Timestamp d'événement (rappel)
 
 `perception_age_s` n'est fiable que si `BallState.header.stamp` porte le **temps
-d'événement** (aujourd'hui temps de réception/nœud, cf. `reste_a_faire.md` P2 et
-`incoherences_code_logique.md #2`). Pré-requis à la calibration de latence §4.3.
+d'événement**. Le tracker C++ natif le fait maintenant via `BallPose3D.timestampUs`
+ancré sur l'horloge ROS ; le fallback `float32_adapter.py` reste timestampé à la
+réception. Pré-requis à la calibration de latence §4.3.
 
 ---
 

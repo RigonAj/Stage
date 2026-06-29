@@ -61,3 +61,10 @@ ball_float32_adapter:
     output_topic: "ball_state"
     camera_frame: "camera_optical"
     units: "mm"
+
+ball_tracking_cpp:
+  ros__parameters:
+    ball_state_topic: "ball_state"
+    camera_frame_id: "camera_optical"
+    publish_legacy_pose: true
+    legacy_pose_topic: "ball_position_3d_mm"

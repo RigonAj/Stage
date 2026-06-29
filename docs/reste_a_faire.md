@@ -1,6 +1,6 @@
 # Reste a faire - UR3e live catch
 
-Date : 2026-06-22
+Date : 2026-06-24
 
 Ce document liste les actions restantes pour passer de la chaine live-catch
 outillee et testee en dry-run a une validation robot reel. Il complete
@@ -151,35 +151,38 @@ tracking.
 
 ## Priorite 2 - Brancher la vraie perception
 
-### [ ] Publier une vraie position depuis le tracker C++
+### [x] Publier une vraie position depuis le tracker C++ (`BallState` natif)
 
 **Etat actuel :** `publisher_member_function.cpp` appelle `publishBallPose()`,
-mais publie un `Float32MultiArray` vide sur `ball_position_3d_mm`.
+qui publie maintenant `ur3e_catch_msgs/BallState` sur `ball_state`, en metres,
+avec `header.frame_id` non vide. Le topic legacy `ball_position_3d_mm` reste
+publie en option pour compatibilite.
 
-**Pourquoi c'est bloquant :** `float32_adapter.py` ne peut produire un
-`BallState` valide que si le tableau contient au moins `[x, y, z]`.
+**Pourquoi ce n'est plus bloquant :** `live_catch_node` peut consommer directement
+le `BallState` natif, sans passer par `float32_adapter.py`.
 
-**Action minimale :** remplir `msg.data` avec la position 3D, en documentant
-l'ordre, l'unite et le repere.
+**Action minimale :** terminee cote C++. `BallState.position` est en metres dans
+le repere camera declare par `camera_frame_id`.
 
-**Action cible :** publier directement `ur3e_catch_msgs/BallState` depuis le
-tracker C++, avec `header.frame_id` et `header.stamp` au temps d'evenement.
+**Action cible restante :** valider le repere camera et la TF hand-eye reelle
+pendant un essai perception seule.
 
 **Validation attendue :** `ros2 topic echo /ball_state` montre `valid=true`,
 une position en metres, un `frame_id` non vide, et une latence coherente dans
 `CatchTelemetry.perception_age_s`.
 
-### [ ] Propager un timestamp evenement reel
+### [x] Propager un timestamp evenement reel depuis le tracker C++
 
-**Etat actuel :** l'adaptateur legacy timestamp a la reception; `test_ball_node`
-timestamp a l'heure de simulation/node.
+**Etat actuel :** le tracker C++ copie `poseTimestampUs` dans `BallPose3D` et le
+publisher natif ancre ce temps evenement sur l'horloge ROS du nœud. L'adaptateur
+legacy timestamp encore a la reception; `test_ball_node` timestamp a l'heure de
+simulation/node, ce qui est attendu pour une source analytique.
 
-**Pourquoi c'est bloquant :** la compensation de latence et les comparaisons
-sim-to-real dependent de l'age de la mesure.
+**Pourquoi ce n'est plus bloquant :** `CatchTelemetry.perception_age_s` peut se
+baser sur le stamp evenement du chemin natif.
 
-**Action :** choisir le timestamp de l'estimation Trace (par exemple milieu ou
-fin de la fenetre d'evenements utilisee), le convertir en temps ROS, puis le
-mettre dans `BallState.header.stamp`.
+**Action restante :** mesurer la latence reelle avec `latency_report` et verifier
+que l'age reste positif et stable en acquisition camera.
 
 **Validation attendue :** `perception_age_s` reste positif, stable, compatible
 avec la cadence camera/tracker, et reagit correctement si la perception ralentit.
@@ -252,6 +255,15 @@ Les assets versionnes sont le STEP, les GLB et le MTL.
 **Validation attendue :** un clone propre suffit pour ouvrir la doc, afficher le
 support dans l'UI et comprendre comment regenerer l'OBJ si necessaire.
 
+### [ ] Decider et versionner le paquet `ur3e_sysid`
+
+**Etat actuel :** `src/ur3e_sysid/` existe localement avec `run_sweep`,
+`fit_gains` et des tests, mais il est non suivi par Git.
+
+**Validation attendue :** soit le paquet est ajoute au depot avec ses tests, soit
+la doc system-id le marque explicitement comme prototype local non requis pour un
+clone propre.
+
 ## Sequence recommandee courte
 
 1. Faire la calibration hand-eye et publier `base -> camera_optical`.
@@ -260,5 +272,5 @@ support dans l'UI et comprendre comment regenerer l'OBJ si necessaire.
 4. Tester l'onglet `Test` en dry-run avec torch.
 5. Tester `enable_command` sur fake hardware / URSim.
 6. Tester robot reel avec balle virtuelle, vitesse reduite, E-stop en main.
-7. Brancher le tracker C++ en `BallState` horodate.
+7. Lancer le tracker C++ natif (`use_tracker:=true`) et verifier `/ball_state`.
 8. Mesurer la latence reelle et seulement ensuite passer a une vraie balle lente.

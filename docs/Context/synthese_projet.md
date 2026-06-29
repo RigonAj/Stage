@@ -364,14 +364,12 @@ Les elements deja bien couverts par le depot sont :
 Les points qui restent critiques ou a finaliser sont :
 
 - valider physiquement la calibration hand-eye `T_base_camera` ;
-- publier une position de balle native, typee et horodatee, plutot qu'un tableau
-  vide ou non structure ;
 - publier les TF statiques `base -> <camera_frame>` et
   `wrist_3_link -> hoop_center` avec la vraie geometrie ;
 - figer les composantes observation 3 / 8 / 10 avec la source Isaac et la
   geometrie reelle du montage ;
 - tester sur robot reel avec balle virtuelle avant toute vraie balle ;
-- brancher la vraie perception C++ en `BallState` horodate au temps d'evenement ;
+- valider la vraie perception C++ native `BallState` en perception seule ;
 - reentrainer ou adapter la simulation avec vitesses, efforts, latences et bruit
   realistes ;
 - mesurer la latence bout-en-bout avec perception reelle avant tout essai

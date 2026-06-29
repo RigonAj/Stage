@@ -309,10 +309,10 @@ BallTrackerResult BallTracker::Update(
                         && std::fabs(pose->depthMm - last_ball_pose_->depthMm) > 250.0f
                         && last_ball_pose_->depthMm != 0.0f;
                     if(bad) continue;
+                    pose->timestampUs = poseTimestampUs;
                     last_ball_pose_ = pose;
                     result.pose = pose;
                     result.poseTimestampUs = poseTimestampUs;
-                    pose->timestampUs = poseTimestampUs;
 
                     track_ball_poses_.emplace_back(*pose);
                     Update3DTrack(poseTimestampUs, *pose, settings.weightedRegressionEnabled, result);

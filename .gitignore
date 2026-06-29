@@ -6,6 +6,7 @@
 # Local agent notes
 AGENT.md
 AGENTS.md
+!AGENTS.md
 
 # Local dependencies
 .deps/

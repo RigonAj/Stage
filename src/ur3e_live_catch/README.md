@@ -35,7 +35,7 @@ ur3e_live_catch/
 | `latency.py` | `LatencyStats` (budget de latence, §10) |
 | `live_catch_node.py` | nœud rclpy 60 Hz : dry-run **ou** commande (flag `enable_command`) |
 | `test_ball_node.py` | source de balle artificielle, `publish_frame` = `base` \| `<camera_frame>` (§4.2) |
-| `float32_adapter.py` | `Float32MultiArray → BallState` (bridge tracker C++, §4.1) |
+| `float32_adapter.py` | fallback legacy `Float32MultiArray → BallState` (§4.1) |
 | `latency_report.py` | nœud d'agrégation latence (`catch_telemetry` → percentiles) |
 
 ## Lancer
@@ -51,7 +51,10 @@ ros2 topic echo /catch_telemetry
 # 2) Commande sur fake hardware / URSim, balle simulée :
 ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true enable_command:=true
 
-# 3) Perception réelle (tracker C++ → adaptateur) + commande — GARDER L'E-STOP :
+# 3) Perception réelle (tracker C++ natif → BallState) + commande — GARDER L'E-STOP :
+ros2 launch ur3e_live_catch live_catch.launch.py use_tracker:=true enable_command:=true
+
+# Fallback legacy si un ancien tracker ne publie que ball_position_3d_mm :
 ros2 launch ur3e_live_catch live_catch.launch.py use_adapter:=true enable_command:=true
 
 # 4) Stack robot réel + UI + balle virtuelle à la demande (défaut : dry-run) :
@@ -63,6 +66,9 @@ ros2 run ur3e_live_catch latency_report
 # Tests de logique pure (stdlib) :
 cd src/ur3e_live_catch && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q
 ```
+
+Ne pas lancer `use_tracker:=true` et `use_adapter:=true` ensemble : les deux
+publieraient sur `ball_state`.
 
 `enable_command:=false` est le **défaut sûr** : tout le pipeline tourne et publie
 `CatchTelemetry`, mais aucune commande n'est émise. En mode commande, le nœud

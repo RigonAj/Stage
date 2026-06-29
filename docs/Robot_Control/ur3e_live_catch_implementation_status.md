@@ -61,7 +61,7 @@ mono-processus retenue (§2 du plan).
 | Étape | Sujet | État |
 |---|---|---|
 | 1 | `ur3e_catch_msgs` (`BallState`, `CatchTelemetry`) | ✅ implémenté (+ champs latence/vitesse balle) |
-| 2 | `test_ball_node` + adaptateur `Float32 → BallState` | ✅ implémenté |
+| 2 | `test_ball_node` + fallback legacy `Float32 → BallState` | ✅ implémenté |
 | 3 | `ball_frame` conscient du repère + filtre vitesse | ✅ implémenté (TF statiques à fournir au lancement) |
 | 4 | `ObservationBuilder` 33-D + test d'équivalence | ✅ implémenté ; comps 3/8/10 paramétrées, à figer (source Isaac) |
 | 5 | `PolicyRunner` (question scaler) → action en dry-run | ✅ implémenté ; **scaler tranché** : pas de scaler externe requis (`.ts` l'embarque, Δ=4.6e-6) |
@@ -116,12 +116,14 @@ float32                confidence
 ```
 float32[]            observation    # 33
 float32[]            raw_action     # 6 (sortie policy, avant mapping/clip)
-float32[]            joint_target   # 6 (après clip+rate-limit ; VIDE en dry-run)
+float32[]            joint_target   # 6 (cible sûre après clip+rate+accel ;
+                                     #    renseignée même en dry-run, mais non émise)
 geometry_msgs/Point  ball_base      # balle dans le repère base
 ```
 
 Le paquet est buildable et visible par le producteur C++ (`Ball_Tracking_Cpp`,
-futur) et le consommateur Python (`ur3e_live_catch`) — workspace unique (§3 du plan).
+qui publie maintenant `BallState` nativement) et le consommateur Python
+(`ur3e_live_catch`) — workspace unique (§3 du plan).
 
 ---
 
@@ -242,10 +244,10 @@ numpy.
 
 ### 4.2 Nœuds rclpy (exécutables sur la machine ROS)
 
-**`float32_adapter.py`** (§4.1, intérim) — abonne `ball_position_3d_mm`
+**`float32_adapter.py`** (§4.1, fallback legacy) — abonne `ball_position_3d_mm`
 (`Float32MultiArray`, caméra, mm) → republie `BallState` (stamp = réception,
-`frame_id` = caméra constante, mm→m). Permet de brancher le tracker C++ existant
-**sans toucher à son build**.
+`frame_id` = caméra constante, mm→m). À réserver aux anciens builds du tracker ;
+le chemin courant est la publication native `BallState` depuis `ball_tracking_cpp`.
 
 **`test_ball_node.py`** (§4.2) — source de balle artificielle :
 - param **`publish_frame`** = `base` **ou** `<camera_frame>` (`header.frame_id`
@@ -287,7 +289,7 @@ l'entraînement (sim-to-real §5.6).
 
 ### 4.3 Config & launch
 - `config/live_catch.yaml` : sections `live_catch_node`, `test_ball_node`,
-  `ball_float32_adapter`. Contient `loop_hz: 60`, repères, géométrie disque
+  `ball_float32_adapter`, `ball_tracking_cpp`. Contient `loop_hz: 60`, repères, géométrie disque
   **placeholder**, `model_path`, et les clés étape 6 **actives** : `enable_command`
   (défaut `false`), `action_mode`, `command_topic`, noms de contrôleurs,
   `auto_switch_controller`, `v_safe_factor`, `a_safe`, `loop_budget_s`,
@@ -296,8 +298,9 @@ l'entraînement (sim-to-real §5.6).
   `live_catch_node` ; argument CLI `publish_frame:=camera_optical` pour la parité.
 - `launch/live_catch.launch.py` (nouveau) : point d'entrée unique de bring-up
   (§9). Arguments : `enable_command` (défaut `false`), `action_mode`, `model_path`,
-  `use_adapter` (bridge tracker C++), `use_test_ball` (balle simulée),
-  `publish_frame`. La **même** config sert du dry-run sim au robot réel.
+  `use_tracker` (tracker C++ natif), `use_adapter` (fallback legacy),
+  `use_test_ball` (balle simulée), `publish_frame`. La **même** config sert du
+  dry-run sim au robot réel.
 
 ### 4.4 Visualisation web UI (étape 7, paquet `ur3e_web_ui`)
 **Hors chemin critique** : pure télémétrie. Le bridge `ros_interface.py` abonne
@@ -420,9 +423,9 @@ service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plo
    perception seule → dry-run → balle lente E-stop en main → montée en vitesse
    (séquence §8 ci-dessous, pilotable depuis l'onglet **Test**). Vérifier
    `forward_position_controller` **spawné** (`ros2 control list_controllers`).
-6. **Horodatage événement** — `BallState.header.stamp` est pour l'instant le temps
-   de réception (adaptateur/test node) ; migrer vers le temps d'événement pour
-   resserrer le budget de latence (sim-to-real §5.6).
+6. **Horodatage événement** — le tracker C++ natif remplit `BallState.header.stamp`
+   depuis `BallPose3D.timestampUs` ancré sur l'horloge ROS. Le fallback
+   `float32_adapter.py` timestamp encore à la réception.
 
 ---
 
@@ -449,8 +452,8 @@ ros2 run ur3e_live_catch latency_report          # budget de latence (§10)
 # Bring-up par étapes (§8, ci-dessous) — GARDER L'E-STOP en main :
 #  a) commande sur le robot (ou fake hardware / URSim), balle simulée :
 ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true enable_command:=true
-#  b) perception réelle (tracker C++ -> adaptateur) + commande :
-ros2 launch ur3e_live_catch live_catch.launch.py use_adapter:=true enable_command:=true
+#  b) perception réelle (tracker C++ -> BallState natif) + commande :
+ros2 launch ur3e_live_catch live_catch.launch.py use_tracker:=true enable_command:=true
 #  c) piloté depuis le web UI (onglet Test) — balle à la demande + activation à chaud :
 #     IMPORTANT : lancer live_catch sous le .venv (torch) pour que la policy infère.
 ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true trigger_mode:=true

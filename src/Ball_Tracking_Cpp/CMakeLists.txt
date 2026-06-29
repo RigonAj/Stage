@@ -16,6 +16,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(ur3e_catch_msgs REQUIRED)
 find_package(dv-processing REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -41,6 +42,7 @@ add_executable(talker
 ament_target_dependencies(talker
   rclcpp
   std_msgs
+  ur3e_catch_msgs
   dv-processing
   OpenCV
 )

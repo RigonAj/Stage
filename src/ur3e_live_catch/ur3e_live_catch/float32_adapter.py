@@ -1,9 +1,9 @@
-"""Interim adapter: ``ball_position_3d_mm`` (Float32MultiArray) -> ``BallState``.
+"""Legacy adapter: ``ball_position_3d_mm`` (Float32MultiArray) -> ``BallState``.
 
-Lets the existing C++ tracker (which publishes a camera-frame mm Float32MultiArray)
-feed the live loop WITHOUT touching its build, while the native timestamped
-``BallState`` publisher is being added (archi §4.1 "intérim"). Stamp = reception
-(no event time available yet); frame_id = a fixed camera frame parameter.
+Kept as a fallback for older tracker builds. Current ``ball_tracking_cpp`` publishes
+native, timestamped ``BallState`` directly. The adapter stamps at reception because
+the legacy Float32MultiArray stream has no event time; frame_id is a fixed camera
+frame parameter.
 """
 
 from __future__ import annotations
