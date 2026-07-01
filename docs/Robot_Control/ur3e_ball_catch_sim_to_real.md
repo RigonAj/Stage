@@ -7,8 +7,9 @@ les vraies limites du robot.
 
 > Statut code (mise à jour 2026-06-24) : les corrections de base côté Isaac Lab
 > sont documentées dans `<ISAAC_REPO>/source/FirstTraining/...` : actionneur
-> borné par joint, action incrémentale clippée/rate-limitée, `clip_actions: True`
-> côté policy, et métadonnées d'export mises à jour. Côté ROS, les paquets
+> borné par joint, action incrémentale clippée/rate-limitée dans l'environnement
+> (`clip_actions: False` côté SKRL pour éviter de biaiser PPO), et métadonnées
+> d'export mises à jour. Côté ROS, les paquets
 > `ur3e_catch_msgs` et `ur3e_live_catch` existent dans ce workspace : le chemin
 > `BallState` + `/joint_states` -> observation 33-D -> policy -> safety ->
 > streaming est câblé derrière `enable_command=false` par défaut. Le diagnostic
@@ -52,7 +53,9 @@ Dans `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining
   `[-2π, -2π, -π, -2π, -2π, -2π]` à `[2π, 2π, π, 2π, 2π, 2π]`.
 - `firsttraining_env.py` : l'action PPO est maintenant clippée dans `[-1, 1]`, transformée en
   cible incrémentale `q + action * v_safe * dt_s`, puis limitée en accélération et en position.
-- `agents/skrl_ppo_cfg.yaml` : `models.policy.clip_actions: True`.
+- `agents/skrl_ppo_cfg.yaml` : `models.policy.clip_actions: False`; Isaac
+  stocke quand même `self.actions = clamp(action, -1, 1)` dans l'observation et
+  Stage réinjecte cette action clippée pour les exports incrémentaux.
 - `scripts/skrl/play.py` : les nouveaux rollouts exportent la vraie cible
   `base_env.joint_pos_target` et les métadonnées `dt_s`, `action_delta_scale_rad`, `v_safe`,
   `a_safe`, bornes articulaires et nouvelle note `action_semantics`.
@@ -64,7 +67,8 @@ Dans `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining
 - `data/models/` : exports `latest` et `best` du run
   `2026-06-30_19-02-25_ppo_torch`, avec TorchScript, ONNX et métadonnées ; le
   modèle canonique par défaut est `latest`. Les rollouts de validation ne sont
-  pas versionnés dans `main` et doivent être régénérés au besoin.
+  pas versionnés dans `main` et doivent être régénérés au besoin. Le run exporté
+  utilisait `disk_radius=0.1 m` (params/env.yaml).
 
 Conséquence importante : les anciennes policies et l'ancien
 `rollouts_10_episodes.json` sont **incompatibles** avec la nouvelle sémantique d'action
@@ -174,11 +178,11 @@ L'option A est maintenant appliquée. L'option B reste une alternative historiqu
   politique apprendre des cibles hors-limite que le clamp masque (moins propre).
 
 Dans les deux cas :
-- **Clipping des actions appliqué** : `clip_actions: True` dans `skrl_ppo_cfg.yaml` comme
-  garde-fou, mais **ne pas compter dessus comme seule sécurité** : selon l'action space exposé
-  à SKRL, le clipping peut ne pas suffire. La source de vérité doit être un clamp/rate-limit
-  explicite dans `_pre_physics_step`, puis le même clamp côté robot. Objectif : supprimer les
-  cibles ±3 rad vues dans le rollout actuel.
+- **Clipping des actions appliqué dans l'environnement** : `clip_actions: False`
+  dans `skrl_ppo_cfg.yaml`, puis `firsttraining_env.py` clippe l'action en
+  `[-1,1]` avant intégration. C'est cette action clippée qui revient en composante
+  9 de l'observation. La source de vérité reste le clamp/rate-limit explicite dans
+  `_pre_physics_step`, puis le même clamp côté robot.
 - **Limite d'accélération `a_safe` appliquée avec une valeur initiale conservatrice** :
   `a_safe = 4 * v_safe`. Cette valeur reste à confirmer par system-id ; la borne empêche déjà
   la politique d'exploiter des sauts d'accélération infinis irréalistes.
@@ -414,7 +418,7 @@ rollouts ne peuvent pas servir de validation car leur policy commande des cibles
 | `source/.../firsttraining/ur_gripper.py` | appliqué : `velocity_limit_sim` + `effort_limit_sim` par joint ; reste : k/d system-id |
 | `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env.py` | appliqué : action delta/rate-limit (`_pre_physics_step`) ; reste : buffers de latence, reward shaping (`compute_rewards`), bruit d'obs |
 | `<ISAAC_REPO>/source/.../firsttraining/firsttraining_env_cfg.py` | appliqué : `v_safe`/`a_safe`/bornes position/ranges balle ; reste : `episode_length_s`, flags DR |
-| `<ISAAC_REPO>/source/.../firsttraining/agents/skrl_ppo_cfg.yaml` | appliqué : `clip_actions: True` côté policy ; reste : renommage expérience, hyperparams |
+| `<ISAAC_REPO>/source/.../firsttraining/agents/skrl_ppo_cfg.yaml` | appliqué : `clip_actions: False` côté policy, clipping dans l'env ; reste : renommage expérience, hyperparams |
 | `src/ur3e_live_catch` | nœud closed-loop : perception → obs 33-D → policy → sécurité → contrôleur streaming ; câblé derrière `enable_command`, validation robot/perception réelle encore ouverte |
 | `docs/Robot_Control/ur3e_real_robot_replay.md`, `docs/Robot_Control/ur3e_robot_control_architecture.md` | lien croisé vers ce document |
 

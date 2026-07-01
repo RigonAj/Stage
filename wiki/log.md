@@ -79,3 +79,11 @@
 - Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
 - Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
 - Updated: [Testing And Commands](operations/testing-and-commands.md)
+
+## [2026-07-01] ingest | Pre-push inference contract review
+
+- Updated: [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Live Catch Loop](live-catch/live-catch-loop.md)
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)

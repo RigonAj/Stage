@@ -104,33 +104,18 @@ ce **silencieusement**, ce qui contredit la discipline du reste du code (cf.
 `joint_order.py`, `limits.py` qui lèvent). Un opérateur peut commander le robot en
 croyant l'observation correcte.
 
-**Correction suggérée.** (a) Logguer un warning *throttlé* quand le fallback est
-utilisé ; (b) en **mode commande**, refuser de commander tant que la TF
-`base→hoop_center` n'est pas disponible (même logique que le refus « pas de modèle »
-de `live_catch_node.py:229-235`) ; (c) distinguer dans `_disk_pose` l'absence de TF
-(attendue au démarrage) d'une vraie erreur de lookup.
+**Correction appliquée.** Le fallback est loggé en dry-run/debug. En mode commande,
+`live_catch_node` refuse de streamer et déclenche un hold tant que la TF
+`base→hoop_center` n'est pas disponible.
 
 ### 3.3 Composantes obs 3 / 8 / 10 non validées, source Isaac absente
 
-**Constat.** Le repo Isaac n'est pas présent sur la machine (`<ISAAC_REPO>` est un
-placeholder ; le checkpoint pointe vers `/home/rigon/Documents/IsaacTrain/...` non
-monté). Les fonctions `signed_distance` (`observation.py:89-97`) et
-`_update_pass_through` (`observation.py:99-113`) portent un `TODO(isaac)` : la
-**convention de signe de la normale** et la logique exacte de `detect_pass_through`
-(porte « dans le cerceau », test de direction de vitesse) sont **devinées**.
-
-Surtout, `test_observation_equivalence.py:64-76` **injecte** les valeurs
-enregistrées de `disk`/`ball`/`ball_vel` dans le builder et **ne compare pas** les
-comps 8/10 reconstruites aux comps enregistrées (seules 1/2/5/6/9 sont vérifiées,
-cf. docstring du test). → le test **donne une fausse confiance** : il ne couvre pas
-la partie géométrie, qui est précisément la plus incertaine.
-
-**Correction suggérée.** Quand la source Isaac est disponible : figer
-`_read_disk_pose_in_body_frame` (repère exact : `base`/local vs *body* du root) et
-`detect_pass_through`, puis **étendre le test d'équivalence** pour comparer comp 8 et
-comp 10 reconstruites aux valeurs enregistrées sur les rollouts (le nouveau rollout
-post-retrain les contiendra). Tant que ce n'est pas fait, marquer comps 3/8/10
-comme **non garanties** dans la télémétrie.
+**Correction appliquée.** Le repo Isaac est maintenant disponible localement et
+`ObservationBuilder` reprend `detect_pass_through` : changement de signe dans
+n'importe quel sens, distance radiale projetée hors normale, rayon de trigger
+`disk_radius=0.1 m` pour le run exporté `2026-06-30_19-02-25`. La validation
+bit-à-bit complète sur nouveaux rollouts reste utile, mais la logique géométrique
+n'est plus une hypothèse.
 
 ### 3.4 Mismatch de boucle fermée `faithful` + safety (cœur du non-transfert)
 

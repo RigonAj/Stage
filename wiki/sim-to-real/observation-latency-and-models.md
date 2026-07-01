@@ -20,6 +20,8 @@ The live node reconstructs the 33-D PPO observation from:
 - pass-through state;
 - previous policy action according to the model contract: raw action for legacy
   absolute exports, clipped action for current incremental Isaac exports.
+- disk trigger radius. The current 2026-06-30 export used `disk_radius_m=0.1`,
+  now carried in `policy_metadata.json`.
 
 The ordering and units must mirror the Isaac environment. Any change here needs
 tests against recorded rollout or exported policy expectations.
@@ -46,8 +48,10 @@ rules:
 - Model metadata encodes action semantics so the live node selects the correct
   mapper.
 - Current Isaac exports should include `rollout_schema_version`, `dt_s`,
-  `joint_names`, action semantics and per-joint safety limits. Legacy metadata
-  without those fields is insufficient for V1 sim-to-real validation.
+  `joint_names`, action semantics, `disk_radius_m` and per-joint safety limits.
+  Legacy metadata without those fields is insufficient for V1 sim-to-real validation.
+- The SKRL policy for the current export used `clip_actions=false`; clipping
+  happens in Isaac's env and in Stage's incremental mapper.
 - Current Isaac actuator limits should align with `ur_description`: velocity
   `[pi, pi, pi, 2*pi, 2*pi, 2*pi]` rad/s and effort
   `[56, 56, 28, 12, 12, 12]` Nm.

@@ -17,6 +17,7 @@ live_catch_node:
     # to be replaced by the Isaac-sourced / measured mount geometry (archi §6 comp 3/8/10).
     disk_pos_fallback: [0.0, 0.0, 0.5]
     disk_normal_fallback: [0.0, 0.0, 1.0]
+    disk_radius: 0.1              # Isaac run 2026-06-30_19-02-25 used disk_radius=0.1 m
 
     # --- step 6: ActionMapper / safety / streaming (archi §4.3.4-§4.3.6, §8, §9) ---
     enable_command: false         # false => DRY-RUN, no robot command. true => stream to robot.
@@ -28,9 +29,9 @@ live_catch_node:
     trajectory_controller: "scaled_joint_trajectory_controller"
     auto_switch_controller: true  # switch traj->forward controller before streaming (archi §8)
     command_substeps: 1           # >1 upsamples 60 Hz targets (hardware also interpolates)
-    # v_safe = URDF max_velocity × v_safe_factor (sim-to-real §2.1); loaded from
-    # joint_limits_path, falling back to the documented UR3e nominal limits.
-    v_safe_factor: 0.5            # -> 1.571/1.571/1.571/3.142/3.142/3.142 rad/s
+    # Fallback only when policy_metadata.json lacks joint safety limits. Current
+    # Isaac exports use metadata limits instead: 3.1416/3.1416/3.1416/6.2832/...
+    v_safe_factor: 0.5            # fallback -> 1.571/1.571/1.571/3.142/3.142/3.142 rad/s
     a_safe: 10.0                  # rad/s^2 acceleration cap (tune on hardware)
     loop_budget_s: 0.02           # watchdog: per-tick compute budget (archi §9)
     max_tracking_error: 0.5       # rad; |q_measured - last_command| watchdog threshold

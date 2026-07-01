@@ -35,7 +35,10 @@ the loaded metadata declares the current Isaac target-integrator semantics.
 
 The 2026-06-30 `latest` and `best` exports in `data/models/` both declare
 `observation_space=33`, `action_space=6`, `dt_s=1/60`, per-joint velocity and
-acceleration limits, and the incremental action semantics.
+acceleration limits, `disk_radius_m=0.1`, and the incremental action semantics.
+The SKRL policy has `clip_actions=false`; the environment/action mapper clip to
+`[-1, 1]` before integration and feed back that clipped action in observation
+component 9.
 
 ## Main Transfer Risks
 

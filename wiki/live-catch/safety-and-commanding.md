@@ -27,6 +27,8 @@ controller switching or UI command gates.
   `policy_metadata.json`; otherwise they fall back to URDF/config limits.
 - `Watchdog` handles stale perception, budget overruns and tracking errors.
 - `CommandStreamer` publishes to `/forward_position_controller/commands`.
+- In command mode, missing `base -> hoop_center` TF is fail-closed: the node does
+  not use the disk fallback for robot motion.
 
 ## Operator Gates
 

@@ -1,9 +1,9 @@
 """Safety layer: clip + rate-limit + watchdog (archi §4.3.5, §9), wired at step 6.
 
-Independent of the simulation: the policy emits aggressive targets, so these
-bounds are enforced robot-side regardless of the action mode (defense in depth).
-``v_safe = URDF_limit * 0.5`` (sim-to-real §2.1) is supplied by the caller from
-``ur_description/.../joint_limits.yaml``.
+Independent of the policy output: bounds are enforced robot-side regardless of
+the action mode. Current Isaac exports supply bounds through
+``policy_metadata.json``; legacy/manual fallback bounds can still be built from
+``ur_description/.../joint_limits.yaml`` and ``v_safe_factor``.
 """
 
 from __future__ import annotations

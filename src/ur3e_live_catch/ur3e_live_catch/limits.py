@@ -1,11 +1,9 @@
 """Joint limits -> SafetyLimiter bounds (archi §4.3.5, §9, sim-to-real §2.1).
 
-``v_safe`` is the per-joint rate cap enforced robot-side, INDEPENDENTLY of the
-simulation (defense in depth, archi §9). The architecture fixes
-``v_safe = URDF nominal max_velocity * 0.5``; the UR3e nominal limits are
-base/shoulder/elbow 3.142 rad/s (180 deg/s) and wrists 6.283 rad/s (360 deg/s),
-so the safe caps are 1.571 / 1.571 / 1.571 / 3.142 / 3.142 / 3.142 rad/s — the
-same value the simulation clamped to (sim-to-real §2.2), enforced on both sides.
+``v_safe`` is the per-joint rate cap enforced robot-side. Current Isaac exports
+provide the exact velocity/acceleration bounds in ``policy_metadata.json`` and
+``live_catch_node`` uses those metadata bounds for action mapping and safety. The
+URDF/config path below is a fallback for legacy models or manual modes.
 
 ``a_safe`` (acceleration cap) is not carried in the URDF; it is a tuning knob
 supplied by config (conservative by default).

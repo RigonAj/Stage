@@ -30,6 +30,7 @@
     -1.0,
     1.0
   ],
+  "disk_radius_m": 0.1,
   "joint_velocity_safe_rad_s": [
     3.1416,
     3.1416,

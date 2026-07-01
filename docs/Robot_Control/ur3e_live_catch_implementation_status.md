@@ -71,7 +71,7 @@ mono-processus retenue (§2 du plan).
 | 1 | `ur3e_catch_msgs` (`BallState`, `CatchTelemetry`) | ✅ implémenté (+ champs latence/vitesse balle) |
 | 2 | `test_ball_node` + fallback legacy `Float32 → BallState` | ✅ implémenté |
 | 3 | `ball_frame` conscient du repère + filtre vitesse | ✅ implémenté (TF statiques à fournir au lancement) |
-| 4 | `ObservationBuilder` 33-D + test d'équivalence | ✅ implémenté ; comps 3/8/10 paramétrées, à figer (source Isaac) |
+| 4 | `ObservationBuilder` 33-D + test d'équivalence | ✅ implémenté ; pass-through aligné sur Isaac (`disk_radius=0.1 m` pour l'export 2026-06-30) |
 | 5 | `PolicyRunner` (question scaler) → action en dry-run | ✅ implémenté ; **scaler tranché** : pas de scaler externe requis (`.ts` l'embarque, Δ=4.6e-6) |
 | 6 | `ActionMapper` + safety + streaming | ✅ **câblé** (flag `enable_command`, défaut dry-run) + `limits.py`/`streaming.py` + tests |
 | 7 | Bascule contrôleur + viz web UI | ✅ bascule auto dans le nœud (§8) ; marqueur balle + arc prédit + télémétrie dans le web UI |
@@ -95,8 +95,10 @@ mono-processus retenue (§2 du plan).
      `policy_metadata.json`; `action_mode=safe` force le mapper incrémental
      simple `q + clamp(action,-1,1) * v_safe * dt`.
 3. **Source Isaac fournie par l'utilisateur** (`firsttraining_env.py`,
-   `firsttraining_env_cfg.py`) → composantes obs **3 / 8 / 10** finalisées exactement
-   d'après ces fichiers. En attendant, elles sont **isolées et paramétrées**.
+   `firsttraining_env_cfg.py`) → composantes obs **3 / 8 / 10** finalisées d'après
+   ces fichiers. Pour l'export 2026-06-30, `disk_radius=0.1 m` est gravé dans
+   `policy_metadata.json` et le nœud refuse la commande si la TF
+   `base -> hoop_center` manque.
 
 ### Découverte clé (confirmée sur les rollouts enregistrés)
 Les anciens `rollouts_10_episodes.json` ont permis de vérifier le contrat
@@ -191,16 +193,16 @@ l'ordre exact, avec les indices de tranche exposés en constantes (`IDX_*`) :
 |---|---|---|---|
 | `[0:6]` | 1 | `joint_pos` | `/joint_states` réordonné |
 | `[6:12]` | 2 | `joint_vel` | `/joint_states` |
-| `[12:15]` | 3 | `disk_pos_local` | pose disque (TF) — *à figer Isaac* |
+| `[12:15]` | 3 | `disk_pos_local` | pose disque (TF `base -> hoop_center`) |
 | `[15:18]` | 4 | `ball_pos_local` | `ball_frame` |
 | `[18:21]` | 5 | `direction` = ball−disk | dérivé |
 | `[21]` | 6 | `distance` = ‖direction‖ | dérivé |
 | `[22:25]` | 7 | `ball_vel_w` | vitesse filtrée |
-| `[25]` | 8 | `prev_signed_dist > 0` | signe — *à figer Isaac* |
-| `[26:32]` | 9 | `actions` (brute précédente) | mémorisé |
-| `[32]` | 10 | `pass_through_count` | recompté — *à figer Isaac* |
+| `[25]` | 8 | `prev_signed_dist > 0` | signe selon normale Isaac |
+| `[26:32]` | 9 | `actions` | action précédente selon contrat modèle |
+| `[32]` | 10 | `pass_through_count` | recompté comme Isaac `detect_pass_through` |
 
-- Méthodes **isolées** : `disk_pos_local`, `signed_distance`, `_update_pass_through`
+- Méthodes géométriques : `disk_pos_local`, `signed_distance`, `_update_pass_through`
   (marquées `TODO(isaac)`). État interne : `_prev_signed_dist`, `_pass_through_count`.
 - Composante 8 lit le signe **du tick précédent** ; l'état avance **après** émission.
 - Unités strictes (rad, rad/s, m, m/s). Lève si longueur ≠ 33.
@@ -221,7 +223,9 @@ l'ordre exact, avec les indices de tranche exposés en constantes (`IDX_*`) :
   **brute** pour comp 9.
 - `safe` : `target = q + clamp(action,−1,1)·v_safe·dt` ; mémorise l'action
   **clippée**. Nécessite `v_safe`.
-- Ne **fait pas** respecter les bornes — c'est le rôle de `safety.py`.
+- `incremental` : miroir des exports Isaac actuels ; intègre depuis la cible
+  précédente, clippe l'action, applique les bornes vitesse/accélération/position
+  des metadata et mémorise l'action clippée pour comp 9.
 
 **`safety.py`** (§4.3.5, §9, **câblé**) :
 - `SafetyLimiter(bounds, dt)` : **clip** position (URDF) → **rate-limit**
@@ -229,7 +233,9 @@ l'ordre exact, avec les indices de tranche exposés en constantes (`IDX_*`) :
   (quelles contraintes ont mordu). `reset()` remet la mémoire de vitesse à zéro
   (appelé à chaque arrêt contrôlé pour redémarrer la rampe à l'arrêt).
 - `Watchdog(stale_after_s, loop_budget_s, max_tracking_error)` : `check(...)`
-  renvoie `(ok, reasons)` ; `ok=False` ⇒ arrêt contrôlé. `v_safe = limite URDF × 0.5`.
+  renvoie `(ok, reasons)` ; `ok=False` ⇒ arrêt contrôlé. Pour les exports actuels,
+  les bornes action/safety viennent de `policy_metadata.json`; `v_safe_factor`
+  reste un fallback pour les exports sans métadonnées complètes.
 
 **`limits.py`** (§4.3.5, §9 ; nouveau) — bornes `SafetyLimiter` depuis les limites
 articulaires :
@@ -270,7 +276,7 @@ le chemin courant est la publication native `BallState` depuis `ball_tracking_cp
 **`live_catch_node.py`** (§2, §4.3) — **boucle live 60 Hz, dry-run OU commande** :
 - abonne `/joint_states` (cache réordonné) et `ball_state` ; tf2 `Buffer`+`Listener` ;
 - par tick : `ball_frame.process` (TF `frame_id→base`) → pose disque (TF
-  `base→hoop_center`, sinon **fallback config**) → `ObservationBuilder.build` →
+  `base→hoop_center`; fallback config seulement en dry-run/debug) → `ObservationBuilder.build` →
   `PolicyRunner.infer` → `ActionMapper.map` → `SafetyLimiter.limit` → publication
   `CatchTelemetry` (obs, action brute, **cible sûre**, balle base+vitesse, latence) ;
 - **`enable_command` (défaut `false`)** : tout le pipeline tourne (la cible sûre
@@ -350,18 +356,19 @@ service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plo
 
 ## 6. Vérification
 
-### Tests de logique pure (Python stdlib, sans ROS/torch/numpy) — **42 OK, 1 skip**
-- `test_observation_equivalence.py` — rejoue les rollouts ; vérifie longueur 33,
-  ordre, **bit-proximité** comp 1/2, comp 5/6, **comp 9 (action brute précédente)**.
+### Tests de logique pure (Python stdlib, sans ROS/torch/numpy)
+- `test_observation_equivalence.py` — rejoue les rollouts legacy ; vérifie longueur
+  33, ordre, **bit-proximité** comp 1/2, comp 5/6, **comp 9** et couvre maintenant
+  le `detect_pass_through` Isaac (changement de signe dans le rayon du disque).
 - `test_ball_frame.py` — identité si `base`, mm→m, rotation+translation, rejet
   frame vide/inconnu, vitesse par différence finie + invariance, staleness.
 - `test_action_mapper.py` — faithful (`target=action×0.5`, comp 9 brute) ; safe
-  (incrémental + clip, comp 9 clippée) ; **faithful reproduit
-  `joint_position_target_rad`** des rollouts.
+  (incrémental + clip, comp 9 clippée) ; incremental depuis metadata actuelle ;
+  **faithful reproduit `joint_position_target_rad`** des rollouts legacy.
 - `test_safety.py` — clip position, rate-limit, accel-limit, watchdog.
 - `test_streaming.py` — `format`/`stream` (interpolation)/`hold` du `CommandStreamer`.
-- `test_limits.py` — `v_safe = max_vel × 0.5` (1.571/…/3.142), ordre canonique,
-  joint manquant ⇒ lève.
+- `test_limits.py` — fallback `v_safe = max_vel × 0.5` (1.571/…/3.142), ordre
+  canonique, joint manquant ⇒ lève.
 - `test_command_pipeline.py` — **pipeline composé** ActionMapper→Safety→Streamer :
   une cible **absolue agressive** (faithful) est **rate-limitée sans saut** et
   converge vers `action×0.5` ; clip position ; mode safe.
@@ -445,9 +452,8 @@ service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plo
 colcon build --packages-select ur3e_catch_msgs ur3e_live_catch
 source install/setup.bash
 
-# (optionnel) lier le modèle canonique :
-ln -s ../ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts \
-      data/models/policy_deterministic.ts
+# Vérifier le modèle canonique versionné :
+ls data/models/policy_deterministic.ts data/models/policy_metadata.json
 
 # Démarrer le driver UR (robot réel) pour fournir /joint_states + contrôleurs ;
 # en l'absence de robot, use_fake_hardware / URSim font l'affaire.

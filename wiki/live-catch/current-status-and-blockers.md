@@ -20,12 +20,15 @@ robot/perception deployment still has blocking validation work.
   canonical model is `latest`.
 - `ActionMapper` resolves the action contract from `policy_metadata.json` for
   current incremental exports while preserving legacy absolute compatibility.
+- `ObservationBuilder` mirrors Isaac pass-through logic for the current export
+  (`disk_radius_m=0.1`), and command mode fails closed without the hoop TF.
 
 ## Blockers Before Real Perception
 
 1. Validate `T_base_camera` physically.
 2. Publish and verify `base -> camera_optical`.
-3. Publish and verify `wrist_3_link -> hoop_center`.
+3. Publish and verify `wrist_3_link -> hoop_center`; without it, command mode
+   holds instead of using a fallback disk pose.
 4. Compare `publish_frame=base` against `publish_frame=camera_optical`.
 
 ## Robot Bring-Up Still Open

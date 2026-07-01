@@ -97,6 +97,7 @@ class LiveCatchNode(Node):
         # to be replaced by the Isaac-sourced mount geometry). normal in base.
         self.declare_parameter("disk_pos_fallback", [0.0, 0.0, 0.5])
         self.declare_parameter("disk_normal_fallback", [0.0, 0.0, 1.0])
+        self.declare_parameter("disk_radius", 0.1)
 
         # --- step 6: action mapping, safety, streaming ---------------------------
         self.declare_parameter("enable_command", False)  # False => DRY-RUN (no robot command)
@@ -141,8 +142,8 @@ class LiveCatchNode(Node):
             units=str(self.get_parameter("units").value),
             stale_after_s=float(self.get_parameter("stale_after_s").value),
         )
-        self._obs_builder = ObservationBuilder()
         self._policy = self._make_policy()
+        self._obs_builder = ObservationBuilder(disk_radius=self._disk_radius_from_metadata())
 
         # Command pipeline (built always; used only when commanding is allowed).
         self._bounds = self._make_bounds()
@@ -281,6 +282,18 @@ class LiveCatchNode(Node):
             return [float(item) for item in value]
         except (TypeError, ValueError):
             return None
+
+    def _disk_radius_from_metadata(self) -> float:
+        for key in ("disk_radius_m", "disk_radius"):
+            if key not in self._policy_metadata:
+                continue
+            try:
+                value = float(self._policy_metadata[key])
+            except (TypeError, ValueError):
+                continue
+            if value > 0.0:
+                return value
+        return float(self.get_parameter("disk_radius").value)
 
     def _bounds_from_metadata(self) -> Optional[list[JointBound]]:
         lower = self._metadata_vector("joint_position_lower_rad")
@@ -460,14 +473,24 @@ class LiveCatchNode(Node):
             )
             return None
 
-    def _disk_pose(self):
-        """Return (disk_pos_base, disk_normal_base) from TF, else the fallback."""
+    def _disk_pose(self, *, commanding: bool = False):
+        """Return (disk_pos_base, disk_normal_base) from TF, else dry-run fallback."""
         try:
             tf_msg = self._tf_buffer.lookup_transform(self._base_frame, self._hoop_frame, rclpy.time.Time())
             tf = _transform_from_msg(tf_msg)
             normal = RigidTransform(quaternion=tf.quaternion).apply((0.0, 0.0, 1.0))
             return list(tf.translation), list(normal)
-        except Exception:
+        except Exception as exc:
+            if commanding:
+                self.get_logger().error(
+                    f"TF {self._base_frame}->{self._hoop_frame} unavailable in command mode: {exc}",
+                    throttle_duration_sec=2.0,
+                )
+                return None
+            self.get_logger().warn(
+                f"TF {self._base_frame}->{self._hoop_frame} unavailable, using disk fallback: {exc}",
+                throttle_duration_sec=2.0,
+            )
             return (
                 [float(x) for x in self.get_parameter("disk_pos_fallback").value],
                 [float(x) for x in self.get_parameter("disk_normal_fallback").value],
@@ -555,7 +578,11 @@ class LiveCatchNode(Node):
             self._controlled_stop(real_q, ["ball_frame_rejected"])
             return
 
-        disk_pos, disk_normal = self._disk_pose()
+        disk_pose = self._disk_pose(commanding=commanding)
+        if disk_pose is None:
+            self._controlled_stop(real_q, ["hoop_tf_unavailable"])
+            return
+        disk_pos, disk_normal = disk_pose
 
         obs = self._obs_builder.build(
             joint_pos=q,

@@ -183,11 +183,16 @@ Modules (classes appelées directement) :
   sim-to-real §5.2).
 - **Gestion de la péremption** (staleness) : si plus de détection depuis `T_stale`, geler ou
   extrapoler brièvement, et lever un **drapeau watchdog** (§9).
+- **TF cerceau obligatoire en commande réelle** : le fallback `disk_pos_fallback`
+  sert au dry-run/debug, mais `live_catch_node` refuse de streamer si la TF
+  `base -> hoop_center` manque en mode commande.
 
 #### 4.3.2 `observation.py` (ObservationBuilder) — observation 33-D
 Reconstruit l'observation **dans l'ordre et les unités exacts** de
 `firsttraining_env.py:197-208` (détail complet en §6). Miroir strict de `_get_observations`,
-`_update_local_pose_tensors` et `detect_pass_through`. **Aucun degré**, tout en rad/rad/s/m/m·s⁻¹.
+`_update_local_pose_tensors` et `detect_pass_through` : changement de signe du plan
+du cerceau, rayon de trigger `disk_radius=0.1 m` pour l'export 2026-06-30, distance
+radiale projetée hors normale. **Aucun degré**, tout en rad/rad/s/m/m·s⁻¹.
 
 #### 4.3.3 `policy_runtime.py` (PolicyRunner) — inférence
 - Charge l'export déterministe canonique `data/models/policy_deterministic.ts`
@@ -464,11 +469,11 @@ et la composition rclcpp en réserve si la latence mesurée (§10) l'exige.
 | Action ROS, joint order, build trajectoire | `Dv-Rosws/src/ur3e_rollout_replay/` (`replay_core.py`, `send.py:build_joint_trajectory`) |
 | Bridge rclpy, gates sécurité, `switch_controller`, TF, WebSocket, viewer | `Dv-Rosws/src/ur3e_web_ui/ur3e_web_ui/` (`ros_interface.py`, `app.py`, `motion.py`, `static/js/viewer3d.js`) |
 | Sémantique obs/action (source de vérité) | `<ISAAC_REPO>/source/FirstTraining/.../firsttraining/firsttraining_env.py`, `firsttraining_env_cfg.py`, `ur_gripper.py`, `agents/skrl_ppo_cfg.yaml`, `<ISAAC_REPO>/scripts/skrl/play.py` |
-| Export politique | `$DV_ROSWS_ROOT/data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/` (`policy_deterministic.ts`/`.onnx`, `policy_metadata.json`) |
+| Export politique | `$DV_ROSWS_ROOT/data/models/` (`policy_deterministic.ts`/`.onnx`, `policy_metadata.json`) ; l'ancien export daté reste un fallback legacy |
 | Perception (Trace, régression, conversion 3D) | `Dv-Rosws/src/Ball_Tracking_Cpp/` (`Gui.cpp`, `BallTracker.cpp`, `RegressionAccumulator.hpp`, `util.hpp::ToMeters`) |
 | Calibration caméra + extrinsèque | `Dv-Rosws/calibration_camera_DVXplorer_*.xml`, `Dv-Rosws/scripts/solve_handeye.py`, `ur3e_camera_base_calibration.md`, `handeye_result.yaml` |
 
-> Source de vérité des limites de vitesse : documentation constructeur UR3e et
-> `ur_description/config/ur3e/joint_limits.yaml` du driver réellement lancé. Le
-> live catch actuel utilise `v_safe_factor=0.5` pour les premiers essais reels ;
-> noter explicitement ce facteur dans toute comparaison sim-to-real.
+> Source de vérité des limites de vitesse pour les exports actuels :
+> `policy_metadata.json` (`joint_velocity_safe_rad_s`,
+> `joint_acceleration_safe_rad_s2`). `v_safe_factor=0.5` est seulement le fallback
+> URDF/config si le modèle chargé ne fournit pas ces métadonnées.

@@ -10,6 +10,7 @@ from ur3e_live_catch.action import ACTION_SCALE, ActionMapper
 ROLLOUTS = (
     "data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/rollouts_10_episodes.json"
 )
+LATEST_METADATA = "data/models/latest/policy_metadata.json"
 
 
 def test_faithful_is_absolute_unclipped():
@@ -72,6 +73,28 @@ def test_incremental_reset_restarts_from_measured_pose():
     assert m.map([1.0] * 6, [0.0] * 6) == pytest.approx([0.1] * 6)
     m.reset()
     assert m.map([-1.0] * 6, [0.5] * 6) == pytest.approx([0.4] * 6)
+
+
+def test_latest_metadata_drives_current_incremental_contract():
+    meta = json.loads((repo_root() / LATEST_METADATA).read_text())
+    assert meta["observation_space"] == 33
+    assert meta["action_space"] == 6
+    assert meta["action_clip"] == [-1.0, 1.0]
+    assert meta["disk_radius_m"] == pytest.approx(0.1)
+
+    dt = float(meta["dt_s"])
+    m = ActionMapper(
+        mode="incremental",
+        v_safe=meta["joint_velocity_safe_rad_s"],
+        a_safe=meta["joint_acceleration_safe_rad_s2"],
+        position_lower=meta["joint_position_lower_rad"],
+        position_upper=meta["joint_position_upper_rad"],
+        dt=dt,
+    )
+    first = m.map([2.0] * 6, [0.0] * 6)
+    expect = [float(a) * dt * dt for a in meta["joint_acceleration_safe_rad_s2"]]
+    assert first == pytest.approx(expect)
+    assert m.prev_action == pytest.approx([1.0] * 6)
 
 
 def test_faithful_matches_recorded_targets():

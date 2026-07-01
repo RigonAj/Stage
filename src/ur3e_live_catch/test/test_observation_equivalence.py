@@ -23,7 +23,8 @@ import pytest
 from conftest import repo_root
 from ur3e_live_catch.observation import (
     IDX_ACTIONS, IDX_BALL_POS, IDX_BALL_VEL, IDX_DIRECTION, IDX_DISK_POS,
-    IDX_DISTANCE, IDX_JOINT_POS, IDX_JOINT_VEL, OBS_DIM, ObservationBuilder,
+    IDX_DISTANCE, IDX_JOINT_POS, IDX_JOINT_VEL, IDX_PASS_THROUGH, OBS_DIM,
+    ObservationBuilder,
 )
 
 ROLLOUTS = (
@@ -50,6 +51,39 @@ def episodes():
 def test_dataset_present(episodes):
     assert episodes, "no episodes in rollouts file"
     assert len(episodes[0]["samples"]) > 1
+
+
+def _blank_obs(builder, ball_pos):
+    return builder.build(
+        joint_pos=[0.0] * 6,
+        joint_vel=[0.0] * 6,
+        disk_pos=[0.0, 0.0, 0.0],
+        disk_normal=[0.0, 0.0, 1.0],
+        ball_pos=ball_pos,
+        ball_vel=[0.0, 0.0, 0.0],
+        prev_action=[0.0] * 6,
+    )
+
+
+def test_pass_through_matches_isaac_crossing_and_radius_gate():
+    builder = ObservationBuilder(disk_radius=0.1)
+
+    _blank_obs(builder, [0.0, 0.0, 0.05])
+    obs = _blank_obs(builder, [0.09, 0.0, -0.05])
+    assert obs[IDX_PASS_THROUGH] == 0.0  # count is emitted before this tick's update
+    assert builder.pass_through_count == 1
+    obs = _blank_obs(builder, [0.09, 0.0, -0.10])
+    assert obs[IDX_PASS_THROUGH] == 1.0
+
+    builder = ObservationBuilder(disk_radius=0.1)
+    _blank_obs(builder, [0.0, 0.0, -0.05])
+    _blank_obs(builder, [0.09, 0.0, 0.05])
+    assert builder.pass_through_count == 1
+
+    builder = ObservationBuilder(disk_radius=0.1)
+    _blank_obs(builder, [0.0, 0.0, 0.05])
+    _blank_obs(builder, [0.11, 0.0, -0.05])
+    assert builder.pass_through_count == 0
 
 
 def test_observation_equivalence(episodes):

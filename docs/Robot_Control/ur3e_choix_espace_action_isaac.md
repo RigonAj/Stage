@@ -108,7 +108,8 @@ avec `qd_des = 0` par défaut. La cible est posée dans `_apply_action()` via
     `ur_description` (remplace l'ancienne valeur projet `[54, 54, 28, 9, 9, 9]`).
   - `velocity_limit_sim` = limites nominales UR3e `[3.1416×3, 6.2832×3]` rad/s.
 - Espace d'action (`_pre_physics_step` / `firsttraining_env_cfg.py`) :
-  - `Δ = v_safe · dt_step` (incrémental), `clip_actions: True`.
+  - `Δ = v_safe · dt_step` (incrémental), clipping dans l'environnement
+    (`clip_actions: False` côté SKRL pour l'export courant).
   - bornes position `[±2π, ±2π, ±π, ±2π, ±2π, ±2π]`.
   - `a_safe = 4·v_safe` (borne d'accélération).
 - **Cohérence déploiement** : `ActionMapper` mode `faithful`/incrémental côté ROS doit
@@ -162,7 +163,7 @@ La policy sort une **cible de vitesse** `qd_des`. Deux mises en œuvre :
 - Variante (b) intégrée (recommandée si on veut « vitesse ») : garder l'actionneur
   position (§3.4), action = vitesse normalisée, `qd_des = action · v_safe`,
   `q_des = q + qd_des · dt_step`, **clip position** ensuite.
-- Espace d'action : `clip_actions: True`, échelle `v_safe` par joint,
+- Espace d'action : clipping dans l'environnement, échelle `v_safe` par joint,
   `a_safe = 4·v_safe` toujours appliquée (limiter la **variation** de vitesse).
 - **Déploiement** : `forward_velocity_controller` (publier `Float64MultiArray` de
   vitesses) + watchdog → **0 rad/s** au lieu de hold.

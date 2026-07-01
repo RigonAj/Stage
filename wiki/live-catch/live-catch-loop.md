@@ -44,6 +44,7 @@ topics, to reduce latency.
 - Command mode must refuse to run when no policy model is loaded.
 - Current Isaac exports use metadata-driven incremental action mapping; legacy
   absolute exports remain supported for fallback/debug only.
+- The disk fallback is dry-run/debug only; command mode requires `base -> hoop_center`.
 - Safety remains independent from policy output.
 
 ## See Also

@@ -739,11 +739,12 @@
 Gère mm→m si nécessaire.</li>
 <li><strong>Filtre de vitesse balle</strong> (Kalman, ou EMA sur différence finie) sur les positions <code>base</code> → <code>ball_vel</code>. Aucune mesure directe de vitesse n'existe : c'est le maillon bruité (cf. sim-to-real §5.2).</li>
 <li><strong>Gestion de la péremption</strong> (staleness) : si plus de détection depuis <code>T_stale</code>, geler ou extrapoler brièvement, et lever un <strong>drapeau watchdog</strong> (§9).</li>
+<li><strong>TF cerceau obligatoire en commande réelle</strong> : le fallback <code>disk_pos_fallback</code> sert au dry-run/debug, mais <code>live_catch_node</code> refuse de streamer si la TF <code>base -&gt; hoop_center</code> manque en mode commande.</li>
 </ul>
 
 <h4 id="4-3-2-observation-py-observationbuilder-observation-33-d">4.3.2 <code>observation.py</code> (ObservationBuilder) — observation 33-D<a class="anchor" href="#4-3-2-observation-py-observationbuilder-observation-33-d" aria-label="Lien vers cette section">#</a></h4>
 
-<p>Reconstruit l'observation <strong>dans l'ordre et les unités exacts</strong> de <code>firsttraining_env.py:197-208</code> (détail complet en §6). Miroir strict de <code>_get_observations</code>, <code>_update_local_pose_tensors</code> et <code>detect_pass_through</code>. <strong>Aucun degré</strong>, tout en rad/rad/s/m/m·s⁻¹.</p>
+<p>Reconstruit l'observation <strong>dans l'ordre et les unités exacts</strong> de <code>firsttraining_env.py:197-208</code> (détail complet en §6). Miroir strict de <code>_get_observations</code>, <code>_update_local_pose_tensors</code> et <code>detect_pass_through</code> : changement de signe du plan du cerceau, rayon de trigger <code>disk_radius=0.1 m</code> pour l'export 2026-06-30, distance radiale projetée hors normale. <strong>Aucun degré</strong>, tout en rad/rad/s/m/m·s⁻¹.</p>
 
 <h4 id="4-3-3-policy-runtime-py-policyrunner-inference">4.3.3 <code>policy_runtime.py</code> (PolicyRunner) — inférence<a class="anchor" href="#4-3-3-policy-runtime-py-policyrunner-inference" aria-label="Lien vers cette section">#</a></h4>
 
@@ -1062,7 +1063,7 @@ geometry_msgs/Point ball_base   # balle dans le repère base</code></pre>
 </tr>
 <tr>
 <td>Export politique</td>
-<td><code>$DV_ROSWS_ROOT/data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/</code> (<code>policy_deterministic.ts</code>/<code>.onnx</code>, <code>policy_metadata.json</code>)</td>
+<td><code>$DV_ROSWS_ROOT/data/models/</code> (<code>policy_deterministic.ts</code>/<code>.onnx</code>, <code>policy_metadata.json</code>) ; l'ancien export daté reste un fallback legacy</td>
 </tr>
 <tr>
 <td>Perception (Trace, régression, conversion 3D)</td>

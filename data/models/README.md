@@ -65,6 +65,9 @@ Les deux exports 2026-06-30 utilisent :
 - action 6-D ;
 - `dt_s = 1/60` ;
 - `joint_names = [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]` ;
+- `disk_radius_m = 0.1` pour le trigger de passage dans le cerceau ;
+- policy SKRL exportée avec `clip_actions: False`; le clipping `[-1, 1]`
+  appartient au contrat de l'environnement/action mapper, pas au modèle ;
 - sémantique d'action incrémentale :
   `previous joint_position_target_rad + clamp(action_normalized, -1, 1) * joint_velocity_safe_rad_s * dt_s`,
   puis limites d'accélération et de position.
