@@ -18,14 +18,14 @@ perception->policy->safety pipeline runs and publishes CatchTelemetry, but no
 robot command is emitted. Bring ``/joint_states`` up separately (use_fake_hardware
 / URSim / real driver).
 
-The policy needs torch, which lives in the project ``.venv`` (NOT in the system
-python that ``ros2 launch`` uses). Without it ``_make_policy()`` loads None and the
-action is all-zeros, so the policy ghost never moves. ``_detect_policy_python()``
-finds the venv interpreter and runs ``live_catch_node`` under it so inference
-actually runs; override with the ``policy_python`` arg or ``LIVE_CATCH_PYTHON``.
+The policy needs either onnxruntime or torch. ``_detect_policy_python()`` only
+selects a venv if it can import ROS 2 ``rclpy`` and one inference backend;
+otherwise the node stays on the ROS Python interpreter. Override with the
+``policy_python`` arg or ``LIVE_CATCH_PYTHON``.
 """
 
 import os
+import subprocess
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo
@@ -36,16 +36,26 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
-def _detect_policy_python() -> str:
-    """Locate the project ``.venv`` interpreter that has torch.
+def _python_can_run_policy(path: str) -> bool:
+    probe = (
+        "import importlib.util; import rclpy; "
+        "raise SystemExit(0 if "
+        "importlib.util.find_spec('onnxruntime') or importlib.util.find_spec('torch') "
+        "else 1)"
+    )
+    result = subprocess.run(
+        [path, "-c", probe],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
 
-    ``ros2 launch`` runs nodes with the system python, which has no torch here, so
-    the policy silently loads as None and the action is all-zeros (the ghost never
-    moves). Running ``live_catch_node`` under the venv interpreter fixes inference.
-    Returns ``""`` when no venv is found (keeps the default interpreter).
-    """
+
+def _detect_policy_python() -> str:
+    """Locate a compatible project ``.venv`` interpreter."""
     override = os.environ.get("LIVE_CATCH_PYTHON", "")
-    if override and os.path.isfile(override):
+    if override and os.path.isfile(override) and _python_can_run_policy(override):
         return override
     candidates: list[str] = []
     root = os.environ.get("DV_ROSWS_ROOT", "")
@@ -60,7 +70,7 @@ def _detect_policy_python() -> str:
             break
         here = parent
     for cand in candidates:
-        if os.path.isfile(cand):
+        if os.path.isfile(cand) and _python_can_run_policy(cand):
             return cand
     return ""
 
@@ -68,10 +78,9 @@ def _detect_policy_python() -> str:
 def generate_launch_description() -> LaunchDescription:
     policy_python_default = _detect_policy_python()
     interpreter_note = (
-        f"live_catch_node interpreter: {policy_python_default} (torch should load)"
+        f"live_catch_node interpreter: {policy_python_default} (policy backend should load)"
         if policy_python_default
-        else "live_catch_node interpreter: system python -- WARNING: no .venv found, "
-        "torch likely missing, the policy will infer zeros and the ghost will not move"
+        else "live_catch_node interpreter: system python"
     )
     config = PathJoinSubstitution(
         [FindPackageShare("ur3e_live_catch"), "config", "live_catch.yaml"]
@@ -95,7 +104,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("enable_command", default_value="false",
                               description="true => stream commands to the robot; false => dry-run"),
         DeclareLaunchArgument("action_mode", default_value="faithful",
-                              description="faithful | safe (archi §4.3.4)"),
+                              description="faithful resolves model metadata; safe is manual (archi §4.3.4)"),
         DeclareLaunchArgument("model_path", default_value="",
                               description="policy export; empty => data/models then dated fallback"),
         DeclareLaunchArgument("use_tracker", default_value="false",
@@ -110,8 +119,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("trigger_mode", default_value="false",
                               description="test_ball_node: true => throw on demand (~/throw service, web UI)"),
         DeclareLaunchArgument("policy_python", default_value=policy_python_default,
-                              description="python interpreter for live_catch_node so torch (.venv) "
-                                          "loads; empty => default interpreter (policy infers zeros)"),
+                              description="python interpreter for live_catch_node; empty => ROS Python"),
         LogInfo(msg=interpreter_note),
         Node(
             package="ur3e_live_catch",

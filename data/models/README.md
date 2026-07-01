@@ -19,18 +19,70 @@ Plusieurs modèles → un sous-dossier par modèle (ex. `data/models/<nom>/`).
 
 ## Source actuelle
 
-L'export d'entraînement de référence vit pour l'instant dans :
+Export Isaac du 2026-06-30 depuis :
 
 ```
-data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/
+~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining/logs/skrl/cartpole_direct/
+  2026-06-30_19-02-25_ppo_torch/checkpoints/
+```
+
+Deux exports sont conservés dans Git :
+
+```
+data/models/latest/
+  checkpoint_agent_latest.pt
+  policy_deterministic.ts
+  policy_deterministic.onnx
+  policy_metadata.json
+
+data/models/best/
+  checkpoint_best_agent.pt
   policy_deterministic.ts
   policy_deterministic.onnx
   policy_metadata.json
 ```
 
-Lier le modèle choisi ici, par exemple :
+Le modèle canonique chargé par défaut par `live_catch_node` est `latest` :
+
+```
+data/models/policy_deterministic.ts
+data/models/policy_deterministic.onnx
+data/models/policy_metadata.json
+```
+
+Le `best` reste disponible en passant explicitement :
 
 ```bash
-ln -s ../ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts \
-      data/models/policy_deterministic.ts
+ros2 launch ur3e_live_catch live_catch.launch.py \
+  model_path:=data/models/best/policy_deterministic.ts
+```
+
+## Contrat actuel
+
+Les deux exports 2026-06-30 utilisent :
+
+- observation 33-D ;
+- action 6-D ;
+- `dt_s = 1/60` ;
+- `joint_names = [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]` ;
+- sémantique d'action incrémentale :
+  `previous joint_position_target_rad + clamp(action_normalized, -1, 1) * joint_velocity_safe_rad_s * dt_s`,
+  puis limites d'accélération et de position.
+
+`live_catch_node` lit `policy_metadata.json` et fait résoudre
+`action_mode=faithful` vers le mapper incrémental pour ces exports. Ne pas
+charger ces modèles avec l'ancien mapper absolu `action * 0.5`.
+
+## Rollouts de validation
+
+Les fichiers `rollouts_10_episodes.json` ne sont pas versionnés dans `main` pour
+garder le dépôt léger. Ils peuvent être régénérés depuis IsaacTrain si une
+validation/relecture exacte est nécessaire :
+
+```bash
+cd ~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining
+source script.zsh
+play latest --headless --livestream 0 --rendering_mode performance \
+  --export_policy --export_onnx --record_actions --record_episodes=10 \
+  --export_dir=/home/rigon/Documents/Stage/Stage/data/models/latest
 ```

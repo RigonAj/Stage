@@ -56,9 +56,15 @@ Dans `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining
 - `scripts/skrl/play.py` : les nouveaux rollouts exportent la vraie cible
   `base_env.joint_pos_target` et les métadonnées `dt_s`, `action_delta_scale_rad`, `v_safe`,
   `a_safe`, bornes articulaires et nouvelle note `action_semantics`.
-- `firsttraining_env_cfg.py` : distribution de balle resserrée pour le debug/training initial :
-  spawn `x=(-0.52,-0.48)`, `y=(1.25,1.35)`, `z=(0.78,0.86)`, bruit position `0.01 m`,
-  vitesse `vx=(-0.15,0.15)`, `vy=(-4.0,-3.0)`, `vz=(-0.1,0.1)`.
+- `firsttraining_env_cfg.py` : distribution de balle actuelle utilisée par
+  l'export 2026-06-30 et le bouton web UI `Isaac random` :
+  spawn `x=(-0.6,-0.2)`, `y=(1.2,2.1)`, `z=(0.5,1.2)`,
+  bruit position `0.01 m`, vitesse `vx=(-0.7,0.6)`,
+  `vy=(-5.0,-3.5)`, `vz=(-0.1,1.5)`.
+- `data/models/` : exports `latest` et `best` du run
+  `2026-06-30_19-02-25_ppo_torch`, avec TorchScript, ONNX et métadonnées ; le
+  modèle canonique par défaut est `latest`. Les rollouts de validation ne sont
+  pas versionnés dans `main` et doivent être régénérés au besoin.
 
 Conséquence importante : les anciennes policies et l'ancien
 `rollouts_10_episodes.json` sont **incompatibles** avec la nouvelle sémantique d'action
@@ -265,7 +271,7 @@ Actions :
 - **Réduire `ball_velocity_y_range`** et/ou **augmenter la distance de spawn** (`ball_spawn_*`)
   pour que `t_arrivée` laisse le temps au robot de se positionner à `v_safe ≈ 3.14 rad/s`
   (joints base/épaule/coude). Le réglage actuel de debug/training resserre déjà la balle à
-  `vy=(-4.0,-3.0)` m/s, avec `x=(-0.52,-0.48)`, `y=(1.25,1.35)`, `z=(0.78,0.86)`.
+  `vy=(-5.0,-3.5)` m/s, avec `x=(-0.6,-0.2)`, `y=(1.2,2.1)`, `z=(0.5,1.2)`.
 - **Méthode de calibrage** : mesurer en sim le `t_déplacement_robot` typique sur des catches
   réussis (= `Δθ_max / v_safe`), fixer `t_arrivée` à ≥ ce temps + marge de latence, en déduire
   vitesse/distance de balle.

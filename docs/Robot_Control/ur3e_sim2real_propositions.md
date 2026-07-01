@@ -1,11 +1,10 @@
 # UR3e Ball-Catch — Propositions d'amélioration sim-to-real & revue d'inférence
 
-> Statut (2026-06-23) : **document de propositions**, issu d'une revue ciblée de la
+> Statut (2026-06-23, mis à jour 2026-06-30) : **document de propositions**, issu d'une revue ciblée de la
 > boucle **live catch** et de l'**inférence**. Aucun code n'est modifié par ce
-> document. Le **nouveau modèle à sémantique incrémentale est encore en cours
-> d'entraînement** côté utilisateur ; les propositions « entraînement » ci-dessous
-> visent donc précisément ce modèle en cours, et les propositions « inférence »
-> préparent le nœud live pour qu'il le déploie correctement dès qu'il sera prêt.
+> document. Le modèle à sémantique incrémentale a depuis été exporté dans
+> `data/models/latest` et `data/models/best`; les sections historiques ci-dessous
+> restent utiles comme registre de risques, avec les points résolus signalés.
 
 Ce document complète, sans les remplacer :
 - `ur3e_ball_catch_sim_to_real.md` — plan de référence sim/entraînement/inférence.
@@ -15,7 +14,7 @@ Ce document complète, sans les remplacer :
 - `reste_a_faire.md` — checklist d'exécution bring-up.
 
 Les constats **déjà** suivis ailleurs (fallback perception legacy, TF statiques
-hand-eye/hoop, modèle canonique `data/models/` absent,
+hand-eye/hoop, modèle canonique `data/models/` maintenant présent,
 chemins hand-eye divergents) ne sont **pas redétaillés ici** : voir les deux derniers
 documents. Ce document se concentre sur (a) **des bugs/risques d'inférence
 nouvellement identifiés**, et (b) **des propositions sim-to-real concrètes**.
@@ -37,9 +36,10 @@ lèvent au lieu d'inventer une valeur). Les exceptions à cette discipline et le
 
 ---
 
-## 2. Le point dur sim-to-real : pas encore de modèle transférable
+## 2. Le point dur sim-to-real : modèle transférable exporté, validation réelle restante
 
-Le seul export présent sur disque est l'**ancienne policy à action absolue** :
+Historique 2026-06-23 : le seul export présent sur disque était l'ancienne policy
+à action absolue :
 
 - `data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_metadata.json:20`
   déclare `action_semantics = "joint_position_target_rad = action_normalized *
@@ -47,18 +47,19 @@ Le seul export présent sur disque est l'**ancienne policy à action absolue** :
 - Dans `rollouts_10_episodes.json`, `action_normalized` sort largement de `[-1, 1]`
   (plage globale `[-6.165, 2.871]`, cf. `ur3e_ball_catch_sim_to_real.md §1`) → cibles
   articulaires jusqu'à ±3 rad, vitesses impliquées jusqu'à ~169 rad/s.
-- `data/models/` ne contient qu'un `README.md` → `live_catch_node.py:62-65` retombe
-  sur cet export daté (`FALLBACK_MODEL`).
+Mise à jour 2026-06-30 :
 
-Les correctifs Isaac (action **incrémentale** bornée, `clip_actions: True`, limites
-de vitesse/effort par joint) listés dans `ur3e_ball_catch_sim_to_real.md §0`
-**n'ont pas encore été ré-entraînés ni ré-exportés** (entraînement en cours).
+- `data/models/latest` contient l'export du dernier checkpoint
+  `agent_118000.pt`.
+- `data/models/best` contient l'export du dernier `best_agent.pt`.
+- `data/models/policy_deterministic.ts` pointe par copie sur `latest`, avec
+  `policy_metadata.json` à côté.
+- Les métadonnées déclarent `observation_space=33`, `action_space=6`,
+  `dt_s=1/60` et la sémantique incrémentale actuelle.
 
-**Conséquence à retenir :** tant que le nouveau modèle n'est pas exporté, **aucune
-commande robot ne devrait être tentée avec le modèle présent**. Le mode `faithful`
-(défaut, `live_catch_node.py:101`) reproduit fidèlement une policy que le plan
-sim-to-real qualifie lui-même de non transférable (§3.4 ci-dessous explique
-pourquoi la couche safety ne « sauve » pas ce modèle, elle change sa dynamique).
+**Conséquence à retenir :** la barrière "pas de modèle incrémental exporté" est
+levée. La validation réelle reste à faire avec le robot, la perception, la TF du
+hoop et les mesures de latence.
 
 ---
 
@@ -67,7 +68,7 @@ pourquoi la couche safety ne « sauve » pas ce modèle, elle change sa dynamiqu
 > Tous ces points sont **nouveaux** (absents de `incoherences_code_logique.md` et
 > `reste_a_faire.md`). Aucun n'est corrigé ici — uniquement constaté + proposition.
 
-### 3.1 Reset d'épisode absent en mode commande (bug fonctionnel)
+### 3.1 Reset d'épisode absent en mode commande (résolu 2026-06-30)
 
 **Constat.** `_reset_sim()` (`live_catch_node.py:421-429`) remet à zéro
 l'`ObservationBuilder` (`pass_through_count`, `_prev_signed_dist`) **et**
@@ -83,10 +84,10 @@ repart de zéro (`_reset_idx`). Dès le 2ᵉ lancer, l'observation envoyée à l
 est **hors-distribution** → comportement imprévisible exactement au moment où le
 robot bouge.
 
-**Correction suggérée.** Détecter le front « balle valide → invalide » (fin
-d'épisode) **dans les deux modes** et réinitialiser alors `ObservationBuilder`,
-`prev_action`, et la mémoire `safety`/`streamer`. Alternative : exposer un service
-`~/reset_episode` que l'onglet Test appelle avant chaque `~/throw`.
+**Correction appliquée.** Quand la balle est invalide, le nœud réarme maintenant
+l'état policy pour le prochain lancer dans les deux modes : `ObservationBuilder`,
+action précédente, mémoire de l'`ActionMapper`, `SafetyLimiter` et bras virtuel
+dry-run sont remis à zéro.
 
 ### 3.2 Fallback de géométrie disque silencieux (sûreté + correction)
 
@@ -293,21 +294,20 @@ toucher le nœud.
 
 ### 5.4 Gate de sémantique d'action piloté par les métadonnées
 
-Aujourd'hui `action_mode` est un **flag manuel** (`config/live_catch.yaml:25`) sans
-lien avec le modèle chargé. Risque : déployer un modèle incrémental en mode
-`faithful` (ou l'inverse). Proposition : lire `policy_metadata.action_semantics`
-(`policy_runtime.load_metadata`, déjà présent `policy_runtime.py:108-110`) et
-**refuser le mode commande** si la sémantique du modèle ≠ `action_mode` demandé
-(même esprit que le refus « pas de modèle » `live_catch_node.py:229-235`). Graver la
-sémantique attendue dans `data/models/` (cf. §4.1).
+Résolu côté code 2026-06-30 : `live_catch_node` lit le
+`policy_metadata.json` voisin du modèle chargé. `action_mode=faithful` reproduit
+le contrat déclaré par les métadonnées : legacy absolu pour les anciens exports,
+incrémental pour les exports Isaac actuels. La sémantique attendue est gravée
+dans `data/models/`.
 
 ### 5.5 Protocole de montée `v_safe_factor`
 
-Le live utilise `v_safe_factor = 0.5` (`config/live_catch.yaml:33`) alors que la sim
-vise les limites nominales (×1.0). Documenter une **montée explicite** 0.5 → 1.0 :
-chaque comparaison sim/réel doit indiquer le facteur utilisé
-(`incoherences_code_logique.md #6` le note déjà côté registre). Idéalement,
-entraîner et déployer **au même facteur** (lié à §4.2).
+Mise à jour 2026-06-30 : quand un export récent fournit
+`joint_velocity_safe_rad_s` et `joint_acceleration_safe_rad_s2`, le live utilise
+ces limites de `policy_metadata.json` pour l'action et la safety. `v_safe_factor`
+reste un fallback lorsque le modèle n'a pas de métadonnées suffisantes. Chaque
+comparaison sim/réel doit donc indiquer si les limites viennent du modèle ou du
+fallback URDF.
 
 ### 5.6 Timestamp d'événement (rappel)
 

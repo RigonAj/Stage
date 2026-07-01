@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -30,7 +31,14 @@ from launch_ros.substitutions import FindPackageShare
 
 def _default_calibration_file() -> str:
     path = os.path.expanduser("~/ur3e_calibration.yaml")
-    return path if os.path.isfile(path) else ""
+    if os.path.isfile(path):
+        return path
+    return os.path.join(
+        get_package_share_directory("ur_description"),
+        "config",
+        "ur3e",
+        "default_kinematics.yaml",
+    )
 
 
 def _launch_driver(context, *_, **__):
@@ -38,7 +46,7 @@ def _launch_driver(context, *_, **__):
         "ur_type": "ur3e",
         "robot_ip": LaunchConfiguration("robot_ip").perform(context),
         "reverse_ip": LaunchConfiguration("reverse_ip").perform(context),
-        "use_fake_hardware": LaunchConfiguration("use_fake_hardware").perform(context),
+        "use_mock_hardware": LaunchConfiguration("use_fake_hardware").perform(context),
         "headless_mode": LaunchConfiguration("headless_mode").perform(context),
         "initial_joint_controller": "scaled_joint_trajectory_controller",
         "launch_rviz": "false",
@@ -110,8 +118,8 @@ def generate_launch_description() -> LaunchDescription:
                 "kinematics_params_file",
                 default_value=_default_calibration_file(),
                 description=(
-                    "UR calibration YAML. Empty => let ur_control.launch.py use "
-                    "the default ur_description kinematics."
+                    "UR calibration YAML. Defaults to ~/ur3e_calibration.yaml when "
+                    "present, otherwise ur_description's UR3e default kinematics."
                 ),
             ),
             DeclareLaunchArgument(
@@ -152,7 +160,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "action_mode",
                 default_value="faithful",
-                description="Action mapping mode: faithful | safe.",
+                description="Action mapping mode: faithful resolves model metadata; safe is manual.",
             ),
             DeclareLaunchArgument(
                 "enable_command",

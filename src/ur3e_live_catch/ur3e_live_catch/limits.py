@@ -28,7 +28,21 @@ from typing import Mapping, Optional, Sequence
 from ur3e_live_catch.joint_order import JOINT_ORDER
 from ur3e_live_catch.safety import JointBound
 
-UR3E_JOINT_LIMITS_PATH = "/opt/ros/humble/share/ur_description/config/ur3e/joint_limits.yaml"
+
+def _default_joint_limits_path() -> str:
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        return str(Path(get_package_share_directory("ur_description")) / "config" / "ur3e" / "joint_limits.yaml")
+    except Exception:
+        for distro in ("jazzy", "humble"):
+            path = Path(f"/opt/ros/{distro}/share/ur_description/config/ur3e/joint_limits.yaml")
+            if path.is_file():
+                return str(path)
+        return "/opt/ros/jazzy/share/ur_description/config/ur3e/joint_limits.yaml"
+
+
+UR3E_JOINT_LIMITS_PATH = _default_joint_limits_path()
 
 # Documented UR3e nominal limits (archi §4.3.5, §9). Used when the URDF yaml is
 # unavailable. max_velocity in rad/s; position range ±2π (UR3e joints).
@@ -108,6 +122,10 @@ def load_ur3e_joint_limits(path: Path | str = UR3E_JOINT_LIMITS_PATH) -> dict[st
     The ``!degrees`` tag used by ur_description is converted to radians.
     """
     p = Path(path)
+    if not p.is_file():
+        default_path = Path(UR3E_JOINT_LIMITS_PATH)
+        if default_path.is_file():
+            p = default_path
     if not p.is_file():
         return nominal_ur3e_limits()
     try:

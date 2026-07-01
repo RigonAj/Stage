@@ -1,6 +1,6 @@
 # Live Catch Loop
 
-> Sources: live-catch architecture, 2026-06-29; implementation status, 2026-06-29; package README, 2026-06-29
+> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; package README, 2026-06-29
 > Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Package README](../../src/ur3e_live_catch/README.md)
 
 ## Overview
@@ -42,6 +42,8 @@ topics, to reduce latency.
 - `BallState` should be native from `ball_tracking_cpp`; the legacy adapter is a
   fallback for old builds.
 - Command mode must refuse to run when no policy model is loaded.
+- Current Isaac exports use metadata-driven incremental action mapping; legacy
+  absolute exports remain supported for fallback/debug only.
 - Safety remains independent from policy output.
 
 ## See Also

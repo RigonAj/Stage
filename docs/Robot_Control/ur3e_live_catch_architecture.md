@@ -190,24 +190,28 @@ Reconstruit l'observation **dans l'ordre et les unités exacts** de
 `_update_local_pose_tensors` et `detect_pass_through`. **Aucun degré**, tout en rad/rad/s/m/m·s⁻¹.
 
 #### 4.3.3 `policy_runtime.py` (PolicyRunner) — inférence
-- Charge l'export déterministe
-  `$DV_ROSWS_ROOT/data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts`
-  (+ `policy_metadata.json` ; `.onnx` disponible en alternative runtime).
+- Charge l'export déterministe canonique `data/models/policy_deterministic.ts`
+  (+ `policy_metadata.json` ; `.onnx` disponible en alternative runtime), avec
+  fallback possible sur l'ancien export daté.
 - **Scaler.** Risque critique identifie dans la conception : le PPO SKRL utilise
   un `RunningStandardScaler`. Etat 2026-06-22 : le test d'equivalence policy
   confirme que l'export TorchScript courant reproduit `action_normalized` sans
   sidecar (`max |delta| = 4.6e-6`) ; aucun `policy_scaler.json` n'est requis pour
   ce modele.
-- **Sortie = action policy (6)**. En mode `faithful`, l'action brute est
-  memorisee pour la composante 9 de l'obs suivante ; en mode `safe`, l'action
-  clippee est memorisee.
+- **Sortie = action policy (6)**. Le feedback de la composante 9 dépend du
+  contrat modèle : action brute pour les exports absolus legacy, action clippée
+  pour les exports Isaac incrémentaux actuels.
 
 #### 4.3.4 `action.py` (ActionMapper) — cible articulaire
-- Mode `faithful` (defaut pour l'export courant) : `joint_target = action * 0.5`
-  avant la couche safety ; memorise l'action brute pour l'observation suivante.
+- Mode `faithful` : reproduit le contrat déclaré dans `policy_metadata.json`.
+  Les exports legacy restent absolus (`joint_target = action * 0.5`) ; les
+  exports Isaac actuels utilisent l'intégrateur incrémental :
+  `previous_target + clamp(action, -1, 1) * v_safe * dt`, avec limites
+  d'accélération et de position.
 - Mode `safe` : `joint_target = q + clamp(action, -1, 1) * v_safe * dt_step` ;
   memorise l'action clippee.
-- Les bornes position/vitesse/acceleration restent appliquees par `safety.py`.
+- Les bornes position/vitesse/acceleration sont lues dans les métadonnées du
+  modèle quand elles existent, sinon depuis le fallback URDF/config.
 
 #### 4.3.5 `safety.py` (SafetyLimiter + watchdog) — défense en profondeur
 - **Clip** aux bornes articulaires URDF + **bornes de workspace** (rejet hors zone sûre).

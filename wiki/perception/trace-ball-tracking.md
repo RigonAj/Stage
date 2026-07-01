@@ -1,7 +1,7 @@
 # Trace Ball Tracking
 
-> Sources: Repository README, 2026-06-29; tracker agent notes, 2026-06-29; project synthesis, 2026-06-29
-> Raw: [README](../../README.md); [Tracker agent note](../../docs/Context/AGENT.md); [Synthese projet](../../docs/Context/synthese_projet.md)
+> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29
+> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md)
 
 ## Overview
 

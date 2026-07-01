@@ -26,6 +26,14 @@
 >
 > Passage 1 (2026-06-20) : étapes 1–5 (dry-run), ActionMapper/safety/streaming
 > conçus mais non câblés.
+>
+> Mise à jour 2026-06-30 : `data/models/` contient maintenant deux exports
+> Isaac récents (`latest` et `best`) avec TorchScript, ONNX et métadonnées. Les
+> rollouts de validation ne sont pas versionnés dans `main`. Le modèle
+> canonique par défaut est `latest`. Le
+> `ActionMapper` lit `policy_metadata.json` : `action_mode=faithful` reste
+> compatible avec les exports legacy absolus, mais se résout en mapper
+> incrémental pour les exports Isaac actuels.
 
 Ce document décrit **précisément ce qui existe dans le code à ce jour**, ce qui a
 été **vérifié**, ce qui reste **ouvert**, et comment construire/exécuter. Il
@@ -75,26 +83,27 @@ mono-processus retenue (§2 du plan).
 ## 2. Décisions verrouillées (Q&A du 2026-06-20)
 
 1. **Périmètre de ce passage = étapes 1–5** (pas de mouvement robot).
-2. **Mapping action / observation = fidélité sim + safety indépendante, via un
-   flag `action_mode = faithful | safe` (défaut `faithful`)**.
-   - Conséquence *en vigueur dès maintenant* : **l'observation composante 9 = action
-     policy BRUTE précédente** (non clippée), comme à l'entraînement.
-   - Le mapping commande lui-même (faithful = cible absolue `action×0.5` ;
-     safe = incrémental `q + clamp(action,-1,1)·v_safe·dt`) appartient à
-     l'**ActionMapper (étape 6)**.
+2. **Mapping action / observation = fidélité sim + safety indépendante, pilotée
+   par les métadonnées de modèle**.
+   - Les exports legacy utilisent la cible absolue `action * 0.5` et réinjectent
+     l'action brute en composante 9.
+   - Les exports Isaac actuels utilisent l'intégrateur incrémental :
+     `previous joint_position_target_rad + clamp(action,-1,1) * v_safe * dt`,
+     puis limites d'accélération et de position ; la composante 9 est l'action
+     clippée, comme dans `firsttraining_env`.
+   - `action_mode=faithful` reproduit le contrat déclaré par
+     `policy_metadata.json`; `action_mode=safe` force le mapper incrémental
+     simple `q + clamp(action,-1,1) * v_safe * dt`.
 3. **Source Isaac fournie par l'utilisateur** (`firsttraining_env.py`,
    `firsttraining_env_cfg.py`) → composantes obs **3 / 8 / 10** finalisées exactement
    d'après ces fichiers. En attendant, elles sont **isolées et paramétrées**.
 
 ### Découverte clé (confirmée sur les rollouts enregistrés)
-Les données `rollouts_10_episodes.json` ont permis de **vérifier la sémantique
-réelle** de la policy, ce qui a tranché deux ambiguïtés du plan :
-- `joint_position_target_rad == action_normalized × 0.5` → la cible sim est
-  **absolue et non clippée** (le plan §4.3.4 décrivait une variante incrémentale
-  *de sécurité*, différente — d'où le flag).
-- `observation[26:32]` (composante 9) = action **brute** précédente (valeurs hors
-  `[-1,1]`, p.ex. −4.2) → comp 9 n'est **pas** clippée (le plan §6 disait
-  « clippée »). Le code suit la donnée : **brute**.
+Les anciens `rollouts_10_episodes.json` ont permis de vérifier le contrat
+legacy absolu. Les exports du 2026-06-30 portent maintenant
+`rollout_schema_version >= 2` et déclarent explicitement le contrat incrémental
+dans `policy_metadata.json`; cette métadonnée devient la source de vérité pour
+l'inférence live.
 
 ---
 

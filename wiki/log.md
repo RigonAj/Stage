@@ -41,3 +41,41 @@
 ## [2026-06-29] ingest | Add Agent Skills entry point
 
 - Updated: [Wiki Maintenance](operations/wiki-maintenance.md)
+
+## [2026-06-29] ingest | Clarify Isaac sim2real action contract
+
+- Updated: [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+
+## [2026-06-29] lint | Remove missing perception source link
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+
+## [2026-06-29] ingest | Align Isaac action integrator and actuator limits
+
+- Updated: [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+
+## [2026-06-30] ingest | Transfer latest Isaac policies and UI random ball
+
+- Updated: [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Live Catch Loop](live-catch/live-catch-loop.md)
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+
+## [2026-07-01] ingest | Integrate Isaac policies on main
+
+- Updated: [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Live Catch Loop](live-catch/live-catch-loop.md)
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)

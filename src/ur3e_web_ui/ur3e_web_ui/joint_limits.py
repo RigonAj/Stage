@@ -6,7 +6,21 @@ from pathlib import Path
 
 import yaml
 
-UR3E_JOINT_LIMITS_PATH = Path("/opt/ros/humble/share/ur_description/config/ur3e/joint_limits.yaml")
+
+def _default_joint_limits_path() -> Path:
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        return Path(get_package_share_directory("ur_description")) / "config" / "ur3e" / "joint_limits.yaml"
+    except Exception:
+        for distro in ("jazzy", "humble"):
+            path = Path(f"/opt/ros/{distro}/share/ur_description/config/ur3e/joint_limits.yaml")
+            if path.is_file():
+                return path
+        return Path("/opt/ros/jazzy/share/ur_description/config/ur3e/joint_limits.yaml")
+
+
+UR3E_JOINT_LIMITS_PATH = _default_joint_limits_path()
 
 
 @dataclass(frozen=True)

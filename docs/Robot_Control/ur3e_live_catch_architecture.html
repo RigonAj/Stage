@@ -748,17 +748,17 @@ Gère mm→m si nécessaire.</li>
 <h4 id="4-3-3-policy-runtime-py-policyrunner-inference">4.3.3 <code>policy_runtime.py</code> (PolicyRunner) — inférence<a class="anchor" href="#4-3-3-policy-runtime-py-policyrunner-inference" aria-label="Lien vers cette section">#</a></h4>
 
 <ul>
-<li>Charge l'export déterministe <code>$DV_ROSWS_ROOT/data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts</code> (+ <code>policy_metadata.json</code> ; <code>.onnx</code> disponible en alternative runtime).</li>
+<li>Charge l'export déterministe canonique <code>data/models/policy_deterministic.ts</code> (+ <code>policy_metadata.json</code> ; <code>.onnx</code> disponible en alternative runtime), avec fallback possible sur l'ancien export daté.</li>
 <li><strong>Scaler.</strong> Risque critique identifie dans la conception : le <span class="term">PPO</span> SKRL utilise un <code>RunningStandardScaler</code>. Etat 2026-06-22 : le test d'equivalence policy confirme que l'export TorchScript courant reproduit <code>action_normalized</code> sans sidecar (<code>max |delta| = 4.6e-6</code>) ; aucun <code>policy_scaler.json</code> n'est requis pour ce modele.</li>
-<li><strong>Sortie = action policy (6)</strong>. En mode <code>faithful</code>, l'action brute est memorisee pour la composante 9 de l'obs suivante ; en mode <code>safe</code>, l'action clippee est memorisee.</li>
+<li><strong>Sortie = action policy (6)</strong>. Le feedback de la composante 9 depend du contrat modele : action brute pour les exports absolus legacy, action clippee pour les exports Isaac incrementaux actuels.</li>
 </ul>
 
 <h4 id="4-3-4-action-py-actionmapper-cible-articulaire">4.3.4 <code>action.py</code> (ActionMapper) — cible articulaire<a class="anchor" href="#4-3-4-action-py-actionmapper-cible-articulaire" aria-label="Lien vers cette section">#</a></h4>
 
 <ul>
-<li>Mode <code>faithful</code> (defaut pour l'export courant) : <code>joint_target = action * 0.5</code> avant la couche safety ; memorise l'action brute pour l'observation suivante.</li>
+<li>Mode <code>faithful</code> : reproduit le contrat declare dans <code>policy_metadata.json</code>. Les exports legacy restent absolus (<code>joint_target = action * 0.5</code>) ; les exports Isaac actuels utilisent l'integrateur incremental <code>previous_target + clamp(action, -1, 1) * v_safe * dt</code>, avec limites d'acceleration et de position.</li>
 <li>Mode <code>safe</code> : <code>joint_target = q + clamp(action, -1, 1) * v_safe * dt_step</code> ; memorise l'action clippee.</li>
-<li>Les bornes position/vitesse/acceleration restent appliquees par <code>safety.py</code>.</li>
+<li>Les bornes position/vitesse/acceleration sont lues dans les metadonnees du modele quand elles existent, sinon depuis le fallback URDF/config.</li>
 </ul>
 
 <h4 id="4-3-5-safety-py-safetylimiter-watchdog-defense-en-profondeur">4.3.5 <code>safety.py</code> (SafetyLimiter + watchdog) — défense en profondeur<a class="anchor" href="#4-3-5-safety-py-safetylimiter-watchdog-defense-en-profondeur" aria-label="Lien vers cette section">#</a></h4>

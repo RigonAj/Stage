@@ -1,6 +1,6 @@
 # UR3e Web UI
 
-> Sources: web UI docs, 2026-06-29; robot control architecture, 2026-06-29; live-catch package README, 2026-06-29
+> Sources: web UI docs, 2026-06-30; robot control architecture, 2026-06-29; live-catch package README, 2026-06-29
 > Raw: [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live-catch README](../../src/ur3e_live_catch/README.md)
 
 ## Overview
@@ -22,6 +22,12 @@ target validation, rollout replay, calibration and live-catch test interaction.
 The Test tab can launch a virtual ball, display the ball trajectory and policy
 ghost, and toggle `live_catch_node` command mode through services. It is not on
 the hot path; it is telemetry and operator control.
+
+The Test tab also has an `Isaac random` throw path. It samples the current Isaac
+ball distribution before calling the same virtual-ball services: spawn ranges
+`x=(-0.6,-0.2)`, `y=(1.2,2.1)`, `z=(0.5,1.2)` with `0.01 m` Gaussian position
+noise, and velocity ranges `vx=(-0.7,0.6)`, `vy=(-5.0,-3.5)`,
+`vz=(-0.1,1.5)` m/s.
 
 ## See Also
 

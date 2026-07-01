@@ -1,9 +1,24 @@
 from __future__ import annotations
 
+from pathlib import Path
 import threading
 
-UR_XACRO_PATH = "/opt/ros/humble/share/ur_description/urdf/ur.urdf.xacro"
-UR_DESCRIPTION_SHARE = "/opt/ros/humble/share/ur_description"
+
+def _default_ur_description_share() -> Path:
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        return Path(get_package_share_directory("ur_description"))
+    except Exception:
+        for distro in ("jazzy", "humble"):
+            path = Path(f"/opt/ros/{distro}/share/ur_description")
+            if path.is_dir():
+                return path
+        return Path("/opt/ros/jazzy/share/ur_description")
+
+
+UR_DESCRIPTION_SHARE = str(_default_ur_description_share())
+UR_XACRO_PATH = str(Path(UR_DESCRIPTION_SHARE) / "urdf" / "ur.urdf.xacro")
 
 
 class UrdfCache:

@@ -1,6 +1,6 @@
 # Observation Latency And Models
 
-> Sources: sim-to-real plan, 2026-06-29; live-catch implementation status, 2026-06-29; sim-to-real proposals, 2026-06-29; model README, 2026-06-29
+> Sources: sim-to-real plan, 2026-06-30; live-catch implementation status, 2026-06-30; sim-to-real proposals, 2026-06-30; model README, 2026-06-30
 > Raw: [Sim-to-real plan](../../docs/Robot_Control/ur3e_ball_catch_sim_to_real.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Proposals](../../docs/Robot_Control/ur3e_sim2real_propositions.md); [Model README](../../data/models/README.md)
 
 ## Overview
@@ -18,7 +18,8 @@ The live node reconstructs the 33-D PPO observation from:
 - filtered ball velocity;
 - hoop/disk position;
 - pass-through state;
-- previous raw policy action in faithful mode.
+- previous policy action according to the model contract: raw action for legacy
+  absolute exports, clipped action for current incremental Isaac exports.
 
 The ordering and units must mirror the Isaac environment. Any change here needs
 tests against recorded rollout or exported policy expectations.
@@ -37,10 +38,19 @@ rules:
 
 ## Model Management
 
-- `data/models/` is the intended canonical live model location.
-- The current node can fall back to a dated rollout export.
-- Model metadata should encode action semantics so a model is not deployed with
-  the wrong mapper.
+- `data/models/` is the canonical live model location.
+- `data/models/latest` contains the 2026-06-30 export from `agent_118000.pt`;
+  `data/models/best` contains the matching latest `best_agent.pt` export.
+- The root `data/models/policy_deterministic.ts` is a copy of `latest` and is
+  loaded by default.
+- Model metadata encodes action semantics so the live node selects the correct
+  mapper.
+- Current Isaac exports should include `rollout_schema_version`, `dt_s`,
+  `joint_names`, action semantics and per-joint safety limits. Legacy metadata
+  without those fields is insufficient for V1 sim-to-real validation.
+- Current Isaac actuator limits should align with `ur_description`: velocity
+  `[pi, pi, pi, 2*pi, 2*pi, 2*pi]` rad/s and effort
+  `[56, 56, 28, 12, 12, 12]` Nm.
 - The current TorchScript export was verified as self-contained for scaling.
 
 ## See Also

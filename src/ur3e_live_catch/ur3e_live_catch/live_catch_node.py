@@ -8,7 +8,7 @@ archi §2):
     /joint_states ─▶ cache (reordered)              (TF: frame_id→base, base→hoop)
                                                             │
                   ActionMapper ─▶ SafetyLimiter ─▶ CommandStreamer ─▶ command  ◀┘
-                  (faithful|safe)  (clip+rate+accel)  (Float64MultiArray)
+                  (metadata)       (clip+rate+accel)  (Float64MultiArray)
 
 Two modes, behind ``enable_command`` (default **False = DRY-RUN**):
 
@@ -26,15 +26,16 @@ Two modes, behind ``enable_command`` (default **False = DRY-RUN**):
   enforces a Watchdog controlled-stop (stale perception / loop overrun / tracking
   error -> hold in place, archi §9). It refuses to command without a policy model.
 
-The comp-9 observation feedback is the ActionMapper's recorded action (RAW in
-faithful mode, matching training; CLIPPED in safe mode) — archi §6, locked decision.
+The comp-9 observation feedback is the ActionMapper's recorded action. Legacy
+absolute exports feed back the raw action; current incremental Isaac exports
+feed back the clipped action, matching ``firsttraining_env``.
 """
 
 from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import rclpy
 from rclpy.node import Node
@@ -54,13 +55,17 @@ from ur3e_live_catch.limits import (
     UR3E_JOINT_LIMITS_PATH,
 )
 from ur3e_live_catch.observation import ObservationBuilder
-from ur3e_live_catch.policy_runtime import PolicyRunner
-from ur3e_live_catch.safety import SafetyLimiter, Watchdog
+from ur3e_live_catch.policy_runtime import PolicyRunner, load_metadata
+from ur3e_live_catch.safety import JointBound, SafetyLimiter, Watchdog
 from ur3e_live_catch.streaming import CommandStreamer
 
-# Default model: canonical data/models/, falling back to the dated training export.
-CANONICAL_MODEL = "data/models/policy_deterministic.ts"
-FALLBACK_MODEL = (
+# Default model: prefer ONNX on the ROS PC, fall back to TorchScript exports.
+CANONICAL_ONNX_MODEL = "data/models/policy_deterministic.onnx"
+CANONICAL_TORCH_MODEL = "data/models/policy_deterministic.ts"
+FALLBACK_ONNX_MODEL = (
+    "data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.onnx"
+)
+FALLBACK_TORCH_MODEL = (
     "data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts"
 )
 CONTROLLER_POLL_PERIOD_S = 0.5
@@ -98,7 +103,7 @@ class LiveCatchNode(Node):
         # DRY-RUN preview: integrate a virtual arm that follows the safe target so the
         # ghost moves (closed loop). False => open loop vs the frozen pose (ghost ~still).
         self.declare_parameter("dry_run_simulate", True)
-        self.declare_parameter("action_mode", "faithful")  # faithful | safe
+        self.declare_parameter("action_mode", "faithful")  # faithful resolves from metadata; safe is manual
         self.declare_parameter("command_topic", "/forward_position_controller/commands")
         self.declare_parameter("command_controller", "forward_position_controller")
         self.declare_parameter("trajectory_controller", "scaled_joint_trajectory_controller")
@@ -124,6 +129,8 @@ class LiveCatchNode(Node):
         self._joint_vel: Optional[list[float]] = None
         self._ball_msg: Optional[BallState] = None
         self._prev_action: list[float] = [0.0] * 6
+        self._policy_metadata: dict[str, Any] = {}
+        self._policy_model_path: Optional[Path] = None
         # Virtual arm for the dry-run closed-loop preview (None => re-init from the
         # measured pose on the next valid-ball tick, i.e. each throw starts fresh).
         self._sim_q: Optional[list[float]] = None
@@ -139,9 +146,14 @@ class LiveCatchNode(Node):
 
         # Command pipeline (built always; used only when commanding is allowed).
         self._bounds = self._make_bounds()
+        action_mode = self._resolve_action_mode(str(self.get_parameter("action_mode").value))
         self._action_mapper = ActionMapper(
-            mode=str(self.get_parameter("action_mode").value),
+            mode=action_mode,
+            action_scale=float(self._policy_metadata.get("action_scale", 0.5)),
             v_safe=v_safe_vector(self._bounds),
+            a_safe=[bound.a_safe for bound in self._bounds],
+            position_lower=[bound.min_position for bound in self._bounds],
+            position_upper=[bound.max_position for bound in self._bounds],
             dt=self._dt,
         )
         self._safety = SafetyLimiter(self._bounds, self._dt)
@@ -191,18 +203,38 @@ class LiveCatchNode(Node):
 
     def _make_policy(self) -> Optional[PolicyRunner]:
         configured = str(self.get_parameter("model_path").value)
-        candidates = [c for c in ([configured] if configured else [CANONICAL_MODEL, FALLBACK_MODEL]) if c]
+        default_candidates = [
+            CANONICAL_ONNX_MODEL,
+            CANONICAL_TORCH_MODEL,
+            FALLBACK_ONNX_MODEL,
+            FALLBACK_TORCH_MODEL,
+        ]
+        candidates = [c for c in ([configured] if configured else default_candidates) if c]
+        self._policy_metadata = {}
+        self._policy_model_path = None
         for cand in candidates:
-            if not Path(cand).exists():
+            model_path = Path(cand)
+            if not model_path.exists():
                 continue
             try:
                 # Eager load so a missing backend (torch/onnx) or a bad export
                 # fails HERE, not inside the 60 Hz timer (which would kill the node).
-                runner = PolicyRunner(cand).load()
+                runner = PolicyRunner(model_path).load()
             except Exception as exc:  # ImportError, torch load errors, ...
                 self.get_logger().warn(f"policy model {cand} failed to load ({exc}); trying next")
                 continue
-            self.get_logger().info(f"policy model loaded: {cand}")
+            metadata_path = model_path.with_name("policy_metadata.json")
+            if metadata_path.exists():
+                try:
+                    self._policy_metadata = load_metadata(metadata_path)
+                    self.get_logger().info(f"policy metadata loaded: {metadata_path}")
+                except Exception as exc:
+                    self._policy_metadata = {}
+                    self.get_logger().warn(f"policy metadata {metadata_path} failed to load: {exc}")
+            else:
+                self.get_logger().warn(f"policy metadata not found next to model: {metadata_path}")
+            self._policy_model_path = model_path
+            self.get_logger().info(f"policy model loaded: {model_path}")
             return runner
         self.get_logger().warn(
             f"no usable policy model (looked for {candidates}); "
@@ -210,7 +242,29 @@ class LiveCatchNode(Node):
         )
         return None
 
+    def _resolve_action_mode(self, configured: str) -> str:
+        mode = configured.strip() or "faithful"
+        metadata_incremental = self._metadata_uses_incremental_actions()
+        if mode in ("auto", "metadata"):
+            return "incremental" if metadata_incremental else "faithful"
+        if mode == "faithful" and metadata_incremental:
+            self.get_logger().info("action_mode=faithful resolved to incremental from policy metadata")
+            return "incremental"
+        return mode
+
+    def _metadata_uses_incremental_actions(self) -> bool:
+        semantics = str(self._policy_metadata.get("action_semantics", "")).lower()
+        return (
+            "incremental joint target integrator" in semantics
+            or "previous joint_position_target" in semantics
+            or "previous joint position target" in semantics
+        )
+
     def _make_bounds(self):
+        metadata_bounds = self._bounds_from_metadata()
+        if metadata_bounds is not None:
+            self.get_logger().info("using policy_metadata.json joint limits for action/safety bounds")
+            return metadata_bounds
         path = str(self.get_parameter("joint_limits_path").value)
         limits = load_ur3e_joint_limits(path)
         return build_joint_bounds(
@@ -219,17 +273,43 @@ class LiveCatchNode(Node):
             a_safe=float(self.get_parameter("a_safe").value),
         )
 
+    def _metadata_vector(self, key: str) -> Optional[list[float]]:
+        value = self._policy_metadata.get(key)
+        if not isinstance(value, list) or len(value) != 6:
+            return None
+        try:
+            return [float(item) for item in value]
+        except (TypeError, ValueError):
+            return None
+
+    def _bounds_from_metadata(self) -> Optional[list[JointBound]]:
+        lower = self._metadata_vector("joint_position_lower_rad")
+        upper = self._metadata_vector("joint_position_upper_rad")
+        v_safe = self._metadata_vector("joint_velocity_safe_rad_s")
+        a_safe = self._metadata_vector("joint_acceleration_safe_rad_s2")
+        if lower is None or upper is None or v_safe is None or a_safe is None:
+            return None
+        return [
+            JointBound(
+                min_position=lower[i],
+                max_position=upper[i],
+                v_safe=v_safe[i],
+                a_safe=a_safe[i],
+            )
+            for i in range(6)
+        ]
+
     def _setup_command_mode(self) -> bool:
         """Create the command publisher + controller-switch clients (idempotent).
 
         Callable from ``__init__`` (when starting in command mode) or later from the
         ``~/enable_command`` service. Returns False and stays in dry-run when there is
-        no policy: a zero action would be an absolute target.
+        no policy.
         """
         if self._policy is None:
             self.get_logger().error(
                 "enable_command requested but no policy model loaded: refusing to "
-                "command (a zero action would be an absolute target). Staying in dry-run."
+                "command. Staying in dry-run."
             )
             self._enable_command = False
             return False
@@ -420,11 +500,13 @@ class LiveCatchNode(Node):
 
     def _reset_sim(self) -> None:
         """Drop the virtual arm so the next throw's preview restarts from the real pose."""
-        if self._sim_q is None:
-            return
         self._sim_q = None
         self._sim_vel = None
+        self._reset_policy_state()
+
+    def _reset_policy_state(self) -> None:
         self._safety.reset()
+        self._action_mapper.reset()
         self._obs_builder.reset()
         self._prev_action = [0.0] * 6
 
@@ -439,8 +521,7 @@ class LiveCatchNode(Node):
         if self._ball_msg is None or not self._ball_msg.valid:
             self.get_logger().warn("waiting for a valid BallState", throttle_duration_sec=2.0)
             self._controlled_stop(real_q, ["no_valid_ball"])
-            if not commanding:
-                self._reset_sim()  # re-arm the virtual arm for the next throw
+            self._reset_sim()  # re-arm policy state for the next throw
             return
 
         # Effective joint state fed to policy/safety: the measured arm when commanding,

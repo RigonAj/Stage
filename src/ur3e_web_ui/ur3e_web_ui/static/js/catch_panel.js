@@ -15,11 +15,28 @@ const DEFAULT_BALL_CONFIG = {
   flight_s: 2.0,
 };
 
+const ISAAC_RANDOM_BALL = {
+  p0Ranges: [[-0.6, -0.2], [1.2, 2.1], [0.5, 1.2]],
+  v0Ranges: [[-0.7, 0.6], [-5.0, -3.5], [-0.1, 1.5]],
+  positionNoiseStd: 0.01,
+};
+
 const BALL_FIELD_IDS = {
   p0: ["catch-p0-x", "catch-p0-y", "catch-p0-z"],
   v0: ["catch-v0-x", "catch-v0-y", "catch-v0-z"],
 };
 const FLIGHT_FIELD_ID = "catch-flight-s";  // restart_after_s (flight duration, s)
+
+function uniform([lo, hi]) {
+  return lo + Math.random() * (hi - lo);
+}
+
+function gaussian(std) {
+  if (std <= 0) return 0;
+  const u1 = Math.max(Number.MIN_VALUE, Math.random());
+  const u2 = Math.random();
+  return std * Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+}
 
 // Test tab: throw a virtual ball at the live-catch policy and (optionally) let the
 // policy command the real robot. The green "policy ghost" in the 3D view is driven
@@ -49,6 +66,7 @@ export class CatchPanel {
     }
     document.getElementById("btn-catch-apply-ball").addEventListener("click", () => this.applyBallConfig());
     document.getElementById("btn-catch-reset-ball").addEventListener("click", () => this.resetBallConfig());
+    document.getElementById("btn-catch-isaac-random").addEventListener("click", () => this.throwIsaacRandomBall());
     document.getElementById("btn-catch-throw").addEventListener("click", () => this.throwBall());
     document.getElementById("btn-catch-command-on").addEventListener("click", () => this.setCommand(true));
     document.getElementById("btn-catch-command-off").addEventListener("click", () => this.setCommand(false));
@@ -98,6 +116,27 @@ export class CatchPanel {
     this.setBallConfig(DEFAULT_BALL_CONFIG, "launch frame reset");
   }
 
+  sampleIsaacRandomBallConfig() {
+    return {
+      p0: ISAAC_RANDOM_BALL.p0Ranges.map(
+        (range) => uniform(range) + gaussian(ISAAC_RANDOM_BALL.positionNoiseStd),
+      ),
+      v0: ISAAC_RANDOM_BALL.v0Ranges.map((range) => uniform(range)),
+      flight_s: this.ballConfig.flight_s,
+    };
+  }
+
+  async throwIsaacRandomBall() {
+    const config = this.sampleIsaacRandomBallConfig();
+    this.setBallConfig(config, "Isaac random sampled");
+    try {
+      const result = await api.post("/api/catch/throw", config);
+      this.setText("catch-status", result.message || "Isaac random ball thrown");
+    } catch (error) {
+      this.onError(`Isaac random throw: ${error.message}`);
+    }
+  }
+
   async throwBall() {
     try {
       const result = await api.post("/api/catch/throw", this.readBallConfig());
@@ -130,6 +169,7 @@ export class CatchPanel {
 
     document.getElementById("btn-catch-throw").disabled = !status.throw_ready || !this.configReady;
     document.getElementById("btn-catch-apply-ball").disabled = !this.configReady;
+    document.getElementById("btn-catch-isaac-random").disabled = !status.throw_ready || !this.configReady;
     this.refreshButtons();
 
     const cmdStatus = document.getElementById("catch-command-status");

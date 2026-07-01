@@ -1,6 +1,6 @@
 # Safety And Commanding
 
-> Sources: live-catch architecture, 2026-06-29; implementation status, 2026-06-29; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29
+> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29
 > Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md)
 
 ## Overview
@@ -20,9 +20,11 @@ controller switching or UI command gates.
 ## Mapping And Limits
 
 - `ActionMapper` translates policy output into a joint target according to the
-  model/action mode.
+  model metadata/action mode. Current Isaac exports use the incremental target
+  integrator; legacy exports use the absolute `action * 0.5` contract.
 - `SafetyLimiter` applies position, velocity and acceleration constraints
-  independently from the policy.
+  independently from the policy. With current exports, bounds come from
+  `policy_metadata.json`; otherwise they fall back to URDF/config limits.
 - `Watchdog` handles stale perception, budget overruns and tracking errors.
 - `CommandStreamer` publishes to `/forward_position_controller/commands`.
 

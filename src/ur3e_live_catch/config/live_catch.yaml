@@ -22,7 +22,7 @@ live_catch_node:
     enable_command: false         # false => DRY-RUN, no robot command. true => stream to robot.
     dry_run_simulate: true        # dry-run: integrate a virtual arm tracking the policy so
                                   # the ghost moves (closed-loop preview). false => open loop.
-    action_mode: "faithful"       # faithful | safe (user decision; default faithful)
+    action_mode: "faithful"       # faithful auto-resolves current incremental metadata; safe is manual
     command_topic: "/forward_position_controller/commands"
     command_controller: "forward_position_controller"
     trajectory_controller: "scaled_joint_trajectory_controller"
@@ -34,7 +34,7 @@ live_catch_node:
     a_safe: 10.0                  # rad/s^2 acceleration cap (tune on hardware)
     loop_budget_s: 0.02           # watchdog: per-tick compute budget (archi §9)
     max_tracking_error: 0.5       # rad; |q_measured - last_command| watchdog threshold
-    joint_limits_path: "/opt/ros/humble/share/ur_description/config/ur3e/joint_limits.yaml"
+    joint_limits_path: ""         # "" => use ur_description from the currently sourced ROS distro
 
 test_ball_node:
   ros__parameters:

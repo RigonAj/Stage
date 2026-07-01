@@ -132,9 +132,11 @@ services ajoutés sur les nœuds :
   **Stop / back to safe** la coupe et restaure `scaled_joint_trajectory_controller`.
   Refusé (`success=false`) si aucun modèle de politique n'est chargé.
 
-Pour que le fantôme bouge réellement, `live_catch_node` doit tourner avec torch (via le
-`.venv`). Bring-up type : `... live_catch.launch.py use_test_ball:=true trigger_mode:=true`
-puis `ros2 run ur3e_web_ui ur3e_web_ui` et ouvrir l'onglet **Test**.
+Pour que le fantôme bouge réellement, `live_catch_node` doit avoir `onnxruntime`
+ou `torch`. Par défaut il préfère `data/models/policy_deterministic.onnx`, donc
+`onnxruntime` suffit sur le PC ROS. Bring-up type :
+`... live_catch.launch.py use_test_ball:=true trigger_mode:=true` puis
+`ros2 run ur3e_web_ui ur3e_web_ui` et ouvrir l'onglet **Test**.
 
 ## Modèle IA
 

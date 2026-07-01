@@ -41,6 +41,39 @@ def test_safe_requires_v_safe():
         ActionMapper(mode="safe")
 
 
+def test_incremental_mirrors_current_isaac_integrator():
+    dt = 1.0 / 60.0
+    v_safe = [3.0] * 6
+    a_safe = [12.0] * 6
+    lower = [-1.0] * 6
+    upper = [1.0] * 6
+    m = ActionMapper(
+        mode="incremental",
+        v_safe=v_safe,
+        a_safe=a_safe,
+        position_lower=lower,
+        position_upper=upper,
+        dt=dt,
+    )
+
+    first = m.map([2.0] * 6, [0.0] * 6)
+    second = m.map([2.0] * 6, first)
+
+    # action is clipped to +1, then acceleration-limited:
+    # tick 1 cmd_vel = 12 * dt = 0.2 rad/s -> step = 0.2 * dt
+    # tick 2 cmd_vel = 0.4 rad/s -> cumulative target = first + 0.4 * dt
+    assert first == pytest.approx([0.2 * dt] * 6)
+    assert second == pytest.approx([(0.2 + 0.4) * dt] * 6)
+    assert m.prev_action == pytest.approx([1.0] * 6)
+
+
+def test_incremental_reset_restarts_from_measured_pose():
+    m = ActionMapper(mode="incremental", v_safe=[1.0] * 6, dt=0.1)
+    assert m.map([1.0] * 6, [0.0] * 6) == pytest.approx([0.1] * 6)
+    m.reset()
+    assert m.map([-1.0] * 6, [0.5] * 6) == pytest.approx([0.4] * 6)
+
+
 def test_faithful_matches_recorded_targets():
     """faithful target must reproduce joint_position_target_rad from the rollouts."""
     data = json.loads((repo_root() / ROLLOUTS).read_text())

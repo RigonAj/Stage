@@ -15,7 +15,10 @@ A browser UI for the UR3e served by the `ur3e_web_ui` ROS 2 package:
   through `/test_ball_node/throw`, display the ball marker, predicted flight arc
   and green policy ghost from `CatchTelemetry.joint_target`, and toggle real
   robot commanding through `/live_catch_node/enable_command` after an explicit
-  E-stop/workspace confirmation.
+  E-stop/workspace confirmation. The `Isaac random` button samples the current
+  Isaac ball distribution before throwing: `p0.x=(-0.6,-0.2)`,
+  `p0.y=(1.2,2.1)`, `p0.z=(0.5,1.2)` plus `0.01 m` Gaussian position noise,
+  and `v0.x=(-0.7,0.6)`, `v0.y=(-5.0,-3.5)`, `v0.z=(-0.1,1.5)` m/s.
 - Dashboard buttons (play/stop/power on/off/brake release) appear automatically when the real driver's dashboard client is available.
 
 Troubleshooting history for the original real-robot motion issue is documented in `docs/Robot_Control/ur3e_motion_issue_resolution.md`.
@@ -132,7 +135,9 @@ Things to try safely with mock hardware:
 3. In the Rollout tab: Validate episode 0, Preview it (only the blue ghost moves), then Execute it.
 4. In the Test tab, after launching `ur3e_live_catch` with
    `use_test_ball:=true trigger_mode:=true`, press Launch virtual ball and
-   verify the ball marker / policy ghost without enabling command.
+   verify the ball marker / policy ghost without enabling command. Press
+   `Isaac random` to throw from the same spawn/velocity distribution as the
+   current Isaac training config.
 
 ## Run Against the Real Robot
 
@@ -176,7 +181,9 @@ The backend also exposes a JSON API (interactive docs at `/docs`):
   default `calibration/handeye_result.yaml`); the Calibration tab can draw the
   calibrated camera frame in the viewer from it
 - `POST /api/catch/throw` — calls `/test_ball_node/throw`
-  (`std_srvs/Trigger`) to launch one virtual ball in trigger mode
+  (`std_srvs/Trigger`) to launch one virtual ball in trigger mode. The Test tab
+  can either send the visible `p0`/`v0` values or sample the Isaac random
+  distribution client-side, apply it through the same endpoint, then throw.
 - `POST /api/catch/command {"enable": true|false, "confirm": true|false}` —
   calls `/live_catch_node/enable_command` (`std_srvs/SetBool`) to toggle
   streaming to the real robot; enabling requires `confirm: true`

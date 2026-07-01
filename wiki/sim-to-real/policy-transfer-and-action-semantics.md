@@ -1,6 +1,6 @@
 # Policy Transfer And Action Semantics
 
-> Sources: sim-to-real plan, 2026-06-29; action-space decision, 2026-06-29; sim-to-real proposals, 2026-06-29; model README, 2026-06-29
+> Sources: sim-to-real plan, 2026-06-30; action-space decision, 2026-06-29; sim-to-real proposals, 2026-06-30; model README, 2026-06-30
 > Raw: [Sim-to-real plan](../../docs/Robot_Control/ur3e_ball_catch_sim_to_real.md); [Action-space decision](../../docs/Robot_Control/ur3e_choix_espace_action_isaac.md); [Proposals](../../docs/Robot_Control/ur3e_sim2real_propositions.md); [Model README](../../data/models/README.md)
 
 ## Overview
@@ -11,15 +11,31 @@ model metadata.
 
 ## Current Policy Semantics
 
-The documented rollout check showed:
+There are now two distinct action contracts to keep separate.
+
+The dated reference export used by the current Stage fallback rollouts is a
+legacy absolute-action contract:
 
 ```text
 joint_position_target_rad = action_normalized * 0.5
 ```
 
-For the current export, the previous raw policy action is preserved in the
-observation in `faithful` mode. Safety still clips/rate-limits command targets
-independently.
+The current Isaac FirstTraining environment uses an incremental target-integrator
+contract: the normalized action is clipped to `[-1, 1]`, scaled by
+`joint_velocity_safe_rad_s * dt_s`, acceleration- and joint-limit-clamped, then
+integrated from the previous `joint_position_target_rad`. This keeps the command
+trajectory velocity-bounded while giving Isaac's position actuator a target it
+can actually chase, instead of keeping the target only one tiny step ahead of the
+measured joint position.
+
+For deployment, `policy_metadata.json` is the source of truth for the action
+contract. The Stage `ActionMapper` now keeps legacy absolute `faithful`
+compatibility, but resolves `action_mode=faithful` to the incremental mapper when
+the loaded metadata declares the current Isaac target-integrator semantics.
+
+The 2026-06-30 `latest` and `best` exports in `data/models/` both declare
+`observation_space=33`, `action_space=6`, `dt_s=1/60`, per-joint velocity and
+acceleration limits, and the incremental action semantics.
 
 ## Main Transfer Risks
 
@@ -27,8 +43,10 @@ independently.
   training.
 - Real perception latency must be measured and modeled or compensated.
 - Ball velocity is noisy because it is inferred from position history.
-- Action semantics must be encoded in model metadata to avoid deploying a model
-  with the wrong mapper.
+- Action semantics must stay encoded in model metadata to avoid deploying a
+  model with the wrong mapper.
+- Legacy absolute-action exports and current incremental-action exports share
+  the live node only through metadata-driven mapper selection.
 - `data/models/` should contain the canonical model and metadata.
 
 ## See Also

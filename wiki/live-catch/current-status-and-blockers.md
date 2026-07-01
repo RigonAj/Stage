@@ -1,6 +1,6 @@
 # Current Status And Blockers
 
-> Sources: live-catch implementation status, 2026-06-29; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-29
+> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30
 > Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md)
 
 ## Overview
@@ -16,6 +16,10 @@ robot/perception deployment still has blocking validation work.
 - Command streaming is wired behind `enable_command`.
 - The web UI Test tab can launch virtual balls and toggle command mode.
 - The current TorchScript policy was verified without an external scaler.
+- `data/models/` contains current `latest` and `best` Isaac exports; the root
+  canonical model is `latest`.
+- `ActionMapper` resolves the action contract from `policy_metadata.json` for
+  current incremental exports while preserving legacy absolute compatibility.
 
 ## Blockers Before Real Perception
 
@@ -33,7 +37,11 @@ robot/perception deployment still has blocking validation work.
 
 ## Documentation/Reproducibility Gaps
 
-- `data/models/` is intended as canonical, but fallback dated model behavior still matters.
+- Fallback dated model behavior still matters for old rollouts, but the current
+  canonical model is now present under `data/models/`.
+- The dated Stage fallback export uses legacy absolute action semantics; current
+  Isaac exports use incremental velocity/acceleration-limited semantics selected
+  through metadata.
 - `src/ur3e_catch_msgs/README.md` is documented as obsolete.
 - `handeye_result.yaml` path conventions are not fully unified.
 - `src/ur3e_sysid/` is present locally but untracked in the current worktree.
