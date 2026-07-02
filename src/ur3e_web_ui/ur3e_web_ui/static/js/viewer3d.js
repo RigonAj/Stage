@@ -685,24 +685,31 @@ export class Viewer3D {
       this.setPolicyGhostVisible(false);
       return;
     }
-    if (!this.ballGroup) this.buildBall();
-    const [bx, by, bz] = catchInfo.ball_base;
-    this.ballMarker.position.copy(this.baseLinkToThree(bx, by, bz));
+    // ball_valid === false => idle heartbeat telemetry (no flight): the node keeps
+    // publishing command/ghost state but the ball fields are placeholders.
+    const ballValid = catchInfo.ball_valid !== false;
+    if (!ballValid) {
+      this.setBallVisible(false);
+    } else {
+      if (!this.ballGroup) this.buildBall();
+      const [bx, by, bz] = catchInfo.ball_base;
+      this.ballMarker.position.copy(this.baseLinkToThree(bx, by, bz));
 
-    const v = catchInfo.ball_vel_base || [0, 0, 0];
-    const points = [];
-    const horizon = 1.0;
-    const steps = 30;
-    const g = -9.81;
-    for (let i = 0; i <= steps; i++) {
-      const t = (i / steps) * horizon;
-      const px = bx + v[0] * t;
-      const py = by + v[1] * t;
-      const pz = bz + v[2] * t + 0.5 * g * t * t;
-      points.push(this.baseLinkToThree(px, py, pz));
+      const v = catchInfo.ball_vel_base || [0, 0, 0];
+      const points = [];
+      const horizon = 1.0;
+      const steps = 30;
+      const g = -9.81;
+      for (let i = 0; i <= steps; i++) {
+        const t = (i / steps) * horizon;
+        const px = bx + v[0] * t;
+        const py = by + v[1] * t;
+        const pz = bz + v[2] * t + 0.5 * g * t * t;
+        points.push(this.baseLinkToThree(px, py, pz));
+      }
+      this.ballPath.geometry.setFromPoints(points);
+      this.ballGroup.visible = true;
     }
-    this.ballPath.geometry.setFromPoints(points);
-    this.ballGroup.visible = true;
 
     // Policy ghost: the joint pose the network commands this tick (joint_target),
     // overlaid on the live robot so you watch it react to the thrown ball.

@@ -1,6 +1,6 @@
 # Message Contracts And Topics
 
-> Sources: live-catch architecture, 2026-06-29; implementation status, 2026-06-29; package README, 2026-06-29; inconsistency review, 2026-06-29
+> Sources: live-catch architecture, 2026-06-29; implementation status, 2026-06-29; package README, 2026-06-29; inconsistency review, 2026-06-29; heartbeat telemetry change, 2026-07-02
 > Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [ur3e_live_catch README](../../src/ur3e_live_catch/README.md); [Incoherences](../../docs/incoherences_code_logique.md)
 
 ## Overview
@@ -22,12 +22,22 @@ consumer/producer assumptions.
 
 `ur3e_catch_msgs/CatchTelemetry` is debug/visualization, not hot-path control:
 
-- `observation`: 33-D policy observation.
-- `raw_action`: 6-D policy output before mapping/safety.
-- `joint_target`: safe target after mapping/limits, also filled in dry-run.
+- `observation`: 33-D policy observation (empty in idle heartbeats).
+- `raw_action`: 6-D policy output before mapping/safety (empty in heartbeats).
+- `joint_target`: safe target after mapping/limits, also filled in dry-run; in
+  idle heartbeats it carries the measured pose so the UI ghost stays live.
 - `ball_base`: historical field name; ball position transformed into the current
   policy frame `base_link`.
+- `ball_valid`: false marks an idle heartbeat (no valid ball / no hoop TF) where
+  ball fields are placeholders; the viewer hides the ball marker then.
+- `command_enabled`: live node command mode; published every tick since
+  2026-07-02 (heartbeats included) so the Web UI sees command state even while
+  the trigger-mode ball is idle.
 - latency and command state fields are used by UI and `latency_report`.
+
+`test_ball_node` ends a parabola flight when the ball drops below `ground_z_m`
+(default 0.05 m in `base_link`), matching Isaac's `ball_on_ground` episode
+termination — an underground ball is out-of-distribution for the policy.
 
 ## Topics And Producers
 

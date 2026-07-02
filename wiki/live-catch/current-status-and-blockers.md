@@ -51,6 +51,17 @@ The Isaac `FirstTraining` cfg now halves `joint_velocity_safe_rad_s` /
 `joint_acceleration_safe_rad_s2` and keeps joints within ±π — effective only
 after retraining and re-export.
 
+Follow-up the same day: the retry attempt looked like "the controller goes
+inactive", but driver logs show the controller stayed active and no throw ever
+reached `test_ball_node` after arming. Real cause: `CatchTelemetry` was only
+published during valid-ball ticks, so the Web UI never saw
+`command_enabled=true` in trigger-mode idle and kept re-posting the command
+toggle. Fixed with 60 Hz heartbeat telemetry (`ball_valid=false`), plus
+ground-termination of the virtual ball flight (`ground_z_m`, Isaac parity).
+The full chain (throw -> policy -> 500 Hz streaming -> robot follows -> hold
+after grounding, controller stays active) was verified end-to-end on fake
+hardware on 2026-07-02.
+
 ## Robot Bring-Up Still Open
 
 - Validate real command streaming with a virtual ball (retry after the

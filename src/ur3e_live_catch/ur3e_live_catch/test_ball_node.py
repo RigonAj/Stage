@@ -56,6 +56,9 @@ class TestBallNode(Node):
         self.declare_parameter("v0", [-0.05, -4.25, 0.7])
         self.declare_parameter("gravity", [0.0, 0.0, -9.81])
         self.declare_parameter("restart_after_s", 4.0)
+        # Flight ends when the ball drops below this base_link height, matching
+        # Isaac's ball_on_ground episode termination (z < 0.05 m).
+        self.declare_parameter("ground_z_m", 0.05)
         # camera pose in base_link (base_link<-camera), used only when publish_frame != base_link
         self.declare_parameter("camera_translation", [0.0, 0.0, 0.0])
         self.declare_parameter("camera_quaternion", [0.0, 0.0, 0.0, 1.0])
@@ -121,11 +124,13 @@ class TestBallNode(Node):
     def _elapsed(self) -> float:
         return (self.get_clock().now() - self._throw_t0).nanoseconds * 1e-9
 
-    def _parabola_point(self, t: float):
+    def _parabola_base_point(self, t: float):
         p0 = [float(x) for x in self.get_parameter("p0").value]
         v0 = [float(x) for x in self.get_parameter("v0").value]
         g = [float(x) for x in self.get_parameter("gravity").value]
-        base_pt = tuple(p0[i] + v0[i] * t + 0.5 * g[i] * t * t for i in range(3))
+        return tuple(p0[i] + v0[i] * t + 0.5 * g[i] * t * t for i in range(3))
+
+    def _to_output_frame(self, base_pt):
         if self._base_to_cam is None:
             return base_pt
         # Express a base_link point in the camera frame: P^cam = R^T (P^base_link - t).
@@ -158,7 +163,16 @@ class TestBallNode(Node):
                 return None
         elif restart > 0:
             t = math.fmod(t, restart)
-        return self._parabola_point(t)
+        base_pt = self._parabola_base_point(t)
+        # Isaac terminates the episode when the ball reaches the ground
+        # (ball_on_ground: z < 0.05). Keep deployment parity: end the flight
+        # instead of feeding an underground ball, which is out-of-distribution
+        # for the policy and produces erratic late-flight actions.
+        if base_pt[2] < float(self.get_parameter("ground_z_m").value):
+            if self._trigger_mode:
+                self._armed = False
+            return None
+        return self._to_output_frame(base_pt)
 
     def _on_throw(self, request, response):
         """Arm a single flight from now (``~/throw`` Trigger service)."""

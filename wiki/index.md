@@ -41,7 +41,7 @@ Closed-loop perception-to-policy-to-robot path.
 | Article | Summary | Updated |
 |---------|---------|---------|
 | [Live Catch Loop](live-catch/live-catch-loop.md) | Single-process 60 Hz live-catch pipeline, modules, metadata-driven action mapping, safety and tests. | 2026-07-01 |
-| [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState`, `CatchTelemetry`, topics, producers, base_link policy-frame telemetry and timestamp rules. | 2026-07-01 |
+| [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState`, `CatchTelemetry`, topics, producers, base_link policy-frame telemetry, idle heartbeat/`ball_valid` contract and timestamp rules. | 2026-07-02 |
 | [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model-switch gate, metadata/model limits, safety limiter, watchdog, controller switching, 500 Hz interpolated streaming, start-pose ±2π gate and hardware gates. | 2026-07-02 |
 | [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, open robot/perception blockers, 2026-07-02 pendant incident diagnosis and current model/action status. | 2026-07-02 |
 

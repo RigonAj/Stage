@@ -757,6 +757,7 @@ class LiveCatchNode(Node):
             self.get_logger().warn("waiting for a valid BallState", throttle_duration_sec=2.0)
             self._controlled_stop(real_q, ["no_valid_ball"])
             self._reset_sim()  # re-arm policy state for the next throw
+            self._publish_heartbeat_telemetry(real_q)
             return
 
         # Effective joint state fed to policy/safety: the measured arm when commanding,
@@ -788,11 +789,13 @@ class LiveCatchNode(Node):
         except FrameError as exc:
             self.get_logger().warn(f"ball frame rejected: {exc}", throttle_duration_sec=2.0)
             self._controlled_stop(real_q, ["ball_frame_rejected"])
+            self._publish_heartbeat_telemetry(real_q)
             return
 
         disk_pose = self._disk_pose(commanding=commanding)
         if disk_pose is None:
             self._controlled_stop(real_q, ["hoop_tf_unavailable"])
+            self._publish_heartbeat_telemetry(real_q)
             return
         disk_pos, disk_normal = disk_pose
 
@@ -850,8 +853,21 @@ class LiveCatchNode(Node):
             throttle_duration_sec=0.5,
         )
 
+    def _publish_heartbeat_telemetry(self, q) -> None:
+        """Idle-state telemetry (no valid ball / no TF): keeps the Web UI live.
+
+        The UI reads ``command_enabled`` (and the ghost pose) from CatchTelemetry;
+        without this heartbeat the trigger-mode idle state publishes nothing and
+        the UI shows command mode as off even when it is armed.
+        """
+        self._publish_telemetry(
+            obs=[], raw_action=[], safe_target=q,
+            ball_pos=(0.0, 0.0, 0.0), ball_vel=(0.0, 0.0, 0.0),
+            perception_age=0.0, loop_compute=0.0, ball_valid=False,
+        )
+
     def _publish_telemetry(self, obs, raw_action, safe_target, ball_pos, ball_vel,
-                           perception_age, loop_compute) -> None:
+                           perception_age, loop_compute, ball_valid=True) -> None:
         telem = CatchTelemetry()
         telem.observation = [float(x) for x in obs]
         telem.raw_action = [float(x) for x in raw_action]
@@ -867,6 +883,8 @@ class LiveCatchNode(Node):
             telem.loop_compute_s = float(loop_compute)
         if hasattr(telem, "command_enabled"):
             telem.command_enabled = bool(self._enable_command)
+        if hasattr(telem, "ball_valid"):
+            telem.ball_valid = bool(ball_valid)
         self._telemetry_pub.publish(telem)
 
 

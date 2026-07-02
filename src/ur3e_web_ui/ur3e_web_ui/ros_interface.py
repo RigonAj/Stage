@@ -132,6 +132,7 @@ class StateSnapshot:
     catch_perception_age_s: float | None = None
     catch_loop_compute_s: float | None = None
     catch_command_enabled: bool = False  # live node mode (from telemetry)
+    catch_ball_valid: bool = False       # false => heartbeat telemetry, ball fields not meaningful
     catch_throw_ready: bool = False      # test_ball ~/throw service reachable
     catch_config_ready: bool = False     # test_ball parameter services reachable
     catch_command_ready: bool = False    # live_catch ~/enable_command service reachable
@@ -283,8 +284,10 @@ class RosBridge:
             self._snapshot.catch_joint_target = tuple(float(v) for v in msg.joint_target)
             self._snapshot.catch_perception_age_s = float(msg.perception_age_s)
             self._snapshot.catch_loop_compute_s = float(msg.loop_compute_s)
-            # command_enabled exists once ur3e_catch_msgs is rebuilt; guard for older builds.
+            # command_enabled/ball_valid exist once ur3e_catch_msgs is rebuilt; guard
+            # for older builds (ball_valid defaults True so flights still render).
             self._snapshot.catch_command_enabled = bool(getattr(msg, "command_enabled", False))
+            self._snapshot.catch_ball_valid = bool(getattr(msg, "ball_valid", True))
 
     def _on_robot_description(self, msg: StringMsg) -> None:
         if msg.data:

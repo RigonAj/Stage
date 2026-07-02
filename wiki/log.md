@@ -141,3 +141,8 @@
 - Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
 - Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
 - Updated: [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md)
+
+## [2026-07-02] ingest | Heartbeat telemetry, ball ground termination and fake-hardware validation
+
+- Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)

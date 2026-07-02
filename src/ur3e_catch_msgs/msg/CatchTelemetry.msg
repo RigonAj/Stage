@@ -10,3 +10,5 @@ float32              perception_age_s  # now - BallState.stamp au tick (âge per
 float32              loop_compute_s    # temps de calcul du chemin chaud sur ce tick
 # --- mode commande (étape 9 / UI Test) ---
 bool                 command_enabled   # true => le nœud émet des commandes robot (sinon dry-run)
+# --- heartbeat au repos (balle invalide / TF absente) ---
+bool                 ball_valid        # false => télémétrie heartbeat: ball_base/vel non significatifs

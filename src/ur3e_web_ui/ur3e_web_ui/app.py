@@ -857,6 +857,7 @@ def _state_message(bridge: RosBridge) -> dict:
         catch = {
             "ball_base": list(snapshot.ball_base),
             "ball_vel_base": list(snapshot.ball_vel_base or (0.0, 0.0, 0.0)),
+            "ball_valid": snapshot.catch_ball_valid,  # false => idle heartbeat, hide the ball
             "raw_action": list(snapshot.catch_raw_action or ()),
             "joint_target": list(snapshot.catch_joint_target or ()),
             "joint_names": list(DEFAULT_JOINT_NAMES),  # so the viewer maps the ghost by name
