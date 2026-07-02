@@ -87,3 +87,12 @@ def test_viewer_separates_base_and_base_link_coordinate_conversions():
     assert "base_link (x,y,z) -> three.js (x, z, -y)" in source
     assert "return new THREE.Vector3(x, z, -y);" in source
     assert "p0: [position.x, -position.z, position.y]," in source
+
+
+def test_viewer_hides_virtual_ball_during_idle_heartbeat():
+    source = VIEWER_SOURCE.read_text(encoding="utf-8")
+
+    assert "ball_valid === false => idle heartbeat telemetry" in source
+    assert "const ballValid = catchInfo.ball_valid !== false;" in source
+    assert "this.setBallVisible(false);" in source
+    assert "this.ballGroup.visible = true;" in source

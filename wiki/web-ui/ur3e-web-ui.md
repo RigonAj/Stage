@@ -24,6 +24,13 @@ ghost, select the active `latest` or `best` model from `data/models/`, and
 toggle `live_catch_node` command mode through services. It is not on the hot
 path; it is telemetry and operator control.
 
+Current gap: the Test tab does not expose `live_catch_node.v_safe_scale`. That
+scale is still configured in `src/ur3e_live_catch/config/live_catch.yaml`
+(`0.5` for conservative bring-up), so changing the live-catch speed currently
+requires config/launch work rather than a UI field. A future UI control should be
+disabled while command mode is active and should rebuild the live node's
+mapper/safety bounds explicitly after changing the parameter.
+
 Model selection is deliberately narrow: the backend exposes only
 `data/models/latest` and `data/models/best`, prefers ONNX over TorchScript, and
 sends the selected path to `/live_catch_node` as the `model_path` parameter. The

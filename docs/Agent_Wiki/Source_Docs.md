@@ -66,7 +66,8 @@ Non-Markdown but important:
 - `docs/Robot_Control/ur3e_live_catch_architecture.md`: design reference for
   the mono-process 60 Hz live-catch loop.
 - `docs/Robot_Control/ur3e_live_catch_implementation_status.md`: implementation
-  state, verified tests, open robot validation and launch commands.
+  state, verified tests, real-robot virtual-ball status, tuning gaps and launch
+  commands.
 - `src/ur3e_live_catch/README.md`: package-level module map and run commands.
 - `src/ur3e_catch_msgs/README.md`: package README for messages. Note:
   `docs/incoherences_code_logique.md` says this README is obsolete and should

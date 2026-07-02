@@ -67,6 +67,9 @@ test_ball_node:
     v0: [-0.05, -4.25, 0.7]
     gravity: [0.0, 0.0, -9.81]
     restart_after_s: 4.0
+    # Isaac ball_on_ground parity: end a trigger-mode flight once base_link.z
+    # drops below this height instead of feeding underground states to policy.
+    ground_z_m: 0.05
     # camera pose in base_link (base_link<-camera), only used when publish_frame != base_link:
     camera_translation: [0.0, 0.0, 0.0]
     camera_quaternion: [0.0, 0.0, 0.0, 1.0]

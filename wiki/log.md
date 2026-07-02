@@ -146,3 +146,17 @@
 
 - Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
 - Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+
+## [2026-07-02] ingest | Real-UR3e virtual-ball status and slow bring-up tuning
+
+- Updated: [Project Overview](overview/project-overview.md)
+- Updated: [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+
+## [2026-07-02] ingest | Document v_safe_scale UI gap
+
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)

@@ -339,7 +339,7 @@ réception. Pré-requis à la calibration de latence §4.3.
   refusée (pas de fallback silencieux).
 - **Extrapolation balle** : en dry-run, comparer `ball_pos` extrapolée vs vérité
   terrain décalée de `perception_age_s` (via `test_ball_node` csv).
-- **Parité de repère** : `publish_frame=base` vs `<camera_frame>` (déjà outillé,
+- **Parité de repère** : `publish_frame=base_link` vs `<camera_frame>` (déjà outillé,
   `reste_a_faire.md`), inchangé par ces propositions.
 - **Bring-up** : fake hardware / URSim → robot réel, E-stop en main, balle virtuelle,
   vitesse réduite, montée progressive (`ur3e_live_catch_implementation_status.md §8`).

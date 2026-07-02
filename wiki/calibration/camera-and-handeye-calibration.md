@@ -39,7 +39,7 @@ verified derivation and require synthetic tests before accepting real data.
 - Physical eye-to-hand session still needs acceptance.
 - `base -> camera_optical` TF must be published and verified.
 - `wrist_3_link -> hoop_center` TF must be published and verified.
-- The parity test `publish_frame=base` vs `publish_frame=camera_optical` should
+- The parity test `publish_frame=base_link` vs `publish_frame=camera_optical` should
   pass before relying on real camera perception.
 
 ## See Also

@@ -192,6 +192,12 @@ then use **Launch virtual ball** or **Isaac random**. To stop the stack:
 ur3e_catch_stop
 ```
 
+Status, 2026-07-02: the virtual-ball policy stream has been validated on the
+real UR3e according to user hardware testing. The robot follows and holds after
+the virtual ball grounds, but the response is still slow under conservative
+bring-up limits (`v_safe_scale=0.5`); watchdog, tuning, real perception latency
+and camera/hoop TF validation remain open before real-ball interception.
+
 Useful variants:
 
 ```bash

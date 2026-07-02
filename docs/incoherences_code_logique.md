@@ -19,8 +19,8 @@ l'export courant).
 
 Les incoherences restantes se concentrent donc sur les derniers points qui
 empechent un essai realiste : calibration extrinseque non validee physiquement,
-TF statiques camera/hoop a fournir, modele canonique `data/models` absent,
-chemins hand-eye divergents, et quelques documents de reprise encore obsoletes.
+TF statiques camera/hoop a fournir, vitesse robot encore lente, chemins
+hand-eye divergents, et quelques documents de reprise encore obsoletes.
 
 Voir aussi `docs/reste_a_faire.md` pour la checklist d'execution.
 
@@ -40,9 +40,11 @@ calcule une cible sure meme en dry-run et peut publier sur
 
 **Ancien constat :** la boucle live ne commandait jamais le robot.
 
-**Etat 2026-06-22 :** partiellement resolu cote code. Le chemin commande est
-cable derriere `enable_command`, avec bascule de controleur, watchdog et refus
-de commander si aucun modele n'est charge. Il reste a valider sur robot reel.
+**Etat 2026-07-02 :** resolu pour la commande de base avec balle virtuelle. Le
+chemin commande est cable derriere `enable_command`, avec bascule de controleur,
+watchdog et refus de commander si aucun modele n'est charge. Selon rapport
+utilisateur, la balle virtuelle commande maintenant le robot reel, mais la
+reponse reste lente et le watchdog/tuning restent a finaliser.
 
 ### R3. Scaler SKRL non tranche
 
@@ -126,28 +128,33 @@ contrat de messages n'est pas implemente.
 **Correction suggeree :** transformer le README en description d'utilisation
 actuelle : champs de messages, build, consumers/producers, statut du timestamp.
 
-## 3. Modele canonique `data/models` absent et fallback date encore actif
+## 3. Modele canonique `data/models` present, fallback date conserve
 
 **Type :** configuration / reproductibilite
 
-**Constat :** `data/models` est documente comme emplacement canonique, mais ne
-contient actuellement que son README. `live_catch_node.py` retombe donc sur
-l'export date `data/ur3e_rollouts/2026-05-26.../policy_deterministic.ts`.
+**Constat :** ce point est resolu pour le lancement courant. `data/models`
+contient maintenant les exports `latest` et `best`, ainsi qu'une copie racine
+`policy_deterministic.{onnx,ts}` et `policy_metadata.json`. Le fallback date
+reste seulement pour compatibilite/debug legacy.
 
 **Preuves :**
 
-- `data/models/README.md` demande un `policy_deterministic.ts` et des
-  metadonnees associees.
-- `find data/models -type f` ne liste que `data/models/README.md`.
-- `live_catch_node.py` definit `CANONICAL_MODEL` puis `FALLBACK_MODEL`.
-- L'export fallback est l'ancien modele dont la semantique verified est
-  `joint_position_target_rad = action_normalized * 0.5`.
+- `data/models/latest/` et `data/models/best/` contiennent TorchScript, ONNX et
+  `policy_metadata.json`.
+- La racine `data/models/` contient aussi `policy_deterministic.onnx`,
+  `policy_deterministic.ts` et `policy_metadata.json`.
+- `live_catch_node.py` definit toujours `CANONICAL_MODEL` puis `FALLBACK_MODEL`
+  pour ne pas casser les anciens essais.
+- L'export fallback date est l'ancien modele dont la semantique verifiee est
+  `joint_position_target_rad = action_normalized * 0.5`; les exports courants
+  utilisent la semantique incrementale via metadata.
 
-**Impact :** un lancement sans `model_path` explicite peut charger un modele
-utile pour les tests actuels, mais pas forcement le modele final a deployer.
+**Impact :** un lancement sans `model_path` explicite charge maintenant le modele
+canonique courant. Le risque restant est de confondre un fallback legacy avec un
+export Isaac recent pendant les audits ou les replays anciens.
 
-**Correction suggeree :** mettre le modele choisi dans `data/models/` ou le
-lier explicitement, avec `policy_metadata.json` et une note claire sur
+**Correction suggeree :** conserver `data/models/README.md` a jour, verifier que
+chaque export porte `policy_metadata.json`, et garder les docs explicites sur
 `action_semantics`, `normalization=embedded`, `dt_s` et limites attendues.
 
 ## 4. Semantique d'action a figer par modele
@@ -210,16 +217,18 @@ physique finale hand-eye et les TF statiques associes ne sont pas encore valides
 - `docs/Robot_Control/ur3e_camera_base_calibration.md` indique que la session
   physique reste a faire.
 - `live_catch_node.py` a besoin de TF `base_link -> <camera_frame>` et
-  `base_link -> hoop_center`; sans `hoop_center`, il utilise le fallback placeholder
-  de `live_catch.yaml`.
+  `base_link -> hoop_center`; sans `hoop_center`, il peut utiliser le fallback
+  placeholder de `live_catch.yaml` seulement en dry-run/debug. En mode commande,
+  l'absence de TF hoop est un echec ferme.
 - Aucun `calibration/handeye_result.yaml` versionne n'est present.
 
 **Impact :** la boucle peut etre testee avec une balle virtuelle en `base_link`, mais
 pas encore avec une perception camera fiable dans le repere robot.
 
 **Correction suggeree :** executer la session hand-eye, publier
-`base -> camera_optical`, mesurer/publier `wrist_3_link -> hoop_center`, puis
-faire le test de parite `publish_frame=base` vs `publish_frame=<camera_frame>`.
+`base_link -> camera_optical`, mesurer/publier `wrist_3_link -> hoop_center`,
+puis faire le test de parite `publish_frame=base_link` vs
+`publish_frame=<camera_frame>`.
 
 ## 7. Chemin du resultat hand-eye divergent entre script et UI
 
@@ -267,30 +276,33 @@ localement mais est ignore par Git via `*.obj`; la photo versionnee est sous
 **Correction suggeree :** traiter le STEP et les GLB comme sources versionnees,
 ou forcer l'ajout de l'OBJ si ce format doit rester une entree officielle.
 
-## 9. Test robot reel avec balle virtuelle encore a faire
+## 9. Test robot reel avec balle virtuelle valide mais lent
 
 **Type :** validation materielle
 
-**Constat :** le code permet maintenant de tester la policy avec une balle
-virtuelle et `enable_command`, mais la validation sur UR3e reel n'est pas encore
-faite.
+**Constat :** ce point n'est plus une incoherence ouverte de commande de base.
+Selon rapport utilisateur du 2026-07-02, la policy avec balle virtuelle et
+`enable_command` fonctionne sur UR3e reel, mais le mouvement reste lent sous les
+limites de bring-up.
 
 **Preuves :**
 
-- `ur3e_live_catch_implementation_status.md` marque l'etape 9 comme outillee
-  mais a valider sur robot reel.
+- `ur3e_live_catch_implementation_status.md` marque maintenant l'etape 9 comme
+  validee avec balle virtuelle sur robot reel selon rapport utilisateur.
 - L'onglet `Test` appelle `/test_ball_node/throw` et
   `/live_catch_node/enable_command`.
-- Les smoke-tests documentes sont dry-run, services ROS et chaine en process
-  avec torch, pas commande physique validee.
+- Les correctifs 2026-07-02 ajoutent le heartbeat `CatchTelemetry.ball_valid`
+  et l'arret de vol `ground_z_m`, ce qui evite le faux symptome "controller
+  inactive" en idle trigger.
 
-**Impact :** la securite logicielle est prete a tester, mais le comportement
-reel du `forward_position_controller`, du watchdog et du retour au trajectory
-controller reste inconnu.
+**Impact :** la commande robot n'est plus le blocage principal. Les risques
+restants sont la lenteur, le watchdog materiel, le retour controleur et la
+perception reelle.
 
-**Correction suggeree :** suivre la checklist `docs/reste_a_faire.md` :
-fake hardware/URSim, puis robot reel sans vraie balle, E-stop en main, vitesse
-reduite, validation watchdog et retour controleur.
+**Correction suggeree :** poursuivre avec la checklist `docs/reste_a_faire.md` :
+rejouer balle virtuelle sur robot reel, mesurer `/joint_states` et
+`catch_telemetry`, regler `v_safe_scale`/`a_safe`/budgets, valider watchdog et
+retour controleur avant vraie balle.
 
 ## 10. Compilation du rapport non reproductible sur clone propre
 

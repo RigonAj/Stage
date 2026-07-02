@@ -1,6 +1,6 @@
 # Safety And Commanding
 
-> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; live-catch README, 2026-07-01; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29; 2026-07-02 pendant incident analysis
+> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; live-catch README, 2026-07-01; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02
 > Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md)
 
 ## Overview
@@ -35,6 +35,14 @@ controller switching or UI command gates.
 - `v_safe_scale` (default 1.0; bring-up config 0.5) scales metadata
   `v_safe`/`a_safe` for both mapper and safety — a deliberate slow-down that
   diverges from the trained contract; restore 1.0 for faithful runs.
+  The 2026-07-02 real-UR3e virtual-ball validation worked under this conservative
+  setting but was visibly slow, so speed tuning is now an optimization task.
+- Standard bring-up (`ur3e_catch_stack --real` /
+  `virtual_ball_robot.launch.py` -> `live_catch.launch.py`) loads
+  `config/live_catch.yaml`; because `v_safe_scale=0.5` lives in that config and
+  is not overridden by the UI/script, it applies to real-robot command tests
+  launched through the standard stack. If the node is launched manually without
+  that config, the code default is 1.0.
 - In command mode, missing `base_link -> hoop_center` TF is fail-closed: the
   node does not use the disk fallback for robot motion.
 
@@ -78,11 +86,14 @@ The real robot path is intentionally layered:
 
 ## Current Hardware Work
 
-Still open from the docs:
+The virtual-ball command path has been reported working on the real UR3e after
+the 2026-07-02 heartbeat/grounding fixes. Still open:
 
-- validate command streaming with virtual ball on real UR3e;
 - test watchdog behavior on hardware;
-- tune `a_safe`, `loop_budget_s` and `max_tracking_error`;
+- tune `v_safe_scale`, `a_safe`, `loop_budget_s`, `max_tracking_error` and
+  `start_pose_limit_rad` for faster but still bounded behavior;
+- add a Web UI Test-tab control for `v_safe_scale` so operators can adjust the
+  bring-up speed deliberately instead of editing YAML/relaunching;
 - verify controller restoration after stop.
 
 ## See Also

@@ -1,9 +1,16 @@
 # UR3e Ball-Catch — État d'implémentation de la boucle live (passage 2)
 
-> Statut (2026-06-22) : **étapes 1–8 de la feuille de route §11 implémentées et
-> buildées sur la machine ROS Humble** ; **le robot UR3e est désormais disponible**,
-> donc l'étape 9 (bring-up matériel) — outillée (launch + procédure + onglet **Test**
-> du web UI) — est **prête à valider sur le robot réel** (E-stop en main, procédure §8).
+> Statut (mise à jour 2026-07-02) : **étapes 1–8 de la feuille de route §11
+> implémentées et buildées sur la machine ROS Humble**. L'étape 9 n'est plus
+> seulement outillée : selon rapport utilisateur du 2026-07-02, la chaîne
+> **balle virtuelle → policy → streaming 500 Hz → robot UR3e réel** fonctionne et
+> tient la position après fin de vol. Le comportement reste **lent** sous les
+> limites de bring-up (`v_safe_scale=0.5`) et doit encore être optimisé avant une
+> vraie balle/perception réelle.
+>
+> Statut initial (2026-06-22) : le robot UR3e était disponible et l'étape 9
+> (bring-up matériel) — launch + procédure + onglet **Test** du web UI — était
+> préparée pour les essais sur robot réel (E-stop en main, procédure §8).
 > Le chemin de commande (ActionMapper → SafetyLimiter → CommandStreamer →
 > `forward_position_controller`) est **câblé** derrière un flag `enable_command`
 > (défaut **`false` = dry-run, rien ne bouge**), avec bascule de contrôleur
@@ -21,8 +28,9 @@
 > (238 msgs en 4 s, actions non nulles, pass-through qui s'incrémente, cibles sûres
 > bornées). **Question scaler tranchée** : la policy reproduit `action_normalized` à
 > **max |Δ| = 4.6e-6** sans scaler externe → le `.ts` embarque le scaler, **aucun
-> `policy_scaler.json` requis**. **À valider sur le robot (désormais disponible)** :
-> commande réelle sur `forward_position_controller` (onglet Test ou `enable_command:=true`).
+> `policy_scaler.json` requis**. **Validé ensuite côté robot réel avec balle
+> virtuelle** selon rapport utilisateur du 2026-07-02 ; restent le watchdog
+> matériel, le tuning vitesse/sécurité et la perception réelle.
 >
 > Passage 1 (2026-06-20) : étapes 1–5 (dry-run), ActionMapper/safety/streaming
 > conçus mais non câblés.
@@ -76,7 +84,7 @@ mono-processus retenue (§2 du plan).
 | 6 | `ActionMapper` + safety + streaming | ✅ **câblé** (flag `enable_command`, défaut dry-run) + `limits.py`/`streaming.py` + tests |
 | 7 | Bascule contrôleur + viz web UI | ✅ bascule auto dans le nœud (§8) ; marqueur balle + arc prédit + télémétrie dans le web UI |
 | 8 | Mesure de latence bout-en-bout | ✅ champs télémétrie + `latency.py` + nœud `latency_report` |
-| 9 | Bring-up robot par étapes | 🟡 outillé (`live_catch.launch.py` + onglet **Test** du web UI + procédure §8) ; **robot disponible — à valider sur le robot réel** |
+| 9 | Bring-up robot par étapes | 🟡 balle virtuelle validée sur robot réel selon rapport utilisateur 2026-07-02 ; encore lent, watchdog/tuning/perception réelle à finaliser |
 
 ---
 
@@ -305,11 +313,13 @@ l'entraînement (sim-to-real §5.6).
 ### 4.3 Config & launch
 - `config/live_catch.yaml` : sections `live_catch_node`, `test_ball_node`,
   `ball_float32_adapter`, `ball_tracking_cpp`. Contient `loop_hz: 60`, repères, géométrie disque
-  **placeholder**, `model_path`, et les clés étape 6 **actives** : `enable_command`
+  fallback dry-run, `model_path`, et les clés étape 6 **actives** : `enable_command`
   (défaut `false`), `action_mode`, `command_topic`, noms de contrôleurs,
-  `auto_switch_controller`, `v_safe_factor`, `a_safe`, `loop_budget_s`,
-  `max_tracking_error`, `joint_limits_path`.
-- `launch/test_dry_run.launch.py` : `test_ball_node` (`publish_frame=base`) +
+  `auto_switch_controller`, `command_rate_hz`, `v_safe_scale`,
+  `start_pose_limit_rad`, `v_safe_factor`, `a_safe`, `loop_budget_s`,
+  `max_tracking_error`, `joint_limits_path`. `test_ball_node` termine le vol sous
+  `ground_z_m=0.05` pour rester aligné avec Isaac `ball_on_ground`.
+- `launch/test_dry_run.launch.py` : `test_ball_node` (`publish_frame=base_link`) +
   `live_catch_node` ; argument CLI `publish_frame:=camera_optical` pour la parité.
 - `launch/live_catch.launch.py` (nouveau) : point d'entrée unique de bring-up
   (§9). Arguments : `enable_command` (défaut `false`), `action_mode`, `model_path`,
@@ -322,15 +332,17 @@ l'entraînement (sim-to-real §5.6).
 `catch_telemetry` (`CatchTelemetry`) et range balle/vitesse/action/cible/latence
 dans le `StateSnapshot` (drapeau `catch_alive`, péremption 0,5 s). `app.py` ajoute
 une section `catch` au payload WebSocket. `viewer3d.js` rend un **marqueur balle**
-(sphère) dans le repère `base` (même conversion base→three.js `(-x, z, y)` que les
-repères TCP/caméra) et un **arc balistique prédit** (intégration `p + v t +
-½ g t²`). `main.js` appelle `viewer.setCatch(state.catch)`.
+(sphère) dans le repère policy `base_link` et un **arc balistique prédit**
+(intégration `p + v t + ½ g t²`). Quand `CatchTelemetry.ball_valid=false`
+(heartbeat idle), la balle est cachée mais l'état commande et le fantôme restent
+à jour. `main.js` appelle `viewer.setCatch(state.catch)`.
 
 **Onglet « Test » (étape 9 / UI).** Deux boutons pilotent la chaîne depuis l'UI :
 - **Launch virtual ball** → service `~/throw` (`std_srvs/Trigger`) de `test_ball_node`
   (param `trigger_mode` : nœud inactif entre deux lancers, **un** vol de parabole par
   appel). Un **fantôme vert** (`policyGhost` de `viewer3d.js`) suit `joint_target` — la
-  pose commandée par le réseau — superposé au robot live.
+  pose commandée par le réseau — superposé au robot live. Le vol s'arrête sous
+  `ground_z_m` pour éviter de nourrir la policy avec une balle sous le sol.
 - **Run on real robot** (case de confirmation) → service `~/enable_command`
   (`std_srvs/SetBool`) de `live_catch_node` : bascule la commande **à chaud** (refus si
   aucun modèle chargé) ; **Stop / back to safe** restaure
@@ -346,11 +358,12 @@ service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plo
 ## 5. Cohérence des repères (rappel des pièges, §7 du plan)
 - **Un seul `<camera_frame>`** : le tracker publie dedans, le hand-eye `{}^B T_C`
   est résolu dedans, publié en **TF statique**. À fournir au lancement.
-- **`base` vs `base_link`** : rotation π autour de Z. Le « local » de la sim =
-  `base`. Le code construit l'obs dans **`base`** (param `base_frame`).
+- **`base` vs `base_link`** : rotation π autour de Z dans `ur_description`. Le
+  frame policy courant est **`base_link`**, aligné sur Isaac FirstTraining ; le
+  frame teach pendant `base` reste un enfant fixe utilisé par les panneaux TCP.
 - **`hoop_center`** : TF statique `wrist_3_link → hoop_center` (offset+normale du
-  montage). Tant qu'elle n'est pas publiée, `live_catch_node` utilise le **fallback**
-  config (placeholder) — à remplacer par la vraie géométrie.
+  montage). En dry-run/debug, `live_catch_node` peut utiliser le fallback config ;
+  en mode commande, l'absence de TF `base_link -> hoop_center` est un échec fermé.
 
 ---
 
@@ -380,7 +393,8 @@ service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plo
 - `colcon build --packages-select ur3e_catch_msgs ur3e_live_catch` ✅ (puis
   `ur3e_rollout_replay`, `ur3e_web_ui` pour la viz).
 - `ros2 interface show ur3e_catch_msgs/msg/CatchTelemetry` ✅ — champs
-  `ball_vel_base`, `perception_age_s`, `loop_compute_s`, `command_enabled` présents.
+  `ball_vel_base`, `perception_age_s`, `loop_compute_s`, `command_enabled`,
+  `ball_valid` présents.
 - **Résolution complète des imports** de `live_catch_node`, `latency_report`,
   `ur3e_web_ui.ros_interface`, `ur3e_web_ui.app` ✅ (rclpy, `controller_manager_msgs`,
   `std_msgs/Float64MultiArray`, `ur3e_catch_msgs`, modules `limits`/`streaming`).
@@ -392,7 +406,8 @@ service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plo
 - `node --check` sur `viewer3d.js` / `main.js` / `catch_panel.js` ✅.
 - **Smoke-test ROS de l'onglet Test** ✅ : `test_ball_node trigger_mode:=true` +
   `live_catch_node`, puis appels de service — `~/throw` arme un vol (balle
-  `valid=False` → `True` avec parabole → `False` après `restart_after_s`),
+  `valid=False` → `True` avec parabole → `False` après `ground_z_m` ou
+  `restart_after_s`; heartbeat `CatchTelemetry.ball_valid=false` en idle),
   `~/enable_command(true)` **refusé** (`success=false`) faute de modèle en python
   système, `~/enable_command(false)` OK. Tests web UI : **24 OK** ; logique pure
   live-catch : **42 OK / 1 skip**.
@@ -411,13 +426,14 @@ service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plo
   les **limites nominales** (vitesses identiques à l'URDF ; positions ±2π). Ajouter
   `pyyaml` au venv pour des bornes de position exactes si on lance depuis le venv.
 
-### À valider **sur le robot** (désormais disponible)
-- Bring-up par étapes (séquence §8) avec **E-stop en main** ; `ros2 topic echo` ;
-  **parité de repère** (base vs caméra, §12) ; **test watchdog** (couper la
-  perception → hold) ; **commande réelle** sur `forward_position_controller`,
-  déclenchée depuis l'onglet **Test** du web UI (*Run on real robot*) ou
-  `enable_command:=true`. Vérifier la bascule (`ros2 control list_controllers` →
-  `forward_position_controller` actif) et le retour au contrôleur de trajectoire au *Stop*.
+### Validé / restant **sur le robot**
+- Validé selon rapport utilisateur du 2026-07-02 : balle virtuelle déclenchée
+  depuis l'onglet **Test**, policy active, streaming 500 Hz vers
+  `forward_position_controller`, robot réel qui suit puis hold après fin de vol.
+- Restant : le comportement est encore lent ; tester le watchdog matériel
+  (couper la perception → hold), vérifier systématiquement le retour au
+  contrôleur de trajectoire au *Stop*, régler `v_safe_scale`/`a_safe`/budgets et
+  valider la parité de repère caméra avant vraie perception.
 
 ---
 
@@ -435,10 +451,10 @@ service + `throw_ball()` / `set_catch_command()` dans `ros_interface.py`. La plo
 4. **`a_safe` / `loop_budget_s`** — valeurs par défaut conservatrices à **caler sur
    le matériel** (l'accélération sûre n'est pas dans l'URDF ; le budget de boucle
    dépend du temps d'inférence torch réel).
-5. **Étape 9 — bring-up matériel** — **robot disponible, à valider** : enchaîner
-   perception seule → dry-run → balle lente E-stop en main → montée en vitesse
-   (séquence §8 ci-dessous, pilotable depuis l'onglet **Test**). Vérifier
-   `forward_position_controller` **spawné** (`ros2 control list_controllers`).
+5. **Étape 9 — bring-up matériel** — balle virtuelle validée sur robot réel
+   selon rapport utilisateur du 2026-07-02, mais encore lente. Continuer par
+   watchdog matériel, tuning vitesse/sécurité, vraie perception puis vraie balle
+   lente (séquence §8 ci-dessous, pilotable depuis l'onglet **Test**).
 6. **Horodatage événement** — le tracker C++ natif remplit `BallState.header.stamp`
    depuis `BallPose3D.timestampUs` ancré sur l'horloge ROS. Le fallback
    `float32_adapter.py` timestamp encore à la réception.
@@ -489,9 +505,10 @@ cd src/ur3e_live_catch && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tes
    real robot* de l'onglet Test) : le nœud bascule sur `forward_position_controller`
    et stream ; **tester le watchdog** (couper la perception → hold) ; *Stop* restaure
    `scaled_joint_trajectory_controller`.
-5. **Robot réel** (désormais disponible) **, vitesse réduite, E-stop en main, sans
-   vraie balle** (balle virtuelle via l'onglet Test), puis balle lente, puis montée
-   en vitesse de balle.
+5. **Robot réel** : la balle virtuelle fonctionne selon rapport utilisateur du
+   2026-07-02, mais reste lente. Garder vitesse réduite/E-stop pendant le tuning,
+   tester le watchdog et le retour contrôleur, puis passer à la perception réelle,
+   à une vraie balle lente, et seulement ensuite monter la vitesse de balle.
 
 ---
 

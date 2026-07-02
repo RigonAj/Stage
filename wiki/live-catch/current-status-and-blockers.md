@@ -1,12 +1,14 @@
 # Current Status And Blockers
 
-> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis
+> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02
 > Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md)
 
 ## Overview
 
-The live-catch code path is implemented and dry-run tested, but the physical
-robot/perception deployment still has blocking validation work.
+The live-catch code path is implemented. The virtual-ball path has now been
+validated through real UR3e command streaming, but it is still slow under the
+current bring-up limits. Real perception deployment still has blocking
+calibration, TF, watchdog and latency validation work.
 
 ## Working
 
@@ -22,6 +24,13 @@ robot/perception deployment still has blocking validation work.
   current incremental exports while preserving legacy absolute compatibility.
 - `ObservationBuilder` mirrors Isaac pass-through logic for the current export
   (`disk_radius_m=0.05`), and command mode fails closed without the hoop TF.
+- `CatchTelemetry` publishes idle heartbeats with `ball_valid=false`, so the UI
+  keeps command state live between trigger-mode throws.
+- `test_ball_node` terminates virtual flights at `ground_z_m=0.05` by default,
+  matching Isaac `ball_on_ground` and avoiding underground policy inputs.
+- User hardware report, 2026-07-02: virtual ball -> policy -> 500 Hz streaming
+  -> real UR3e follows and holds after the ball grounds. It works, but the robot
+  response is still slow and needs tuning/optimization.
 
 ## Blockers Before Real Perception
 
@@ -29,7 +38,7 @@ robot/perception deployment still has blocking validation work.
 2. Publish and verify `base -> camera_optical`.
 3. Publish and verify `wrist_3_link -> hoop_center`; without it, command mode
    holds instead of using a fallback disk pose.
-4. Compare `publish_frame=base` against `publish_frame=camera_optical`.
+4. Compare `publish_frame=base_link` against `publish_frame=camera_optical`.
 
 ## 2026-07-02 Pendant Incident (Diagnosed)
 
@@ -60,12 +69,18 @@ toggle. Fixed with 60 Hz heartbeat telemetry (`ball_valid=false`), plus
 ground-termination of the virtual ball flight (`ground_z_m`, Isaac parity).
 The full chain (throw -> policy -> 500 Hz streaming -> robot follows -> hold
 after grounding, controller stays active) was verified end-to-end on fake
-hardware on 2026-07-02.
+hardware on 2026-07-02. A same-day user hardware report then confirmed the same
+virtual-ball chain on the real UR3e; the remaining issue is speed/latency, not a
+basic command-path failure.
 
-## Robot Bring-Up Still Open
+## Remaining Robot Work
 
-- Validate real command streaming with a virtual ball (retry after the
-  2026-07-02 fixes; unwind wrist_3 first).
+- Optimize the real-robot virtual-ball response. Current bring-up uses
+  `v_safe_scale=0.5`, and the current policy still saturates actions against
+  metadata limits, so the working behavior is intentionally conservative.
+- Add an operator-facing control for `v_safe_scale`; today the Test tab cannot
+  change it, and the standard real-robot stack inherits `0.5` from
+  `live_catch.yaml`.
 - Test watchdog behavior on hardware.
 - Tune safety parameters on the real robot (`v_safe_scale`, `a_safe`,
   `loop_budget_s`, `max_tracking_error`, `start_pose_limit_rad`).

@@ -5,6 +5,11 @@ source de balle de test, sécurité, runtime politique, streaming et mesure de
 latence. Voir `docs/Robot_Control/ur3e_live_catch_architecture.md` §4.3 et
 `docs/Robot_Control/ur3e_live_catch_implementation_status.md` pour l'état détaillé.
 
+État 2026-07-02 : le chemin balle virtuelle → policy → streaming 500 Hz →
+UR3e réel fonctionne selon rapport utilisateur, avec maintien après fin de vol.
+Il reste lent sous les limites de bring-up (`v_safe_scale=0.5`) et doit encore
+être optimisé avant une vraie balle/perception réelle.
+
 Type de paquet : **`ament_python`** (miroir de `ur3e_rollout_replay` /
 `ur3e_web_ui`).
 
@@ -96,6 +101,12 @@ locale documentée : `robot_ip:=192.168.0.5`, `reverse_ip:=192.168.0.3`, balle e
 le robot ne reçoit aucune commande tant que l'UI n'active pas explicitement
 **Run on real robot** avec confirmation E-stop/workspace.
 
+Après les correctifs du 2026-07-02, l'état idle du mode trigger publie aussi
+une télémétrie heartbeat (`ball_valid=false`) pour que l'UI garde le vrai mode
+commande visible entre deux lancers. La balle virtuelle s'arrête quand sa
+hauteur `base_link.z` passe sous `ground_z_m` (défaut `0.05 m`), parité avec
+Isaac `ball_on_ground`.
+
 Arguments utiles :
 
 ```bash
@@ -132,7 +143,9 @@ services ajoutés sur les nœuds :
   (`std_srvs/Trigger`) sur `test_ball_node`. Avec `trigger_mode:=true`, le nœud
   reste **inactif** (`valid=False`) entre deux lancers et ne renvoie qu'**un**
   vol de parabole par appel. Le **fantôme vert** de la vue 3D suit `joint_target`
-  (la pose commandée par le réseau) ; le marqueur rouge + l'arc, la balle.
+  (la pose commandée par le réseau) ; le marqueur rouge + l'arc, la balle. En
+  heartbeat idle, `CatchTelemetry.ball_valid=false` cache la balle mais garde le
+  fantôme et l'état commande à jour.
 - **Isaac random** → échantillonne la même distribution que
   `firsttraining_env_cfg.py`: `p0.x=(-0.6,-0.2)`, `p0.y=(1.2,2.1)`,
   `p0.z=(0.5,1.2)`, bruit position `0.01 m`, `v0.x=(-0.7,0.6)`,

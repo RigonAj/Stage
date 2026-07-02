@@ -1,6 +1,6 @@
 # Testing And Commands
 
-> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30
+> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02
 > Raw: [README](../../README.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md)
 
 ## Environment
@@ -31,6 +31,12 @@ the UR driver, MoveIt, `live_catch_node`, `test_ball_node` in trigger mode, the
 Isaac-matched hoop TF and the Web UI. It defaults to dry-run
 `enable_command=false`; command mode is enabled later from the Web UI Test tab
 or with an explicit launch option.
+
+Status note, 2026-07-02: user hardware validation confirmed that the real UR3e
+can follow the virtual-ball policy stream and hold after the virtual ball
+grounds. This is not the final real-ball deployment: the current response is
+slow under bring-up limits (`v_safe_scale=0.5`), and watchdog, tuning, real
+perception latency and camera/hoop TF validation remain open.
 
 ```bash
 # Fake hardware + virtual ball + inference + UI.

@@ -55,14 +55,14 @@ scripts/publish_camera_tf.py calibration/handeye_result.yaml
 ros2 run tf2_ros static_transform_publisher <x> <y> <z> <qx> <qy> <qz> <qw> wrist_3_link hoop_center
 ```
 
-**Validation attendue :** `ros2 run tf2_ros tf2_echo base camera_optical` et
-`ros2 run tf2_ros tf2_echo base hoop_center` repondent de facon stable; le
+**Validation attendue :** `ros2 run tf2_ros tf2_echo base_link camera_optical`
+et `ros2 run tf2_ros tf2_echo base_link hoop_center` repondent de facon stable; le
 viewer affiche une camera et un hoop coherents avec le montage.
 
-### [ ] Tester la parite `publish_frame=base` vs `publish_frame=<camera_frame>`
+### [ ] Tester la parite `publish_frame=base_link` vs `publish_frame=<camera_frame>`
 
 **Etat actuel :** `test_ball_node` peut publier la meme parabole directement en
-`base` ou dans un repere camera via la pose camera configuree.
+`base_link` ou dans un repere camera via la pose camera configuree.
 
 **Pourquoi c'est bloquant :** ce test isole une erreur de TF/extrinseque d'une
 erreur policy/observation.
@@ -83,15 +83,16 @@ precision TF/calibration pres.
 
 ## Priorite 1 - Bring-up robot reel sans vraie balle
 
-### [ ] Valider la commande sur robot reel avec balle virtuelle
+### [x] Valider la commande sur robot reel avec balle virtuelle
 
-**Etat actuel :** la chaine a ete testee en dry-run et en process avec torch.
-Le robot reel est disponible, mais la commande physique via
-`forward_position_controller` n'est pas encore validee.
+**Etat actuel :** selon rapport utilisateur du 2026-07-02, la chaine balle
+virtuelle -> policy -> streaming 500 Hz -> robot reel fonctionne. Le robot suit
+et tient apres fin de vol, mais le comportement reste lent sous les limites de
+bring-up (`v_safe_scale=0.5`).
 
-**Pourquoi c'est bloquant :** il faut verifier la bascule de controleur, le
-streaming, le watchdog et le retour au controller de trajectoire avant toute
-vraie balle.
+**Pourquoi ca reste important :** ce n'est plus un blocage de commande de base,
+mais il faut encore valider le watchdog, le retour controleur et le tuning avant
+toute vraie balle.
 
 **Action :**
 
@@ -115,10 +116,10 @@ Dans l'onglet `Test` :
 - activer `Run on real robot` a vitesse reduite;
 - arreter avec `Stop / back to safe`.
 
-**Validation attendue :** `forward_position_controller` devient actif pendant
-la commande, la cible est bornee, le robot bouge sans saut, `Stop / back to safe`
-restaure `scaled_joint_trajectory_controller`, et l'UI reflete
-`command_enabled=false` apres l'arret.
+**Validation observee :** le robot reel suit la policy avec la balle virtuelle
+et tient apres l'arret du vol. A re-verifier pendant les prochains essais :
+`Stop / back to safe` restaure `scaled_joint_trajectory_controller`, et l'UI
+reflete `command_enabled=false` apres l'arret.
 
 ### [ ] Tester le watchdog sur robot reel
 
@@ -134,16 +135,19 @@ source balle ou attendre la fin du vol `trigger_mode`.
 **Validation attendue :** le node publie un hold, `SafetyLimiter.reset()` evite
 une reprise brutale, et les logs signalent la raison du stop.
 
-### [ ] Caler `a_safe`, `loop_budget_s` et `max_tracking_error` sur le materiel
+### [ ] Optimiser la vitesse et caler les seuils materiel
 
-**Etat actuel :** les valeurs par defaut sont conservatrices mais pas
+**Etat actuel :** le chemin robot reel fonctionne avec balle virtuelle, mais il
+est encore lent. Les valeurs par defaut restent conservatrices et ne sont pas
 identifiees sur le robot.
 
 **Pourquoi c'est bloquant :** des seuils trop hauts masquent des problemes de
 suivi; des seuils trop bas arretent la boucle sans raison.
 
 **Action :** enregistrer `/joint_states`, `catch_telemetry`,
-`ros2 control list_controllers` et les logs pendant les essais balle virtuelle.
+`ros2 control list_controllers` et les logs pendant les essais balle virtuelle ;
+tester des valeurs documentees de `v_safe_scale`, `a_safe`, `loop_budget_s`,
+`max_tracking_error` et `start_pose_limit_rad`.
 
 **Validation attendue :** seuils documentes dans `live_catch.yaml` ou dans une
 note de test, avec vitesse slider, mode `action_mode`, modele et observations de
@@ -271,6 +275,7 @@ clone propre.
 3. Valider la parite balle virtuelle `base` puis `camera_optical`.
 4. Tester l'onglet `Test` en dry-run avec torch.
 5. Tester `enable_command` sur fake hardware / URSim.
-6. Tester robot reel avec balle virtuelle, vitesse reduite, E-stop en main.
+6. Rejouer robot reel avec balle virtuelle, vitesse reduite, E-stop en main, puis
+   optimiser la lenteur.
 7. Lancer le tracker C++ natif (`use_tracker:=true`) et verifier `/ball_state`.
 8. Mesurer la latence reelle et seulement ensuite passer a une vraie balle lente.

@@ -1,6 +1,6 @@
 # Project Overview
 
-> Sources: Repository README, 2026-06-29; Project synthesis, 2026-06-29
+> Sources: Repository README, 2026-06-29; Project synthesis, 2026-06-29; user hardware report, 2026-07-02
 > Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md)
 
 ## Overview
@@ -38,9 +38,11 @@ DVXplorer events
 ## Current Interpretation
 
 The perception stack is more mature than the physical catch deployment. The
-live-catch software path is implemented and dry-run tested, but the real robot
-bring-up still depends on calibration, static TFs, hardware watchdog testing and
-latency measurement.
+live-catch software path is implemented, and a 2026-07-02 user hardware report
+confirms the virtual-ball policy stream can drive the real UR3e and hold after
+the ball grounds. The current behavior is still slow under conservative bring-up
+limits, and full real-ball deployment still depends on calibration, static TFs,
+hardware watchdog testing and latency measurement.
 
 ## See Also
 

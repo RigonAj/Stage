@@ -169,11 +169,11 @@ Modules (classes appelées directement) :
 
 #### 4.3.1 `ball_frame.py` — repère + filtrage vitesse
 - **Conscient du repère : ne suppose jamais la caméra.** Le module lit le `header.frame_id` du
-  `BallState` reçu et transforme **vers le repère `base`** par un lookup TF générique
-  `header.frame_id → base` (`P^B = {}^{B}T_{frame} · P^{frame}`) :
-  - `frame_id == <camera_frame>` → applique le hand-eye `{}^{B}T_C` (§7) ;
-  - `frame_id == base` → transformée **identité**, balle déjà en `base` (cas `test_ball_node`
-    `publish_frame=base`) : **aucune** transformation appliquée ;
+  `BallState` reçu et transforme **vers le repère policy `base_link`** par un lookup TF générique
+  `header.frame_id → base_link` (`P^B = {}^{base_link}T_{frame} · P^{frame}`) :
+  - `frame_id == <camera_frame>` → applique le hand-eye `{}^{base_link}T_C` (§7) ;
+  - `frame_id == base_link` → transformée **identité**, balle déjà en `base_link` (cas `test_ball_node`
+    `publish_frame=base_link`) : **aucune** transformation appliquée ;
   - tout autre `frame_id` présent dans l'arbre TF est accepté (lookup tf2 standard) ;
   - `frame_id` **vide ou inconnu de TF** ⇒ **rejet** + drapeau watchdog (§9) : jamais d'hypothèse
     silencieuse de repère, qui enverrait la balle au mauvais endroit.
@@ -411,12 +411,12 @@ exclusifs** ; l'exposer clairement dans l'UI/launch.
 
 1. **`ur3e_catch_msgs`** (`BallState`, `CatchTelemetry`) ; buildable et visible par les deux
    workspaces.
-2. **`test_ball_node`** (param `publish_frame` : `base` **ou** `<camera_frame>`) + fallback
+2. **`test_ball_node`** (param `publish_frame` : `base_link` **ou** `<camera_frame>`) + fallback
    legacy `Float32MultiArray → BallState` → chaîne testable sans caméra. Commencer en
-   `publish_frame=base` (sans dépendre du hand-eye), puis passer en `<camera_frame>`.
+   `publish_frame=base_link` (sans dépendre du hand-eye), puis passer en `<camera_frame>`.
 3. **`ball_frame`** **conscient du repère** (transforme selon `header.frame_id`) + TF statiques
-   (`base → <camera_frame>`, `wrist_3_link → hoop_center`) → `ball_pos_local` validé (echo +
-   visualisation), vérifié en parité base/caméra (§12).
+   (`base_link → <camera_frame>`, `wrist_3_link → hoop_center`) → `ball_pos_local` validé (echo +
+   visualisation), vérifié en parité base_link/caméra (§12).
 4. **`ObservationBuilder`** 33-D + **test d'équivalence** : rejouer un épisode
    `rollouts_10_episodes.json`, reconstruire l'obs, comparer bit-à-bit à l'obs sim.
 5. **`PolicyRunner`** (scaler resolu pour l'export courant) → action policy en **dry-run**.
@@ -437,11 +437,11 @@ exclusifs** ; l'exposer clairement dans l'UI/launch.
   courant.
 - **Bornes physiques** : `vitesse réalisée ≤ v_safe` par joint (réutiliser l'analyse de vitesse du
   sim-to-real §1).
-- **Dry-run** : enregistrer obs/actions sans envoi robot ; inspecter `BallState` (base) via la
+- **Dry-run** : enregistrer obs/actions sans envoi robot ; inspecter `BallState` (`base_link`) via la
   visualisation et `ros2 topic echo`.
-- **Parité de repère** : rejouer la **même** trajectoire avec `test_ball_node` en `publish_frame=base`
-  puis en `publish_frame=<camera_frame>` (la version caméra étant la version `base` passée par
-  `({}^{B}T_C)^{-1}`). Le `ball_pos_local` reconstruit doit **coïncider** (à l'erreur hand-eye
+- **Parité de repère** : rejouer la **même** trajectoire avec `test_ball_node` en `publish_frame=base_link`
+  puis en `publish_frame=<camera_frame>` (la version caméra étant la version `base_link` passée par
+  `({}^{base_link}T_C)^{-1}`). Le `ball_pos_local` reconstruit doit **coïncider** (à l'erreur hand-eye
   près) : confirme que `ball_frame` est bien conscient du repère, et isole une erreur extrinsèque
   d'une erreur de chaîne.
 - **Fake hardware / URSim d'abord** ; `forward_position_controller` actif vérifié ; **watchdog

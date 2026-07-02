@@ -19,6 +19,11 @@ This note summarizes the current state from `docs/reste_a_faire.md`,
   command enable/disable.
 - The current TorchScript policy has been checked against rollout actions and
   does not require a separate scaler file.
+- User hardware report, 2026-07-02: the virtual-ball path drives the real UR3e
+  through policy inference and 500 Hz command streaming, then holds after the
+  virtual ball grounds. The current behavior is still slow.
+- `CatchTelemetry.ball_valid=false` marks idle heartbeat telemetry, and
+  `test_ball_node` ends virtual flights at `ground_z_m=0.05` by default.
 
 ## Open Blockers Before Real Perception
 
@@ -26,14 +31,15 @@ This note summarizes the current state from `docs/reste_a_faire.md`,
    `T_base_camera`.
 2. Publish stable TFs for `base -> camera_optical` and
    `wrist_3_link -> hoop_center`.
-3. Compare `test_ball_node publish_frame=base` against
+3. Compare `test_ball_node publish_frame=base_link` against
    `publish_frame=camera_optical` to isolate TF/extrinsic errors.
 
 ## Open Robot Bring-Up Work
 
-1. Validate command streaming on the real UR3e with a virtual ball.
+1. Optimize the slow real-UR3e virtual-ball response.
 2. Test watchdog behavior on the real robot.
-3. Tune `a_safe`, `loop_budget_s` and `max_tracking_error` on hardware.
+3. Tune `v_safe_scale`, `a_safe`, `loop_budget_s`, `max_tracking_error` and
+   `start_pose_limit_rad` on hardware.
 
 ## Open Perception Work
 
@@ -57,8 +63,8 @@ This note summarizes the current state from `docs/reste_a_faire.md`,
 1. Source the workspace and build only the needed packages.
 2. Run live catch in dry-run with `use_test_ball:=true`.
 3. Verify telemetry and policy ghost from the web UI.
-4. Validate controller switching and watchdog with the virtual ball on the real
-   robot at reduced speed.
+4. Re-run the validated virtual-ball command path on the real robot at reduced
+   speed, then tune the slow response and watchdog.
 5. Validate camera extrinsics and static TFs.
 6. Repeat the dry-run with real tracker `BallState`.
 7. Measure latency before attempting real ball interception.
