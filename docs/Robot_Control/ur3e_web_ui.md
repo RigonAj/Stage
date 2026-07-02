@@ -3,6 +3,10 @@
 A browser UI for the UR3e served by the `ur3e_web_ui` ROS 2 package:
 
 - Live 3D model of the robot (URDF + meshes from `ur_description`), driven by `/joint_states`.
+  The viewer anchors the robot and ghosts in the URDF root `base_link`, then only
+  applies the ROS Z-up to Three.js Y-up display rotation. It must not apply the
+  UR `base` 180 deg Z rotation to the robot root; `base` is a fixed child frame
+  of `base_link` in `ur_description`.
 - Pose information: joint positions (rad/deg), joint velocities, and TCP pose (`base` → `tool0` via TF, matching the teach-pendant convention).
 - Per-joint jog buttons, move-to-home, and a cancel button. All motion goes through `/scaled_joint_trajectory_controller/follow_joint_trajectory` with positions clamped to the UR3e joint limits.
 - TCP Target tab: movable 3D target frame plus numeric X/Y/Z/Roll/Pitch/Yaw fields; validates with MoveIt `/compute_ik`, previews the IK solution as a ghost robot, then sends a retimed joint trajectory after explicit confirmation.
@@ -13,12 +17,19 @@ A browser UI for the UR3e served by the `ur3e_web_ui` ROS 2 package:
 - Calibration tab: records the current joints as named poses (stored in `calibration/calibration_poses.json`, override with `--calibration-poses`), replays them identically for the hand-eye calibration session ("Go" / "Go to next pose", ghost preview + confirmation, same motion gates as TCP targets), and can display the phone-support ghost (`static/models/Support3D.glb`, mount transform in `static/models/support_mount.json`) on `tool0`. Poses are joint-space on purpose — no IK branch surprises (see `docs/Robot_Control/ur3e_camera_base_calibration.md` §7).
 - Test tab: supervises the live-catch chain. It can trigger one virtual ball
   through `/test_ball_node/throw`, display the ball marker, predicted flight arc
-  and green policy ghost from `CatchTelemetry.joint_target`, and toggle real
-  robot commanding through `/live_catch_node/enable_command` after an explicit
-  E-stop/workspace confirmation. The `Isaac random` button samples the current
-  Isaac ball distribution before throwing: `p0.x=(-0.6,-0.2)`,
-  `p0.y=(1.2,2.1)`, `p0.z=(0.5,1.2)` plus `0.01 m` Gaussian position noise,
-  and `v0.x=(-0.7,0.6)`, `v0.y=(-5.0,-3.5)`, `v0.z=(-0.1,1.5)` m/s.
+  and green policy ghost from `CatchTelemetry.joint_target`, select the active
+  `data/models/latest` or `data/models/best` policy, and toggle real robot
+  commanding through `/live_catch_node/enable_command` after an explicit
+  E-stop/workspace confirmation. Model changes are sent to
+  `/live_catch_node/set_parameters` as `model_path` and are rejected while
+  command mode is active. The `Isaac random` button samples the Isaac ball
+  distribution from the inspected FirstTraining config before throwing:
+  `p0.x=(-0.6,-0.2)`, `p0.y=(1.2,2.1)`, `p0.z=(0.5,1.2)` plus `0.01 m`
+  Gaussian position noise, and `v0.x=(-0.7,0.6)`, `v0.y=(-5.0,-3.5)`,
+  `v0.z=(-0.1,1.5)` m/s. The default visible launch frame starts at the
+  midpoint of those ranges, with `gravity=(0,0,-9.81) m/s^2` and `flight_s=4.0`.
+  These ball positions, velocities and arcs are displayed in the policy
+  `base_link` frame, not in the teach-pendant `base` frame.
 - Dashboard buttons (play/stop/power on/off/brake release) appear automatically when the real driver's dashboard client is available.
 
 Troubleshooting history for the original real-robot motion issue is documented in `docs/Robot_Control/ur3e_motion_issue_resolution.md`.
@@ -137,7 +148,8 @@ Things to try safely with mock hardware:
    `use_test_ball:=true trigger_mode:=true`, press Launch virtual ball and
    verify the ball marker / policy ghost without enabling command. Press
    `Isaac random` to throw from the same spawn/velocity distribution as the
-   current Isaac training config.
+   inspected Isaac training config. Use the policy selector to compare `latest`
+   and `best`; switch models only while command mode is off.
 
 ## Run Against the Real Robot
 
@@ -182,8 +194,15 @@ The backend also exposes a JSON API (interactive docs at `/docs`):
   calibrated camera frame in the viewer from it
 - `POST /api/catch/throw` — calls `/test_ball_node/throw`
   (`std_srvs/Trigger`) to launch one virtual ball in trigger mode. The Test tab
-  can either send the visible `p0`/`v0` values or sample the Isaac random
-  distribution client-side, apply it through the same endpoint, then throw.
+  can either send the visible `p0`/`v0`/`gravity` values or sample the Isaac
+  random distribution client-side, apply it through the same endpoint, then
+  throw.
+- `GET /api/catch/models` — lists the allowed live-catch policies under
+  `data/models/latest` and `data/models/best`, preferring ONNX over TorchScript.
+- `POST /api/catch/model {"name": "latest"|"best"}` — sets
+  `/live_catch_node`'s `model_path` parameter. The live node loads and validates
+  the new policy before replacing the active policy, and rejects model changes
+  while real-robot command mode is active.
 - `POST /api/catch/command {"enable": true|false, "confirm": true|false}` —
   calls `/live_catch_node/enable_command` (`std_srvs/SetBool`) to toggle
   streaming to the real robot; enabling requires `confirm: true`

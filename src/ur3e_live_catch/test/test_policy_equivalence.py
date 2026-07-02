@@ -14,7 +14,7 @@ import json
 import pytest
 
 from conftest import repo_root
-from ur3e_live_catch.policy_runtime import PolicyRunner, load_metadata
+from ur3e_live_catch.policy_runtime import PolicyRunner, load_metadata, policy_model_candidates
 
 torch = pytest.importorskip("torch", reason="torch not installed (run on the ROS machine)")
 
@@ -39,6 +39,13 @@ def test_metadata_dims():
     assert meta["observation_space"] == 33
     assert meta["action_space"] == 6
     assert meta["action_scale"] == pytest.approx(0.5)
+
+
+def test_explicit_onnx_model_falls_back_to_torchscript_sibling():
+    assert policy_model_candidates("/tmp/model/policy_deterministic.onnx", []) == [
+        "/tmp/model/policy_deterministic.onnx",
+        "/tmp/model/policy_deterministic.ts",
+    ]
 
 
 def test_policy_reproduces_recorded_actions(runner, rollouts):

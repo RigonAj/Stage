@@ -70,7 +70,7 @@ erreur policy/observation.
 **Action :**
 
 ```bash
-ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true publish_frame:=base enable_command:=false
+ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true publish_frame:=base_link enable_command:=false
 ros2 topic echo /catch_telemetry
 
 ros2 launch ur3e_live_catch live_catch.launch.py use_test_ball:=true publish_frame:=camera_optical enable_command:=false

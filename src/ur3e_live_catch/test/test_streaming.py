@@ -3,7 +3,7 @@
 import pytest
 
 from ur3e_live_catch.joint_order import JOINT_ORDER
-from ur3e_live_catch.streaming import CommandStreamer
+from ur3e_live_catch.streaming import CommandStreamer, step_toward
 
 
 def test_format_returns_six_values_in_order():
@@ -66,3 +66,30 @@ def test_hold_without_command_or_fallback_raises():
 def test_invalid_substeps():
     with pytest.raises(ValueError):
         CommandStreamer(substeps=0)
+
+
+def test_step_toward_caps_each_joint_delta():
+    cur = [0.0] * 6
+    goal = [1.0, -1.0, 0.005, 0.0, 2.0, -2.0]
+    out = step_toward(cur, goal, [0.01] * 6)
+    assert out == pytest.approx([0.01, -0.01, 0.005, 0.0, 0.01, -0.01])
+
+
+def test_step_toward_reaches_goal_within_cap():
+    out = step_toward([0.5] * 6, [0.501] * 6, [0.01] * 6)
+    assert out == pytest.approx([0.501] * 6)
+
+
+def test_step_toward_converges_over_iterations():
+    cur = [0.0] * 6
+    goal = [0.105] * 6  # one 60 Hz safe step at wrist v_safe
+    for _ in range(9):  # 0.0126 rad per 500 Hz frame -> <= 9 frames
+        cur = step_toward(cur, goal, [6.2832 * 0.002] * 6)
+    assert cur == pytest.approx(goal, abs=1e-9)
+
+
+def test_step_toward_rejects_mismatched_lengths_and_negative_caps():
+    with pytest.raises(ValueError):
+        step_toward([0.0] * 6, [0.0] * 5, [0.1] * 6)
+    with pytest.raises(ValueError):
+        step_toward([0.0] * 6, [0.0] * 6, [-0.1] * 6)

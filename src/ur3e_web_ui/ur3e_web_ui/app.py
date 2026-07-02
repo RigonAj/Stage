@@ -4,7 +4,9 @@ import argparse
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import json
 import math
+import os
 from pathlib import Path
 import random
 import sys
@@ -60,8 +62,10 @@ TCP_IK_FALLBACK_ATTEMPTS = 3
 TCP_EXECUTE_MATCH_TOLERANCE_RAD = 0.05
 CALIBRATION_MOVE_MIN_DURATION_S = 4.0
 BALL_POSITION_BOUNDS_M = ((-2.0, 2.0), (-2.0, 2.0), (0.0, 2.5))
-BALL_VELOCITY_BOUNDS_M_S = ((-6.0, 6.0), (-6.0, 6.0), (-6.0, 6.0))
+BALL_VELOCITY_BOUNDS_M_S = ((-10.0, 10.0), (-10.0, 10.0), (-10.0, 10.0))
+BALL_GRAVITY_BOUNDS_M_S2 = ((-20.0, 20.0), (-20.0, 20.0), (-20.0, 20.0))
 BALL_FLIGHT_BOUNDS_S = (0.2, 10.0)  # test_ball_node restart_after_s (flight duration)
+CATCH_MODEL_NAMES = ("latest", "best")
 
 REPLAY_PRESETS = {
     "safe": SafetyLimits(
@@ -124,7 +128,12 @@ class CatchCommandRequest(BaseModel):
 class CatchBallConfigRequest(BaseModel):
     p0: list[float] | None = None
     v0: list[float] | None = None
+    gravity: list[float] | None = None
     flight_s: float | None = None
+
+
+class CatchModelRequest(BaseModel):
+    name: str
 
 
 class TcpTargetRequest(BaseModel):
@@ -576,10 +585,10 @@ def create_app(bridge: RosBridge, settings: Settings) -> FastAPI:
 
     @app.post("/api/catch/throw")
     async def catch_throw(body: CatchBallConfigRequest | None = None) -> dict:
-        if body is not None and (body.p0 is not None or body.v0 is not None):
-            p0, v0, flight_s = _validate_ball_config(body, require_all=True)
+        if body is not None and (body.p0 is not None or body.v0 is not None or body.gravity is not None):
+            p0, v0, gravity, flight_s = _validate_ball_config(body, require_all=True)
             try:
-                success, message = await bridge.set_test_ball_config(p0, v0, flight_s)
+                success, message = await bridge.set_test_ball_config(p0, v0, gravity, flight_s)
             except ActionServerUnavailable as exc:
                 raise HTTPException(status_code=503, detail=str(exc))
             except RuntimeError as exc:
@@ -600,20 +609,72 @@ def create_app(bridge: RosBridge, settings: Settings) -> FastAPI:
             raise HTTPException(status_code=503, detail=str(exc))
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
-        return {"p0": list(config["p0"]), "v0": list(config["v0"]), "flight_s": config["flight_s"]}
+        return {
+            "p0": list(config["p0"]),
+            "v0": list(config["v0"]),
+            "gravity": list(config["gravity"]),
+            "flight_s": config["flight_s"],
+        }
 
     @app.post("/api/catch/ball_config")
     async def catch_ball_config_set(body: CatchBallConfigRequest) -> dict:
-        p0, v0, flight_s = _validate_ball_config(body, require_all=True)
+        p0, v0, gravity, flight_s = _validate_ball_config(body, require_all=True)
         try:
-            success, message = await bridge.set_test_ball_config(p0, v0, flight_s)
+            success, message = await bridge.set_test_ball_config(p0, v0, gravity, flight_s)
         except ActionServerUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc))
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
         if not success:
             raise HTTPException(status_code=409, detail=message)
-        return {"ok": True, "message": message, "p0": list(p0), "v0": list(v0), "flight_s": flight_s}
+        return {
+            "ok": True,
+            "message": message,
+            "p0": list(p0),
+            "v0": list(v0),
+            "gravity": list(gravity) if gravity is not None else None,
+            "flight_s": flight_s,
+        }
+
+    @app.get("/api/catch/models")
+    async def catch_models_get() -> dict:
+        models = _discover_catch_models()
+        active_model_path = ""
+        live_catch_ready = True
+        try:
+            active_model_path = await bridge.get_live_catch_model_path()
+        except ActionServerUnavailable:
+            live_catch_ready = False
+        except RuntimeError:
+            live_catch_ready = False
+        active = _active_model_name(models, active_model_path)
+        for model in models:
+            model["active"] = model["name"] == active
+        return {
+            "models": models,
+            "active": active,
+            "active_model_path": active_model_path,
+            "live_catch_ready": live_catch_ready,
+        }
+
+    @app.post("/api/catch/model")
+    async def catch_model_set(body: CatchModelRequest) -> dict:
+        models = _discover_catch_models()
+        model = next((item for item in models if item["name"] == body.name), None)
+        if model is None:
+            raise HTTPException(status_code=404, detail=f"unknown catch model: {body.name}")
+        if not model["available"]:
+            raise HTTPException(status_code=409, detail=f"catch model {body.name} is incomplete")
+        snapshot = bridge.get_snapshot()
+        if snapshot.catch_command_enabled:
+            raise HTTPException(status_code=409, detail="stop command mode before changing the policy model")
+        try:
+            success, message = await bridge.set_live_catch_model_path(model["model_path"])
+        except ActionServerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        if not success:
+            raise HTTPException(status_code=409, detail=message)
+        return {"ok": True, "message": message, "active": model["name"], "model": model}
 
     @app.post("/api/catch/command")
     async def catch_command(body: CatchCommandRequest) -> dict:
@@ -809,6 +870,7 @@ def _state_message(bridge: RosBridge) -> dict:
         "throw_ready": snapshot.catch_throw_ready,
         "config_ready": snapshot.catch_config_ready,
         "command_ready": snapshot.catch_command_ready,
+        "model_ready": snapshot.catch_model_ready,
         "command_enabled": snapshot.catch_command_enabled,
     }
     return {
@@ -835,6 +897,84 @@ def _json_safe(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def _workspace_root() -> Path:
+    env_root = os.environ.get("DV_ROSWS_ROOT")
+    if env_root:
+        path = Path(env_root).expanduser()
+        if (path / "data" / "models").is_dir():
+            return path.resolve()
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "data" / "models").is_dir():
+            return parent
+    return Path.cwd()
+
+
+def _discover_catch_models(workspace_root: Path | None = None) -> list[dict]:
+    root = workspace_root or _workspace_root()
+    model_root = root / "data" / "models"
+    models: list[dict] = []
+    for name in CATCH_MODEL_NAMES:
+        directory = model_root / name
+        candidates = [
+            directory / "policy_deterministic.onnx",
+            directory / "policy_deterministic.ts",
+        ]
+        model_path = next((path for path in candidates if path.is_file()), None)
+        metadata_path = directory / "policy_metadata.json"
+        metadata: dict = {}
+        metadata_error = ""
+        if metadata_path.is_file():
+            try:
+                metadata = json.loads(metadata_path.read_text())
+            except json.JSONDecodeError as exc:
+                metadata_error = str(exc)
+        available = model_path is not None and metadata_path.is_file() and not metadata_error
+        models.append(
+            {
+                "name": name,
+                "available": available,
+                "directory": str(directory.resolve()),
+                "model_path": str(model_path.resolve()) if model_path is not None else "",
+                "metadata_path": str(metadata_path.resolve()) if metadata_path.exists() else "",
+                "checkpoint": str(metadata.get("checkpoint", "")),
+                "action_semantics": str(metadata.get("action_semantics", "")),
+                "observation_space": metadata.get("observation_space"),
+                "action_space": metadata.get("action_space"),
+                "error": metadata_error,
+                "active": False,
+            }
+        )
+    return models
+
+
+def _resolve_path_for_match(path: str, workspace_root: Path | None = None) -> Path:
+    raw = Path(path).expanduser()
+    if raw.is_absolute():
+        return raw.resolve()
+    root = workspace_root or _workspace_root()
+    return (root / raw).resolve()
+
+
+def _active_model_name(models: list[dict], active_model_path: str) -> str | None:
+    if not active_model_path:
+        return "latest" if any(model["name"] == "latest" and model["available"] for model in models) else None
+    try:
+        active = _resolve_path_for_match(active_model_path)
+    except OSError:
+        return None
+    for model in models:
+        model_path = model.get("model_path")
+        directory = model.get("directory")
+        if not model_path or not directory:
+            continue
+        try:
+            if active == Path(model_path).resolve() or active.parent == Path(directory).resolve():
+                return str(model["name"])
+        except OSError:
+            continue
+    return None
+
+
 def _coerce_vector(values: list[float], expected_len: int, label: str) -> tuple[float, ...]:
     if len(values) != expected_len:
         raise HTTPException(status_code=400, detail=f"{label} must contain {expected_len} values")
@@ -848,7 +988,12 @@ def _validate_ball_config(
     body: CatchBallConfigRequest,
     *,
     require_all: bool,
-) -> tuple[tuple[float, float, float], tuple[float, float, float], float | None]:
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float] | None,
+    float | None,
+]:
     if body.p0 is None or body.v0 is None:
         if require_all:
             raise HTTPException(status_code=400, detail="p0 and v0 are required")
@@ -857,6 +1002,11 @@ def _validate_ball_config(
     v0 = _coerce_vector(body.v0, 3, "v0")
     _ensure_vector_bounds(p0, BALL_POSITION_BOUNDS_M, "p0")
     _ensure_vector_bounds(v0, BALL_VELOCITY_BOUNDS_M_S, "v0")
+    gravity: tuple[float, float, float] | None = None
+    if body.gravity is not None:
+        g = _coerce_vector(body.gravity, 3, "gravity")
+        _ensure_vector_bounds(g, BALL_GRAVITY_BOUNDS_M_S2, "gravity")
+        gravity = (g[0], g[1], g[2])
     flight_s: float | None = None
     if body.flight_s is not None:
         flight_s = float(body.flight_s)
@@ -866,6 +1016,7 @@ def _validate_ball_config(
     return (
         (p0[0], p0[1], p0[2]),
         (v0[0], v0[1], v0[2]),
+        gravity,
         flight_s,
     )
 

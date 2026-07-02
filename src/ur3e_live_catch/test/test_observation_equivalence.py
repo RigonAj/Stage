@@ -9,11 +9,12 @@ What is validated exactly here:
   - comp 2 joint_vel == recorded, fed from joint_velocity_before_rad_s
   - comp 5 direction == ball - disk   (derivation)
   - comp 6 distance  == ||direction|| (derivation)
+  - comp 8 signed flag follows the current signed distance after Isaac's done pass
   - comp 9 actions   == previous sample's action_normalized (raw, unclipped)
   - structure: length 33 and slot placement
 
-comps 3/8/10 (disk geometry, pass-through) are injected from the recorded obs and
-will get their own bit-exact check once the Isaac geometry lands.
+comps 3/10 (disk geometry, pass-through) are injected from the recorded obs and
+covered by targeted geometry tests for the current FirstTraining contract.
 """
 
 import json
@@ -24,7 +25,7 @@ from conftest import repo_root
 from ur3e_live_catch.observation import (
     IDX_ACTIONS, IDX_BALL_POS, IDX_BALL_VEL, IDX_DIRECTION, IDX_DISK_POS,
     IDX_DISTANCE, IDX_JOINT_POS, IDX_JOINT_VEL, IDX_PASS_THROUGH, OBS_DIM,
-    ObservationBuilder,
+    IDX_SIGNED_FLAG, ObservationBuilder,
 )
 
 ROLLOUTS = (
@@ -66,24 +67,34 @@ def _blank_obs(builder, ball_pos):
 
 
 def test_pass_through_matches_isaac_crossing_and_radius_gate():
-    builder = ObservationBuilder(disk_radius=0.1)
+    builder = ObservationBuilder(disk_radius=0.05)
 
     _blank_obs(builder, [0.0, 0.0, 0.05])
-    obs = _blank_obs(builder, [0.09, 0.0, -0.05])
-    assert obs[IDX_PASS_THROUGH] == 0.0  # count is emitted before this tick's update
+    obs = _blank_obs(builder, [0.04, 0.0, -0.05])
+    assert obs[IDX_PASS_THROUGH] == 1.0
     assert builder.pass_through_count == 1
-    obs = _blank_obs(builder, [0.09, 0.0, -0.10])
+    obs = _blank_obs(builder, [0.04, 0.0, -0.10])
     assert obs[IDX_PASS_THROUGH] == 1.0
 
-    builder = ObservationBuilder(disk_radius=0.1)
+    builder = ObservationBuilder(disk_radius=0.05)
     _blank_obs(builder, [0.0, 0.0, -0.05])
-    _blank_obs(builder, [0.09, 0.0, 0.05])
+    _blank_obs(builder, [0.04, 0.0, 0.05])
     assert builder.pass_through_count == 1
 
-    builder = ObservationBuilder(disk_radius=0.1)
+    builder = ObservationBuilder(disk_radius=0.05)
     _blank_obs(builder, [0.0, 0.0, 0.05])
-    _blank_obs(builder, [0.11, 0.0, -0.05])
+    _blank_obs(builder, [0.06, 0.0, -0.05])
     assert builder.pass_through_count == 0
+
+
+def test_signed_flag_matches_current_distance_after_isaac_done_pass():
+    builder = ObservationBuilder(disk_radius=0.05)
+
+    obs = _blank_obs(builder, [0.0, 0.0, 0.05])
+    assert obs[IDX_SIGNED_FLAG] == 1.0
+
+    obs = _blank_obs(builder, [0.0, 0.0, -0.05])
+    assert obs[IDX_SIGNED_FLAG] == 0.0
 
 
 def test_observation_equivalence(episodes):

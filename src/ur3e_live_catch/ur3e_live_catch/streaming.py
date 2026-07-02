@@ -24,6 +24,33 @@ from typing import Optional, Sequence
 from ur3e_live_catch.joint_order import JOINT_ORDER
 
 
+def step_toward(
+    current: Sequence[float],
+    goal: Sequence[float],
+    max_deltas: Sequence[float],
+) -> list[float]:
+    """One interpolation step from ``current`` toward ``goal``, per-joint capped.
+
+    Used by the high-rate command timer: the UR driver validates consecutive
+    servoj set-points every 2 ms against the joint velocity limits, so the
+    per-message delta must stay <= v_safe * command period — publishing the 60 Hz
+    safe target directly would be rejected as a velocity violation.
+    """
+    if not (len(current) == len(goal) == len(max_deltas)):
+        raise ValueError("current, goal and max_deltas must have the same length")
+    out: list[float] = []
+    for cur, tgt, max_delta in zip(current, goal, max_deltas):
+        if max_delta < 0.0:
+            raise ValueError(f"max_deltas must be >= 0, got {max_delta}")
+        delta = float(tgt) - float(cur)
+        if delta > max_delta:
+            delta = max_delta
+        elif delta < -max_delta:
+            delta = -max_delta
+        out.append(float(cur) + delta)
+    return out
+
+
 class CommandStreamer:
     """Format (and optionally upsample) safe joint targets into controller commands.
 

@@ -1,6 +1,6 @@
 # Policy Transfer And Action Semantics
 
-> Sources: sim-to-real plan, 2026-06-30; action-space decision, 2026-06-29; sim-to-real proposals, 2026-06-30; model README, 2026-06-30
+> Sources: sim-to-real plan, 2026-07-01; action-space decision, 2026-06-29; sim-to-real proposals, 2026-06-30; model README, 2026-07-01
 > Raw: [Sim-to-real plan](../../docs/Robot_Control/ur3e_ball_catch_sim_to_real.md); [Action-space decision](../../docs/Robot_Control/ur3e_choix_espace_action_isaac.md); [Proposals](../../docs/Robot_Control/ur3e_sim2real_propositions.md); [Model README](../../data/models/README.md)
 
 ## Overview
@@ -32,10 +32,20 @@ For deployment, `policy_metadata.json` is the source of truth for the action
 contract. The Stage `ActionMapper` now keeps legacy absolute `faithful`
 compatibility, but resolves `action_mode=faithful` to the incremental mapper when
 the loaded metadata declares the current Isaac target-integrator semantics.
+The Web UI model selector does not choose an action mapper directly; it only
+sets `model_path`, then the live node validates metadata and rebuilds the mapper
+from that metadata.
 
 The 2026-06-30 `latest` and `best` exports in `data/models/` both declare
 `observation_space=33`, `action_space=6`, `dt_s=1/60`, per-joint velocity and
-acceleration limits, `disk_radius_m=0.1`, and the incremental action semantics.
+acceleration limits, `observation_frame=base_link`, `disk_radius_m=0.05`, and
+the incremental action semantics.
+Those exports carry the UR3e HARD velocity limits as `v_safe` (π rad/s base
+joints, 2π rad/s wrists) and ±2π position bounds, and the policy saturates its
+raw actions, so deployment runs every joint at full speed. On 2026-07-02 the
+Isaac `FirstTraining` cfg was changed to half velocities/accelerations and ±π
+position bounds — this only lands in metadata after retraining; until then the
+live node's `v_safe_scale` parameter provides the robot-side slow-down.
 The SKRL policy has `clip_actions=false`; the environment/action mapper clip to
 `[-1, 1]` before integration and feed back that clipped action in observation
 component 9.
@@ -48,6 +58,8 @@ component 9.
 - Ball velocity is noisy because it is inferred from position history.
 - Action semantics must stay encoded in model metadata to avoid deploying a
   model with the wrong mapper.
+- Runtime model changes must stay disabled while real-robot command mode is
+  active, otherwise the policy, mapper and safety state could change mid-flight.
 - Legacy absolute-action exports and current incremental-action exports share
   the live node only through metadata-driven mapper selection.
 - `data/models/` should contain the canonical model and metadata.

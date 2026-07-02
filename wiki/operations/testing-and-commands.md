@@ -1,6 +1,6 @@
 # Testing And Commands
 
-> Sources: repository README, 2026-06-29; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30
+> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30
 > Raw: [README](../../README.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md)
 
 ## Environment
@@ -14,6 +14,7 @@ source env.sh
 ```bash
 build
 colcon build --packages-select ur3e_catch_msgs ur3e_live_catch
+colcon build --symlink-install --packages-select ur3e_catch_msgs ur3e_live_catch ur3e_rollout_replay ur3e_web_ui
 colcon build --packages-select ball_tracking_cpp
 ```
 
@@ -23,6 +24,37 @@ colcon build --packages-select ball_tracking_cpp
 run
 ur3e_stack
 ur3e_catch_stack
+```
+
+`ur3e_catch_stack` is the one-command live-catch inference bring-up. It starts
+the UR driver, MoveIt, `live_catch_node`, `test_ball_node` in trigger mode, the
+Isaac-matched hoop TF and the Web UI. It defaults to dry-run
+`enable_command=false`; command mode is enabled later from the Web UI Test tab
+or with an explicit launch option.
+
+```bash
+# Fake hardware + virtual ball + inference + UI.
+ur3e_catch_stack --fake
+
+# Real UR3e + virtual ball + inference + UI.
+UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 ur3e_catch_stack --real
+
+# Explicit policy export.
+ur3e_catch_stack --fake --model-path data/models/latest/policy_deterministic.onnx
+
+# Stop the combined stack.
+ur3e_catch_stop
+```
+
+Direct ROS equivalents:
+
+```bash
+ros2 launch ur3e_live_catch virtual_ball_robot.launch.py use_fake_hardware:=true
+ros2 launch ur3e_live_catch virtual_ball_robot.launch.py \
+  robot_ip:=192.168.0.5 reverse_ip:=192.168.0.3 use_fake_hardware:=false
+ros2 launch ur3e_live_catch live_catch.launch.py \
+  use_test_ball:=true trigger_mode:=true publish_frame:=base_link enable_command:=false
+ros2 service call /test_ball_node/throw std_srvs/srv/Trigger {}
 ```
 
 ## Tests
@@ -59,6 +91,19 @@ play best --headless --livestream 0 --rendering_mode performance \
 
 Add `--record_actions --record_episodes=10` only when regenerating local rollout
 validation files for replay or audit.
+
+Deployment model directories such as `data/models/latest` and `data/models/best`
+do not carry rollout JSON files. Validate their model files and metadata with:
+
+```bash
+python3 /home/rigon/Documents/6-Dof-Ur3e-Catch-a-ball/scripts/sim2real_validate_export.py \
+  --exports data/models/latest --metadata-only
+python3 /home/rigon/Documents/6-Dof-Ur3e-Catch-a-ball/scripts/sim2real_validate_export.py \
+  --exports data/models/best --metadata-only
+```
+
+Run the same script without `--metadata-only` only on full export directories
+that include `rollouts_*_episodes.json`.
 
 ## Wiki Maintenance
 

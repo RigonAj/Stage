@@ -1,10 +1,10 @@
 import { api } from "./api.js";
-import { Viewer3D } from "./viewer3d.js?v=isaac-random-ball";
+import { Viewer3D } from "./viewer3d.js?v=isaac-hoop-visual";
 import { JogPanel } from "./jog_panel.js";
 import { TargetPanel } from "./target_panel.js?v=tcp-target-base-frame";
 import { RolloutPanel } from "./rollout_panel.js?v=exec-target-ghost";
 import { CalibrationPanel } from "./calibration_panel.js";
-import { CatchPanel } from "./catch_panel.js?v=isaac-random-ball";
+import { CatchPanel } from "./catch_panel.js?v=base-link-robot-root";
 
 const RAD_TO_DEG = 180 / Math.PI;
 

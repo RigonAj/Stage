@@ -10,9 +10,10 @@ function fmtMs(seconds, digits = 0) {
 }
 
 const DEFAULT_BALL_CONFIG = {
-  p0: [-1.0, 1.5, 0.4],
-  v0: [1.5, -1.0, 2.5],
-  flight_s: 2.0,
+  p0: [-0.4, 1.65, 0.85],
+  v0: [-0.05, -4.25, 0.7],
+  gravity: [0.0, 0.0, -9.81],
+  flight_s: 4.0,
 };
 
 const ISAAC_RANDOM_BALL = {
@@ -24,6 +25,7 @@ const ISAAC_RANDOM_BALL = {
 const BALL_FIELD_IDS = {
   p0: ["catch-p0-x", "catch-p0-y", "catch-p0-z"],
   v0: ["catch-v0-x", "catch-v0-y", "catch-v0-z"],
+  gravity: ["catch-g-x", "catch-g-y", "catch-g-z"],
 };
 const FLIGHT_FIELD_ID = "catch-flight-s";  // restart_after_s (flight duration, s)
 
@@ -51,9 +53,12 @@ export class CatchPanel {
     this.commandEnabled = false;
     this.configLoaded = false;
     this.mutingInputs = false;
+    this.models = [];
+    this.modelReady = false;
     this.ballConfig = {
       p0: [...DEFAULT_BALL_CONFIG.p0],
       v0: [...DEFAULT_BALL_CONFIG.v0],
+      gravity: [...DEFAULT_BALL_CONFIG.gravity],
       flight_s: DEFAULT_BALL_CONFIG.flight_s,
     };
 
@@ -61,9 +66,11 @@ export class CatchPanel {
     this.writeBallConfig(this.ballConfig);
     this.viewer.setBallLaunchConfig(this.ballConfig);
 
-    for (const id of [...BALL_FIELD_IDS.p0, ...BALL_FIELD_IDS.v0, FLIGHT_FIELD_ID]) {
+    for (const id of [...BALL_FIELD_IDS.p0, ...BALL_FIELD_IDS.v0, ...BALL_FIELD_IDS.gravity, FLIGHT_FIELD_ID]) {
       document.getElementById(id).addEventListener("input", () => this.onBallInputChanged());
     }
+    document.getElementById("catch-model-select").addEventListener("change", () => this.refreshButtons());
+    document.getElementById("btn-catch-model-apply").addEventListener("click", () => this.applyModel());
     document.getElementById("btn-catch-apply-ball").addEventListener("click", () => this.applyBallConfig());
     document.getElementById("btn-catch-reset-ball").addEventListener("click", () => this.resetBallConfig());
     document.getElementById("btn-catch-isaac-random").addEventListener("click", () => this.throwIsaacRandomBall());
@@ -81,6 +88,7 @@ export class CatchPanel {
       button.addEventListener("click", () => this.setLaunchMode(button.dataset.launchMode));
     }
     this.setLaunchMode("move");
+    this.loadModels();
   }
 
   // Pick which gizmo the mouse drives: move p0 (translate) | aim v0 (rotate) | speed |v0| (scale).
@@ -112,6 +120,37 @@ export class CatchPanel {
     }
   }
 
+  async loadModels() {
+    try {
+      const result = await api.get("/api/catch/models");
+      this.models = result.models || [];
+      this.modelReady = !!result.live_catch_ready;
+      this.writeModels(this.models, result.active);
+      const label = result.active ? `model: ${result.active}` : "model: –";
+      const suffix = this.modelReady ? "" : " (live_catch node not found)";
+      this.setText("catch-model-status", `${label}${suffix}`);
+      this.refreshButtons();
+    } catch (error) {
+      this.modelReady = false;
+      this.setText("catch-model-status", `model: ${error.message}`);
+      this.refreshButtons();
+    }
+  }
+
+  async applyModel() {
+    const select = document.getElementById("catch-model-select");
+    const name = select.value;
+    if (!name || this.commandEnabled) return;
+    try {
+      const result = await api.post("/api/catch/model", { name });
+      this.setText("catch-model-status", `model: ${result.active}`);
+      await this.loadModels();
+    } catch (error) {
+      this.onError(`model: ${error.message}`);
+      this.setText("catch-model-status", `model: ${error.message}`);
+    }
+  }
+
   resetBallConfig() {
     this.setBallConfig(DEFAULT_BALL_CONFIG, "launch frame reset");
   }
@@ -122,6 +161,7 @@ export class CatchPanel {
         (range) => uniform(range) + gaussian(ISAAC_RANDOM_BALL.positionNoiseStd),
       ),
       v0: ISAAC_RANDOM_BALL.v0Ranges.map((range) => uniform(range)),
+      gravity: [...this.ballConfig.gravity],
       flight_s: this.ballConfig.flight_s,
     };
   }
@@ -163,6 +203,7 @@ export class CatchPanel {
     const status = state.catch_status;
     this.commandReady = !!status.command_ready;
     this.configReady = !!status.config_ready;
+    this.modelReady = !!status.model_ready;
     this.commandEnabled = !!status.command_enabled;
 
     if (this.configReady && !this.configLoaded) this.loadBallConfig();
@@ -212,6 +253,14 @@ export class CatchPanel {
     document.getElementById("btn-catch-command-on").disabled =
       !this.commandReady || !confirmChecked || this.commandEnabled;
     document.getElementById("btn-catch-command-off").disabled = !this.commandReady || !this.commandEnabled;
+    const modelSelect = document.getElementById("catch-model-select");
+    const modelButton = document.getElementById("btn-catch-model-apply");
+    if (modelSelect && modelButton) {
+      const selected = this.models.find((model) => model.name === modelSelect.value);
+      modelSelect.disabled = this.commandEnabled || !this.models.length;
+      modelButton.disabled =
+        this.commandEnabled || !this.modelReady || !selected || !selected.available || selected.active;
+    }
   }
 
   onBallInputChanged() {
@@ -227,6 +276,7 @@ export class CatchPanel {
     const next = {
       p0: config.p0 || this.ballConfig.p0,
       v0: config.v0 || this.ballConfig.v0,
+      gravity: this.ballConfig.gravity,
       flight_s: this.ballConfig.flight_s,
     };
     const label =
@@ -242,6 +292,7 @@ export class CatchPanel {
     this.ballConfig = {
       p0: [...config.p0],
       v0: [...config.v0],
+      gravity: config.gravity ? [...config.gravity] : [...this.ballConfig.gravity],
       flight_s: config.flight_s != null ? config.flight_s : this.ballConfig.flight_s,
     };
     this.mutingInputs = true;
@@ -255,6 +306,7 @@ export class CatchPanel {
     return {
       p0: BALL_FIELD_IDS.p0.map((id) => this.readNumber(id)),
       v0: BALL_FIELD_IDS.v0.map((id) => this.readNumber(id)),
+      gravity: BALL_FIELD_IDS.gravity.map((id) => this.readNumber(id)),
       flight_s: this.readNumber(FLIGHT_FIELD_ID),
     };
   }
@@ -267,9 +319,29 @@ export class CatchPanel {
     };
     write(BALL_FIELD_IDS.p0, config.p0);
     write(BALL_FIELD_IDS.v0, config.v0);
+    write(BALL_FIELD_IDS.gravity, config.gravity);
     if (config.flight_s != null) {
       document.getElementById(FLIGHT_FIELD_ID).value = Number(config.flight_s).toFixed(2);
     }
+  }
+
+  writeModels(models, active) {
+    const select = document.getElementById("catch-model-select");
+    const previous = select.value;
+    select.innerHTML = "";
+    for (const model of models) {
+      const option = document.createElement("option");
+      option.value = model.name;
+      option.textContent = model.available ? model.name : `${model.name} (missing)`;
+      option.disabled = !model.available;
+      select.appendChild(option);
+    }
+    const previousStillExists = models.some((model) => model.name === previous);
+    const firstAvailable = models.find((model) => model.available);
+    const fallback = firstAvailable ? firstAvailable.name : models[0] ? models[0].name : "";
+    const next = active || (previousStillExists ? previous : fallback);
+    if (next) select.value = next;
+    this.refreshButtons();
   }
 
   readNumber(id) {

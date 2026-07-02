@@ -4,8 +4,8 @@ Exact order (sum = 6+6+3+3+3+1+3+1+6+1 = 33), with slice indices:
 
     [ 0: 6]  1  joint_pos        (rad)
     [ 6:12]  2  joint_vel        (rad/s)
-    [12:15]  3  disk_pos_local   (m)   hoop centre in base   <- needs Isaac geom
-    [15:18]  4  ball_pos_local   (m)   ball in base
+    [12:15]  3  disk_pos_local   (m)   hoop centre in base_link
+    [15:18]  4  ball_pos_local   (m)   ball in base_link
     [18:21]  5  direction        (m)   ball - disk
     [21:22]  6  distance         (m)   ||direction||
     [22:25]  7  ball_vel_w       (m/s) filtered
@@ -74,9 +74,10 @@ class ObservationBuilder:
     clipped ``self.actions`` tensor.
     """
 
-    def __init__(self, disk_radius: float = 0.1) -> None:
+    def __init__(self, disk_radius: float = 0.05) -> None:
         # disk_radius gates pass-through to crossings *inside* the hoop. The
-        # 2026-06-30 exported run used 0.1 m (logs/.../params/env.yaml).
+        # current FirstTraining config sets this to 0.05 m; the mesh radius is
+        # larger, but firsttraining_env uses cfg.disk_radius when it is > 0.
         self.disk_radius = float(disk_radius)
         self._prev_signed_dist: float = 0.0
         self._pass_through_count: int = 0
@@ -93,8 +94,8 @@ class ObservationBuilder:
 
     @staticmethod
     def disk_pos_local(disk_pos_base: Sequence[float]) -> Vec3:
-        """Component 3. In sim, "local" = world - env_origin = base, so the hoop
-        centre expressed in base IS disk_pos_local (archi §6, §7)."""
+        """Component 3. In sim, "local" = world - env_origin = base_link, so the
+        hoop centre expressed in base_link IS disk_pos_local."""
         return (float(disk_pos_base[0]), float(disk_pos_base[1]), float(disk_pos_base[2]))
 
     @staticmethod
@@ -142,8 +143,11 @@ class ObservationBuilder:
         direction = _sub(ball_local, disk_local)
         distance = _norm(direction)
 
-        # Component 8 reads the *previous* tick's sign (archi §6 "prev_disk_signed_dist").
-        signed_flag = 1.0 if self._prev_signed_dist > 0.0 else 0.0
+        # Isaac updates prev_disk_signed_dist/pass_through_count in _get_dones()
+        # before the next observation is emitted. Mirror that order here.
+        current_signed = self.signed_distance(ball_local, disk_local, disk_normal_unit)
+        self._update_pass_through(current_signed, ball_local, disk_local, disk_normal_unit)
+        signed_flag = 1.0 if current_signed > 0.0 else 0.0
 
         obs: list[float] = []
         obs.extend(float(v) for v in joint_pos)          # 1
@@ -157,9 +161,7 @@ class ObservationBuilder:
         obs.extend(float(v) for v in prev_action)        # 9 (contract-specific action feedback)
         obs.append(float(self._pass_through_count))       # 10
 
-        # Advance internal state AFTER emitting comp 8/10 for this tick.
-        current_signed = self.signed_distance(ball_local, disk_local, disk_normal_unit)
-        self._update_pass_through(current_signed, ball_local, disk_local, disk_normal_unit)
+        # Store the signed distance for the next crossing test.
         self._prev_signed_dist = current_signed
 
         if len(obs) != OBS_DIM:

@@ -3,17 +3,17 @@
 Publishes ``BallState`` in the SAME contract as the real tracker (stamped,
 ``frame_id`` always set). Two source modes:
 
-  parabola : analytic p(t) = p0 + v0 t + 1/2 g t^2, defined in the z-up ``base``
-             frame (no axis conversion needed, archi §4.2).
+  parabola : analytic p(t) = p0 + v0 t + 1/2 g t^2, defined in the z-up
+             ``base_link`` frame used by Isaac FirstTraining observations.
   csv      : replay ground-truth, e.g. sequences/<seq>/labels/ground_truth.csv
              (columns ball_*_world_m and ball_*_cam_m).
 
 ``publish_frame`` selects the DECLARED frame (header.frame_id):
-  - "base": publish base coordinates directly (short-circuits the hand-eye, lets
-    you isolate policy/obs errors from extrinsic-calibration errors);
+  - "base_link": publish base_link coordinates directly (short-circuits the
+    hand-eye, lets you isolate policy/obs errors from extrinsic-calibration errors);
   - "<camera_frame>": publish camera-frame coordinates (exercises the full TF /
     hand-eye path). For the parabola this applies the inverse of the configured
-    camera pose in base (``camera_translation`` / ``camera_quaternion``); for csv
+    camera pose in base_link (``camera_translation`` / ``camera_quaternion``); for csv
     it uses the recorded camera columns directly.
 
 Injectable Gaussian ``noise_std`` and ``dropout_prob`` stress the velocity filter
@@ -40,8 +40,8 @@ class TestBallNode(Node):
     def __init__(self) -> None:
         super().__init__("test_ball_node")
         self.declare_parameter("output_topic", "ball_state")
-        self.declare_parameter("publish_frame", "base")
-        self.declare_parameter("base_frame", "base")
+        self.declare_parameter("publish_frame", "base_link")
+        self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("rate_hz", 30.0)
         self.declare_parameter("source", "parabola")  # parabola | csv
         # trigger_mode=False (default): publish continuously (back-compat, used by the
@@ -51,12 +51,12 @@ class TestBallNode(Node):
         self.declare_parameter("trigger_mode", False)
         self.declare_parameter("noise_std", 0.0)
         self.declare_parameter("dropout_prob", 0.0)
-        # parabola params (base frame, z-up, metres / m·s⁻¹ / m·s⁻²)
-        self.declare_parameter("p0", [-1.0, 1.5, 0.4])
-        self.declare_parameter("v0", [1.5, -1.0, 2.5])
+        # parabola params (base_link frame, z-up, metres / m/s / m/s^2)
+        self.declare_parameter("p0", [-0.4, 1.65, 0.85])
+        self.declare_parameter("v0", [-0.05, -4.25, 0.7])
         self.declare_parameter("gravity", [0.0, 0.0, -9.81])
-        self.declare_parameter("restart_after_s", 2.0)
-        # camera pose in base (base<-camera), used only when publish_frame != base
+        self.declare_parameter("restart_after_s", 4.0)
+        # camera pose in base_link (base_link<-camera), used only when publish_frame != base_link
         self.declare_parameter("camera_translation", [0.0, 0.0, 0.0])
         self.declare_parameter("camera_quaternion", [0.0, 0.0, 0.0, 1.0])
         # csv params
@@ -97,8 +97,8 @@ class TestBallNode(Node):
         q = [float(x) for x in self.get_parameter("camera_quaternion").value]
         if t == [0.0, 0.0, 0.0] and q == [0.0, 0.0, 0.0, 1.0]:
             self.get_logger().warn(
-                "publish_frame != base but camera transform is identity; "
-                "camera-frame output will equal base coordinates"
+                "publish_frame != base_link but camera transform is identity; "
+                "camera-frame output will equal base_link coordinates"
             )
         return RigidTransform(translation=(t[0], t[1], t[2]), quaternion=(q[0], q[1], q[2], q[3]))
 
@@ -128,7 +128,7 @@ class TestBallNode(Node):
         base_pt = tuple(p0[i] + v0[i] * t + 0.5 * g[i] * t * t for i in range(3))
         if self._base_to_cam is None:
             return base_pt
-        # Express a base point in the camera frame: P^cam = R^T (P^base - t).
+        # Express a base_link point in the camera frame: P^cam = R^T (P^base_link - t).
         tx, ty, tz = self._base_to_cam.translation
         shifted = (base_pt[0] - tx, base_pt[1] - ty, base_pt[2] - tz)
         qx, qy, qz, qw = self._base_to_cam.quaternion

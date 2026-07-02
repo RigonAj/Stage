@@ -737,14 +737,14 @@
 <li><code>frame_id</code> <strong>vide ou inconnu de TF</strong> ⇒ <strong>rejet</strong> + drapeau watchdog (§9) : jamais d'hypothèse silencieuse de repère, qui enverrait la balle au mauvais endroit.</li>
 </ul>
 Gère mm→m si nécessaire.</li>
-<li><strong>Filtre de vitesse balle</strong> (Kalman, ou EMA sur différence finie) sur les positions <code>base</code> → <code>ball_vel</code>. Aucune mesure directe de vitesse n'existe : c'est le maillon bruité (cf. sim-to-real §5.2).</li>
+<li><strong>Filtre de vitesse balle</strong> (Kalman, ou EMA sur différence finie) sur les positions <code>base_link</code> → <code>ball_vel</code>. Aucune mesure directe de vitesse n'existe : c'est le maillon bruité (cf. sim-to-real §5.2).</li>
 <li><strong>Gestion de la péremption</strong> (staleness) : si plus de détection depuis <code>T_stale</code>, geler ou extrapoler brièvement, et lever un <strong>drapeau watchdog</strong> (§9).</li>
-<li><strong>TF cerceau obligatoire en commande réelle</strong> : le fallback <code>disk_pos_fallback</code> sert au dry-run/debug, mais <code>live_catch_node</code> refuse de streamer si la TF <code>base -&gt; hoop_center</code> manque en mode commande.</li>
+<li><strong>TF cerceau obligatoire en commande réelle</strong> : le fallback <code>disk_pos_fallback</code> sert au dry-run/debug, mais <code>live_catch_node</code> refuse de streamer si la TF <code>base_link -&gt; hoop_center</code> manque en mode commande.</li>
 </ul>
 
 <h4 id="4-3-2-observation-py-observationbuilder-observation-33-d">4.3.2 <code>observation.py</code> (ObservationBuilder) — observation 33-D<a class="anchor" href="#4-3-2-observation-py-observationbuilder-observation-33-d" aria-label="Lien vers cette section">#</a></h4>
 
-<p>Reconstruit l'observation <strong>dans l'ordre et les unités exacts</strong> de <code>firsttraining_env.py:197-208</code> (détail complet en §6). Miroir strict de <code>_get_observations</code>, <code>_update_local_pose_tensors</code> et <code>detect_pass_through</code> : changement de signe du plan du cerceau, rayon de trigger <code>disk_radius=0.1 m</code> pour l'export 2026-06-30, distance radiale projetée hors normale. <strong>Aucun degré</strong>, tout en rad/rad/s/m/m·s⁻¹.</p>
+<p>Reconstruit l'observation <strong>dans l'ordre et les unités exacts</strong> de <code>firsttraining_env.py:197-208</code> (détail complet en §6). Miroir strict de <code>_get_observations</code>, <code>_update_local_pose_tensors</code> et <code>detect_pass_through</code> : changement de signe du plan du cerceau, rayon de trigger <code>disk_radius=0.05 m</code> dans <code>FirstTraining</code>, distance radiale projetée hors normale. Comme Isaac met à jour <code>prev_disk_signed_dist</code> et <code>pass_through_count</code> dans <code>_get_dones()</code> avant l'observation suivante, le builder live émet le flag signé et le compteur déjà actualisés pour l'état courant. <strong>Aucun degré</strong>, tout en rad/rad/s/m/m·s⁻¹.</p>
 
 <h4 id="4-3-3-policy-runtime-py-policyrunner-inference">4.3.3 <code>policy_runtime.py</code> (PolicyRunner) — inférence<a class="anchor" href="#4-3-3-policy-runtime-py-policyrunner-inference" aria-label="Lien vers cette section">#</a></h4>
 

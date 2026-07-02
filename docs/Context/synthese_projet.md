@@ -339,7 +339,7 @@ Deux paquets portent cette boucle :
   action, securite et streaming.
 
 Le message `CatchTelemetry` expose maintenant l'observation, l'action brute, la
-cible articulaire sure, la balle en `base`, la vitesse balle, l'age perception,
+cible articulaire sure, la balle en `base_link`, la vitesse balle, l'age perception,
 le temps de calcul de boucle et l'etat `command_enabled`. La question du scaler
 de l'export courant est tranchee : le TorchScript reproduit les actions
 enregistrees sans scaler externe. Le point encore ouvert cote perception reelle

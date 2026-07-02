@@ -209,12 +209,12 @@ physique finale hand-eye et les TF statiques associes ne sont pas encore valides
 
 - `docs/Robot_Control/ur3e_camera_base_calibration.md` indique que la session
   physique reste a faire.
-- `live_catch_node.py` a besoin de TF `base -> <camera_frame>` et
-  `base -> hoop_center`; sans `hoop_center`, il utilise le fallback placeholder
+- `live_catch_node.py` a besoin de TF `base_link -> <camera_frame>` et
+  `base_link -> hoop_center`; sans `hoop_center`, il utilise le fallback placeholder
   de `live_catch.yaml`.
 - Aucun `calibration/handeye_result.yaml` versionne n'est present.
 
-**Impact :** la boucle peut etre testee avec une balle virtuelle en `base`, mais
+**Impact :** la boucle peut etre testee avec une balle virtuelle en `base_link`, mais
 pas encore avec une perception camera fiable dans le repere robot.
 
 **Correction suggeree :** executer la session hand-eye, publier

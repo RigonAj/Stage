@@ -59,16 +59,18 @@ Dans `<ISAAC_REPO>/source/FirstTraining/FirstTraining/tasks/direct/firsttraining
 - `scripts/skrl/play.py` : les nouveaux rollouts exportent la vraie cible
   `base_env.joint_pos_target` et les métadonnées `dt_s`, `action_delta_scale_rad`, `v_safe`,
   `a_safe`, bornes articulaires et nouvelle note `action_semantics`.
-- `firsttraining_env_cfg.py` : distribution de balle actuelle utilisée par
-  l'export 2026-06-30 et le bouton web UI `Isaac random` :
-  spawn `x=(-0.6,-0.2)`, `y=(1.2,2.1)`, `z=(0.5,1.2)`,
-  bruit position `0.01 m`, vitesse `vx=(-0.7,0.6)`,
-  `vy=(-5.0,-3.5)`, `vz=(-0.1,1.5)`.
+- `firsttraining_env_cfg.py` : le bouton web UI `Isaac random` est aligné sur
+  la distribution actuelle : spawn `x=(-0.6,-0.2)`, `y=(1.2,2.1)`,
+  `z=(0.5,1.2)`, bruit position `0.01 m`, vitesse `vx=(-0.7,0.6)`,
+  `vy=(-5.0,-3.5)`, `vz=(-0.1,1.5)`. Les champs visibles par défaut dans l'UI
+  utilisent le milieu de ces ranges avec `gravity=(0,0,-9.81) m/s^2` et
+  `flight_s=4.0`.
 - `data/models/` : exports `latest` et `best` du run
   `2026-06-30_19-02-25_ppo_torch`, avec TorchScript, ONNX et métadonnées ; le
   modèle canonique par défaut est `latest`. Les rollouts de validation ne sont
-  pas versionnés dans `main` et doivent être régénérés au besoin. Le run exporté
-  utilisait `disk_radius=0.1 m` (params/env.yaml).
+  pas versionnés dans `main` et doivent être régénérés au besoin. Le code
+  `FirstTraining` actuel utilise `cfg.disk_radius=0.05 m` pour le trigger de
+  passage, même si le mesh du cerceau est plus large.
 
 Conséquence importante : les anciennes policies et l'ancien
 `rollouts_10_episodes.json` sont **incompatibles** avec la nouvelle sémantique d'action

@@ -25,7 +25,8 @@ consumer/producer assumptions.
 - `observation`: 33-D policy observation.
 - `raw_action`: 6-D policy output before mapping/safety.
 - `joint_target`: safe target after mapping/limits, also filled in dry-run.
-- `ball_base`: ball position transformed into robot base.
+- `ball_base`: historical field name; ball position transformed into the current
+  policy frame `base_link`.
 - latency and command state fields are used by UI and `latency_report`.
 
 ## Topics And Producers

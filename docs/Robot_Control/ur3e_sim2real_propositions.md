@@ -113,7 +113,7 @@ croyant l'observation correcte.
 **Correction appliquée.** Le repo Isaac est maintenant disponible localement et
 `ObservationBuilder` reprend `detect_pass_through` : changement de signe dans
 n'importe quel sens, distance radiale projetée hors normale, rayon de trigger
-`disk_radius=0.1 m` pour le run exporté `2026-06-30_19-02-25`. La validation
+`disk_radius=0.05 m` dans le code `FirstTraining` actuel. La validation
 bit-à-bit complète sur nouveaux rollouts reste utile, mais la logique géométrique
 n'est plus une hypothèse.
 

@@ -152,6 +152,76 @@ run
 
 `build` sets up the ROS environment and builds the C++ package with colcon; `run` starts the `talker` node with the GUI.
 
+## UR3e Live-Catch Inference Stack
+
+Build the robot UI and live-catch packages before launching the inference stack:
+
+```bash
+source env.sh
+colcon build --symlink-install --packages-select \
+  ur3e_catch_msgs ur3e_live_catch ur3e_rollout_replay ur3e_web_ui
+source install/setup.bash
+```
+
+Recommended one-command bring-up with fake hardware:
+
+```bash
+source env.sh
+ur3e_catch_stack --fake
+```
+
+Recommended one-command bring-up on the real UR3e:
+
+```bash
+source env.sh
+UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 ur3e_catch_stack --real
+```
+
+`ur3e_catch_stack` launches the UR driver, MoveIt, `live_catch_node`,
+`test_ball_node` in trigger mode, the Isaac-matched `wrist_3_link -> hoop_center`
+TF, and the Web UI at `http://127.0.0.1:8080`. The live-catch node loads the
+default policy from `data/models/policy_deterministic.onnx` with TorchScript
+fallback, publishes telemetry, and stays in dry-run by default
+(`enable_command=false`), so no robot command is emitted until the Web UI Test
+tab explicitly enables command mode.
+
+Open the Web UI, select the **Test** tab, choose `latest` or `best` if needed,
+then use **Launch virtual ball** or **Isaac random**. To stop the stack:
+
+```bash
+ur3e_catch_stop
+```
+
+Useful variants:
+
+```bash
+# Use a specific exported policy.
+ur3e_catch_stack --fake --model-path data/models/latest/policy_deterministic.onnx
+
+# Expose the UI on the LAN or use another local port.
+UR3E_UI_HOST=0.0.0.0 ur3e_catch_stack --fake
+ur3e_catch_stack --fake --port 8081
+
+# Start in command mode only after workspace/E-stop checks.
+ur3e_catch_stack --real --model-path data/models/latest/policy_deterministic.onnx --enable-command
+```
+
+Direct ROS launch equivalents:
+
+```bash
+# Fake hardware + virtual ball + inference + UI.
+ros2 launch ur3e_live_catch virtual_ball_robot.launch.py use_fake_hardware:=true
+
+# Real robot + virtual ball + inference + UI.
+ros2 launch ur3e_live_catch virtual_ball_robot.launch.py \
+  robot_ip:=192.168.0.5 reverse_ip:=192.168.0.3 use_fake_hardware:=false
+
+# If a separate UR3e driver stack is already running, start only live-catch + test ball.
+ros2 launch ur3e_live_catch live_catch.launch.py \
+  use_test_ball:=true trigger_mode:=true publish_frame:=base_link enable_command:=false
+ros2 service call /test_ball_node/throw std_srvs/srv/Trigger {}
+```
+
 ## Notes
 
 Depth estimation is sensitive to the width measured in pixels: a small pixel error can create a large depth error, especially when the ball is far from the camera. The Trace view exposes every parameter of the supported-edge detector (`Support div/min/max`, `Support radius px`, `Border %`) and of the ribbon fit so this measurement can be inspected and tuned. See `docs/trace_algorithm_explanation.html` for the tuning guide.

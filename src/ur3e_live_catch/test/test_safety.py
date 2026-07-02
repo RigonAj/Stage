@@ -4,7 +4,13 @@ import math
 
 import pytest
 
-from ur3e_live_catch.safety import JointBound, SafetyLimiter, Watchdog
+from ur3e_live_catch.joint_order import JOINT_ORDER
+from ur3e_live_catch.safety import (
+    JointBound,
+    SafetyLimiter,
+    Watchdog,
+    start_pose_violations,
+)
 
 DT = 1.0 / 60.0
 
@@ -58,3 +64,31 @@ def test_watchdog_triggers():
 
     ok, reasons = wd.check(perception_age_s=0.0, loop_time_s=0.001, tracking_error=0.5)
     assert not ok and any("tracking" in r for r in reasons)
+
+
+def test_start_pose_ok_for_isaac_start_ranges():
+    # Isaac FirstTraining start pose extremes stay within the 3.0 rad gate.
+    q = [0.785, -2.47, 0.2, -1.77, 0.2, 0.2]
+    assert start_pose_violations(q, JOINT_ORDER, limit_rad=3.0) == []
+
+
+def test_start_pose_flags_two_pi_wrapped_wrist():
+    # The 2026-07-02 incident: /joint_states wrist_3 = 6.28321 (~+2pi) while the
+    # UR controller internally sat at ~0.0048 -> first command rejected.
+    q = [0.0, -1.57, 0.0, -1.57, 0.0, 6.28321]
+    violations = start_pose_violations(q, JOINT_ORDER, limit_rad=3.0)
+    assert len(violations) == 1
+    assert "wrist_3_joint" in violations[0]
+    assert "2π" in violations[0] or "wrapped" in violations[0]
+
+
+def test_start_pose_flags_negative_branch_too():
+    q = [0.0, -1.57, 0.0, -1.57, -6.2, 0.0]
+    violations = start_pose_violations(q, JOINT_ORDER, limit_rad=3.0)
+    assert len(violations) == 1
+    assert "wrist_2_joint" in violations[0]
+
+
+def test_start_pose_rejects_length_mismatch():
+    with pytest.raises(ValueError):
+        start_pose_violations([0.0] * 5, JOINT_ORDER, limit_rad=3.0)

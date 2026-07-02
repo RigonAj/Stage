@@ -17,7 +17,7 @@
 > process**, **smoke-test ROS des services de l'onglet Test** (`~/throw` arme/désarme
 > un vol ; `~/enable_command` refusé proprement sans modèle), et — avec
 > `torch 2.12.1+cpu` installé dans `.venv` (uv, py3.10) — **toute la chaîne réelle**
-> `test_ball_node` (balle en `base`) → obs → **vraie policy** → safety, en dry-run
+> `test_ball_node` (balle en `base_link`) → obs → **vraie policy** → safety, en dry-run
 > (238 msgs en 4 s, actions non nulles, pass-through qui s'incrémente, cibles sûres
 > bornées). **Question scaler tranchée** : la policy reproduit `action_normalized` à
 > **max |Δ| = 4.6e-6** sans scaler externe → le `.ts` embarque le scaler, **aucun
@@ -71,7 +71,7 @@ mono-processus retenue (§2 du plan).
 | 1 | `ur3e_catch_msgs` (`BallState`, `CatchTelemetry`) | ✅ implémenté (+ champs latence/vitesse balle) |
 | 2 | `test_ball_node` + fallback legacy `Float32 → BallState` | ✅ implémenté |
 | 3 | `ball_frame` conscient du repère + filtre vitesse | ✅ implémenté (TF statiques à fournir au lancement) |
-| 4 | `ObservationBuilder` 33-D + test d'équivalence | ✅ implémenté ; pass-through aligné sur Isaac (`disk_radius=0.1 m` pour l'export 2026-06-30) |
+| 4 | `ObservationBuilder` 33-D + test d'équivalence | ✅ implémenté ; pass-through aligné sur Isaac (`disk_radius=0.05 m` dans `FirstTraining`) |
 | 5 | `PolicyRunner` (question scaler) → action en dry-run | ✅ implémenté ; **scaler tranché** : pas de scaler externe requis (`.ts` l'embarque, Δ=4.6e-6) |
 | 6 | `ActionMapper` + safety + streaming | ✅ **câblé** (flag `enable_command`, défaut dry-run) + `limits.py`/`streaming.py` + tests |
 | 7 | Bascule contrôleur + viz web UI | ✅ bascule auto dans le nœud (§8) ; marqueur balle + arc prédit + télémétrie dans le web UI |
@@ -96,9 +96,9 @@ mono-processus retenue (§2 du plan).
      simple `q + clamp(action,-1,1) * v_safe * dt`.
 3. **Source Isaac fournie par l'utilisateur** (`firsttraining_env.py`,
    `firsttraining_env_cfg.py`) → composantes obs **3 / 8 / 10** finalisées d'après
-   ces fichiers. Pour l'export 2026-06-30, `disk_radius=0.1 m` est gravé dans
+   ces fichiers. Pour l'export courant, `disk_radius=0.05 m` est gravé dans
    `policy_metadata.json` et le nœud refuse la commande si la TF
-   `base -> hoop_center` manque.
+   `base_link -> hoop_center` manque.
 
 ### Découverte clé (confirmée sur les rollouts enregistrés)
 Les anciens `rollouts_10_episodes.json` ont permis de vérifier le contrat
@@ -193,7 +193,7 @@ l'ordre exact, avec les indices de tranche exposés en constantes (`IDX_*`) :
 |---|---|---|---|
 | `[0:6]` | 1 | `joint_pos` | `/joint_states` réordonné |
 | `[6:12]` | 2 | `joint_vel` | `/joint_states` |
-| `[12:15]` | 3 | `disk_pos_local` | pose disque (TF `base -> hoop_center`) |
+| `[12:15]` | 3 | `disk_pos_local` | pose disque (TF `base_link -> hoop_center`) |
 | `[15:18]` | 4 | `ball_pos_local` | `ball_frame` |
 | `[18:21]` | 5 | `direction` = ball−disk | dérivé |
 | `[21]` | 6 | `distance` = ‖direction‖ | dérivé |

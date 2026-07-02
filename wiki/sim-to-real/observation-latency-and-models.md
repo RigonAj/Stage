@@ -1,6 +1,6 @@
 # Observation Latency And Models
 
-> Sources: sim-to-real plan, 2026-06-30; live-catch implementation status, 2026-06-30; sim-to-real proposals, 2026-06-30; model README, 2026-06-30
+> Sources: sim-to-real plan, 2026-07-01; live-catch implementation status, 2026-06-30; sim-to-real proposals, 2026-06-30; model README, 2026-07-01
 > Raw: [Sim-to-real plan](../../docs/Robot_Control/ur3e_ball_catch_sim_to_real.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Proposals](../../docs/Robot_Control/ur3e_sim2real_propositions.md); [Model README](../../data/models/README.md)
 
 ## Overview
@@ -14,14 +14,19 @@ easy to mix up with training decisions.
 The live node reconstructs the 33-D PPO observation from:
 
 - robot joint positions and velocities;
-- ball position in `base`;
-- filtered ball velocity;
-- hoop/disk position;
+- ball position in `base_link`, matching Isaac FirstTraining's local frame;
+- filtered ball velocity, which is equivalent to world velocity because the
+  Isaac local frame differs from world by a constant environment origin;
+- hoop/disk position in `base_link`;
 - pass-through state;
 - previous policy action according to the model contract: raw action for legacy
   absolute exports, clipped action for current incremental Isaac exports.
-- disk trigger radius. The current 2026-06-30 export used `disk_radius_m=0.1`,
-  now carried in `policy_metadata.json`.
+- disk trigger radius. The current metadata carries `disk_radius_m=0.05`, hoop
+  offset `(-0.5, 0, 0)` in `wrist_3_link`, and hoop normal `(0, 0, -1)`.
+- pass-through ordering. Isaac updates `prev_disk_signed_dist` and
+  `pass_through_count` in `_get_dones()` before the next observation, so the live
+  builder emits the current signed flag and updated pass count for the current
+  ball/disk state.
 
 The ordering and units must mirror the Isaac environment. Any change here needs
 tests against recorded rollout or exported policy expectations.
@@ -45,10 +50,18 @@ rules:
   `data/models/best` contains the matching latest `best_agent.pt` export.
 - The root `data/models/policy_deterministic.ts` is a copy of `latest` and is
   loaded by default.
+- The Web UI Test tab can switch between `latest` and `best`; the backend only
+  exposes these named folders and prefers ONNX before TorchScript. If an
+  explicit ONNX path fails to load because `onnxruntime` is unavailable,
+  `live_catch_node` tries the sibling TorchScript export.
+- On a model switch, `live_catch_node` validates metadata, reloads the policy,
+  rebuilds the observation/action/safety state, and resets dry-run policy state.
+  It rejects model switches while command mode is active.
 - Model metadata encodes action semantics so the live node selects the correct
   mapper.
 - Current Isaac exports should include `rollout_schema_version`, `dt_s`,
-  `joint_names`, action semantics, `disk_radius_m` and per-joint safety limits.
+  `joint_names`, `observation_frame=base_link`, action semantics,
+  disk/ball-distribution metadata and per-joint safety limits.
   Legacy metadata without those fields is insufficient for V1 sim-to-real validation.
 - The SKRL policy for the current export used `clip_actions=false`; clipping
   happens in Isaac's env and in Stage's incremental mapper.

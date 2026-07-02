@@ -9,6 +9,7 @@ from ur3e_live_catch.limits import (
     JointLimit,
     build_joint_bounds,
     nominal_ur3e_limits,
+    scale_bounds,
     v_safe_vector,
 )
 
@@ -58,3 +59,22 @@ def test_bad_factor_and_accel():
         build_joint_bounds(nominal_ur3e_limits(), v_safe_factor=1.5)
     with pytest.raises(ValueError):
         build_joint_bounds(nominal_ur3e_limits(), a_safe=0.0)
+
+
+def test_scale_bounds_halves_velocity_and_accel_only():
+    bounds = build_joint_bounds(nominal_ur3e_limits(), v_safe_factor=1.0, a_safe=10.0)
+    scaled = scale_bounds(bounds, 0.5)
+    for b, s in zip(bounds, scaled):
+        assert s.v_safe == pytest.approx(b.v_safe * 0.5)
+        assert s.a_safe == pytest.approx(b.a_safe * 0.5)
+        assert s.min_position == pytest.approx(b.min_position)
+        assert s.max_position == pytest.approx(b.max_position)
+
+
+def test_scale_bounds_identity_and_validation():
+    bounds = build_joint_bounds(nominal_ur3e_limits())
+    assert scale_bounds(bounds, 1.0) == list(bounds)
+    with pytest.raises(ValueError):
+        scale_bounds(bounds, 0.0)
+    with pytest.raises(ValueError):
+        scale_bounds(bounds, 1.5)

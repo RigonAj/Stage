@@ -18,7 +18,9 @@ Three modes behind a config flag (user decision; default ``faithful``):
              per-joint velocity, acceleration and position limits. Stores the
              CLIPPED action as comp 9, matching ``firsttraining_env``.
 
-This module only maps; it does NOT enforce limits — :mod:`safety` does.
+This module maps the policy contract. In incremental mode it mirrors Isaac's
+target-integrator clamps; :mod:`safety` still applies the final robot-side
+command limiting.
 """
 
 from __future__ import annotations

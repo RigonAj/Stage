@@ -9,11 +9,18 @@ const THREE_TO_ROS_Q = ROS_TO_THREE_Q.clone().invert();
 const BASE_TO_BASE_LINK_Q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, Math.PI, "XYZ"));
 const BASE_LINK_TO_BASE_Q = BASE_TO_BASE_LINK_Q.clone().invert();
 
-// Velocity gizmo: zero-rotation reference points along base +Z (THREE +Y = up), and
+// Velocity gizmo: zero-rotation reference points along base_link +Z (THREE +Y = up), and
 // the throwable speed is clamped so the ball stays in a sane range (m/s).
 const VEL_REF_DIR = new THREE.Vector3(0, 1, 0);
 const VEL_SPEED_MIN = 0.2;
-const VEL_SPEED_MAX = 9.0;
+const VEL_SPEED_MAX = 10.0;
+const ISAAC_HOOP_LINK = "wrist_3_link";
+const ISAAC_HOOP_CENTER_M = [-0.5, 0.0, 0.0];
+const ISAAC_HOOP_NORMAL = [0.0, 0.0, -1.0];
+const ISAAC_HOOP_VISUAL_RADIUS_M = 0.15;
+const ISAAC_HOOP_VALIDATION_RADIUS_M = 0.05;
+const ISAAC_HOOP_TUBE_RADIUS_M = 0.01;
+const ISAAC_HOOP_ROD_RADIUS_M = 0.008;
 
 export class Viewer3D {
   constructor(container) {
@@ -37,7 +44,7 @@ export class Viewer3D {
     // Mouse control of v0: "move" drags p0 (translate), "aim" rotates the velocity
     // direction (rotate gizmo), "speed" scales its norm (scale gizmo). Only one
     // gizmo is shown at a time. _velDir is a unit vector in THREE space, _velSpeed
-    // its magnitude in m/s; together they encode v0 (base) via _velBase().
+    // its magnitude in m/s; together they encode v0 (base_link) via _velBaseLink().
     this.ballVelocityHandle = null;
     this.ballVelocityControls = null;
     this.ballLaunchMode = "move";
@@ -46,6 +53,7 @@ export class Viewer3D {
     this._velScaleRefSpeed = 0;
     this._velDragging = false;
     this._flightHorizon = 2.0;  // predicted-arc length = test_ball restart_after_s (s)
+    this._ballGravity = [0.0, 0.0, -9.81];
     this.ghostMaterialApplied = false;
     this.replayGhostMaterialApplied = false;
     this.policyGhostMaterialApplied = false;
@@ -97,23 +105,108 @@ export class Viewer3D {
     loader.packages = { ur_description: "/pkg/ur_description" };
 
     this.robot = loader.parse(urdfText);
-    this.robot.rotation.x = -Math.PI / 2; // ROS Z-up -> three.js Y-up
+    this.orientRobotRoot(this.robot);
+    this.attachIsaacHoop(this.robot, "robot");
     this.scene.add(this.robot);
 
     this.ghost = loader.parse(urdfText);
-    this.ghost.rotation.x = -Math.PI / 2;
+    this.orientRobotRoot(this.ghost);
+    this.attachIsaacHoop(this.ghost, "ghost");
     this.ghost.visible = false;
     this.scene.add(this.ghost);
 
     this.replayGhost = loader.parse(urdfText);
-    this.replayGhost.rotation.x = -Math.PI / 2;
+    this.orientRobotRoot(this.replayGhost);
+    this.attachIsaacHoop(this.replayGhost, "ghost");
     this.replayGhost.visible = false;
     this.scene.add(this.replayGhost);
 
     this.policyGhost = loader.parse(urdfText);
-    this.policyGhost.rotation.x = -Math.PI / 2;
+    this.orientRobotRoot(this.policyGhost);
+    this.attachIsaacHoop(this.policyGhost, "ghost");
     this.policyGhost.visible = false;
     this.scene.add(this.policyGhost);
+  }
+
+  orientRobotRoot(root) {
+    // The URDF root is `base_link`, same as Isaac FirstTraining's identity frame.
+    // UR's `base` frame is a fixed child rotated pi about Z, so applying
+    // BASE_TO_BASE_LINK_Q here would turn the displayed robot 180 deg away from Isaac.
+    root.quaternion.copy(ROS_TO_THREE_Q);
+  }
+
+  attachIsaacHoop(root, kind = "robot") {
+    const link = root.links && root.links[ISAAC_HOOP_LINK];
+    if (!link) {
+      console.warn(`${ISAAC_HOOP_LINK} link not found in the URDF; Isaac hoop visual skipped`);
+      return;
+    }
+    link.add(this.buildIsaacHoop(kind));
+  }
+
+  buildIsaacHoop(kind = "robot") {
+    const isGhost = kind !== "robot";
+    const hoopGroup = new THREE.Group();
+    hoopGroup.name = "isaac_hoop_visual";
+
+    const hoopMaterial = new THREE.MeshStandardMaterial({
+      color: isGhost ? 0x35d39a : 0xf0d060,
+      emissive: isGhost ? 0x00301f : 0x2c2100,
+      roughness: 0.34,
+      transparent: isGhost,
+      opacity: isGhost ? 0.35 : 0.95,
+      depthWrite: !isGhost,
+      side: THREE.DoubleSide,
+    });
+    const validationMaterial = new THREE.MeshBasicMaterial({
+      color: 0x59d7ff,
+      transparent: true,
+      opacity: isGhost ? 0.22 : 0.45,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const [cx, cy, cz] = ISAAC_HOOP_CENTER_M;
+    const centerGroup = new THREE.Group();
+    centerGroup.position.set(cx, cy, cz);
+    // Three.js torus normals start on +Z. Isaac's disk normal is -Z in wrist_3_link;
+    // rotating by pi around X preserves the disk plane and matches that signed normal.
+    centerGroup.rotation.x = Math.PI;
+
+    const hoop = new THREE.Mesh(
+      new THREE.TorusGeometry(ISAAC_HOOP_VISUAL_RADIUS_M, ISAAC_HOOP_TUBE_RADIUS_M, 16, 96),
+      hoopMaterial,
+    );
+    centerGroup.add(hoop);
+
+    const validationRing = new THREE.Mesh(
+      new THREE.TorusGeometry(ISAAC_HOOP_VALIDATION_RADIUS_M, 0.002, 8, 64),
+      validationMaterial,
+    );
+    validationRing.name = "isaac_hoop_validation_radius";
+    centerGroup.add(validationRing);
+    hoopGroup.add(centerGroup);
+
+    const rodLength = Math.max(0.0, Math.abs(cx) - ISAAC_HOOP_VISUAL_RADIUS_M);
+    if (rodLength > 0.0) {
+      const rod = new THREE.Mesh(
+        new THREE.CylinderGeometry(ISAAC_HOOP_ROD_RADIUS_M, ISAAC_HOOP_ROD_RADIUS_M, rodLength, 16),
+        hoopMaterial,
+      );
+      rod.name = "isaac_hoop_support_rod";
+      rod.rotation.z = Math.PI / 2;
+      rod.position.set(cx + Math.sign(-cx) * (ISAAC_HOOP_VISUAL_RADIUS_M + rodLength / 2), cy, cz);
+      hoopGroup.add(rod);
+    }
+
+    hoopGroup.userData = {
+      frame: ISAAC_HOOP_LINK,
+      center_m: ISAAC_HOOP_CENTER_M,
+      normal: ISAAC_HOOP_NORMAL,
+      visual_radius_m: ISAAC_HOOP_VISUAL_RADIUS_M,
+      validation_radius_m: ISAAC_HOOP_VALIDATION_RADIUS_M,
+    };
+    return hoopGroup;
   }
 
   buildTargetFrame() {
@@ -328,6 +421,15 @@ export class Viewer3D {
     return new THREE.Vector3(-x, z, y);
   }
 
+  // base_link (x,y,z) -> three.js (x, z, -y): ROS Z-up -> three.js Y-up.
+  baseLinkToThree(x, y, z) {
+    return new THREE.Vector3(x, z, -y);
+  }
+
+  baseLinkVectorToThree(x, y, z) {
+    return new THREE.Vector3(x, z, -y);
+  }
+
   buildBall() {
     this.ballGroup = new THREE.Group();
     this.ballGroup.visible = false;
@@ -366,8 +468,8 @@ export class Viewer3D {
 
     const axes = [
       { label: "X", direction: new THREE.Vector3(1, 0, 0), color: 0xff4b4b, labelPosition: [0.18, 0, 0] },
-      { label: "Y", direction: new THREE.Vector3(0, 1, 0), color: 0x41c97f, labelPosition: [0, 0.18, 0] },
-      { label: "Z", direction: new THREE.Vector3(0, 0, 1), color: 0x4fa3ff, labelPosition: [0, 0, 0.18] },
+      { label: "Y", direction: new THREE.Vector3(0, 0, -1), color: 0x41c97f, labelPosition: [0, 0, -0.18] },
+      { label: "Z", direction: new THREE.Vector3(0, 1, 0), color: 0x4fa3ff, labelPosition: [0, 0.18, 0] },
     ];
     for (const axis of axes) {
       this.ballLaunchFrame.add(new THREE.ArrowHelper(axis.direction, new THREE.Vector3(), 0.16, axis.color, 0.04, 0.022));
@@ -475,10 +577,10 @@ export class Viewer3D {
       const s = (Math.abs(scale.x) + Math.abs(scale.y) + Math.abs(scale.z)) / 3;
       this._velSpeed = THREE.MathUtils.clamp(this._velScaleRefSpeed * s, VEL_SPEED_MIN, VEL_SPEED_MAX);
     }
-    this.updateBallLaunchVelocity(this._velBase());
+    this.updateBallLaunchVelocity(this._velBaseLink());
     if (this.ballLaunchFrame) {
       const p = this.ballLaunchFrame.position;
-      this.updateBallLaunchPath([-p.x, p.z, p.y], this._velBase());
+      this.updateBallLaunchPath([p.x, -p.z, p.y], this._velBaseLink());
     }
     if (this.ballLaunchCallback) this.ballLaunchCallback(this.getBallLaunchConfig());
   }
@@ -491,10 +593,10 @@ export class Viewer3D {
     this._syncVelocityHandle();
   }
 
-  // v0 in base coords from the current direction/speed (THREE<->base is an involution).
-  _velBase() {
+  // v0 in base_link coords from the current direction/speed.
+  _velBaseLink() {
     const v = this._velDir.clone().multiplyScalar(this._velSpeed);
-    return [-v.x, v.z, v.y];
+    return [v.x, -v.z, v.y];
   }
 
   enableBallLaunchFrame(callback) {
@@ -517,18 +619,19 @@ export class Viewer3D {
     if (!this.ballLaunchFrame || !config || !config.p0 || !config.v0) return;
     this.ballLaunchUpdateMuted = true;
     if (config.flight_s != null) this._flightHorizon = config.flight_s;
+    if (config.gravity) this._ballGravity = [...config.gravity];
     const [x, y, z] = config.p0;
-    this.ballLaunchFrame.position.copy(this.baseToThree(x, y, z));
+    this.ballLaunchFrame.position.copy(this.baseLinkToThree(x, y, z));
     // During a velocity-gizmo drag the gizmo owns _velDir/_velSpeed; only ingest v0
     // from config when set programmatically (panel inputs, reset, initial load).
     if (!this._velDragging) {
-      const vThree = this.baseVectorToThree(config.v0[0], config.v0[1], config.v0[2]);
+      const vThree = this.baseLinkVectorToThree(config.v0[0], config.v0[1], config.v0[2]);
       this._velSpeed = vThree.length();
       this._velDir = this._velSpeed > 1e-6 ? vThree.clone().normalize() : new THREE.Vector3(0, 1, 0);
       this._velScaleRefSpeed = this._velSpeed;
     }
     this.updateBallLaunchVelocity(config.v0);
-    this.updateBallLaunchPath(config.p0, config.v0);
+    this.updateBallLaunchPath(config.p0, config.v0, this._ballGravity);
     this.ballLaunchFrame.visible = true;
     if (this.ballLaunchPath) this.ballLaunchPath.visible = true;
     this._syncVelocityHandle();
@@ -539,27 +642,27 @@ export class Viewer3D {
   updateBallLaunchVelocity(v0) {
     if (!this.ballLaunchVelocity) return;
     const [vx, vy, vz] = v0;
-    const velocity = this.baseVectorToThree(vx, vy, vz);
+    const velocity = this.baseLinkVectorToThree(vx, vy, vz);
     const speed = velocity.length();
     const direction = speed > 1e-6 ? velocity.clone().normalize() : new THREE.Vector3(0, 1, 0);
     this.ballLaunchVelocity.setDirection(direction);
     this.ballLaunchVelocity.setLength(Math.max(0.08, Math.min(0.65, speed * 0.12)), 0.07, 0.035);
   }
 
-  updateBallLaunchPath(p0, v0) {
+  updateBallLaunchPath(p0, v0, gravity = this._ballGravity) {
     if (!this.ballLaunchPath) return;
     const [x, y, z] = p0;
     const [vx, vy, vz] = v0;
+    const [gx, gy, gz] = gravity || [0.0, 0.0, -9.81];
     const points = [];
     const horizon = this._flightHorizon || 1.2;  // arc spans the configured flight time
     const steps = Math.max(36, Math.round(horizon * 24));
-    const g = -9.81;
     for (let i = 0; i <= steps; i++) {
       const t = (i / steps) * horizon;
-      points.push(this.baseToThree(
-        x + vx * t,
-        y + vy * t,
-        z + vz * t + 0.5 * g * t * t,
+      points.push(this.baseLinkToThree(
+        x + vx * t + 0.5 * gx * t * t,
+        y + vy * t + 0.5 * gy * t * t,
+        z + vz * t + 0.5 * gz * t * t,
       ));
     }
     this.ballLaunchPath.geometry.setFromPoints(points);
@@ -568,12 +671,13 @@ export class Viewer3D {
   getBallLaunchConfig() {
     const position = this.ballLaunchFrame.position;
     return {
-      p0: [-position.x, position.z, position.y],
-      v0: this._velBase(),
+      p0: [position.x, -position.z, position.y],
+      v0: this._velBaseLink(),
+      gravity: [...this._ballGravity],
     };
   }
 
-  // catch: {ball_base:[x,y,z], ball_vel_base:[vx,vy,vz]} in the robot base frame
+  // catch: {ball_base:[x,y,z], ball_vel_base:[vx,vy,vz]} in the policy base_link frame
   // (CatchTelemetry). Draws the ball marker and a short ballistic prediction arc.
   setCatch(catchInfo) {
     if (!catchInfo || !catchInfo.ball_base) {
@@ -583,7 +687,7 @@ export class Viewer3D {
     }
     if (!this.ballGroup) this.buildBall();
     const [bx, by, bz] = catchInfo.ball_base;
-    this.ballMarker.position.copy(this.baseToThree(bx, by, bz));
+    this.ballMarker.position.copy(this.baseLinkToThree(bx, by, bz));
 
     const v = catchInfo.ball_vel_base || [0, 0, 0];
     const points = [];
@@ -595,7 +699,7 @@ export class Viewer3D {
       const px = bx + v[0] * t;
       const py = by + v[1] * t;
       const pz = bz + v[2] * t + 0.5 * g * t * t;
-      points.push(this.baseToThree(px, py, pz));
+      points.push(this.baseLinkToThree(px, py, pz));
     }
     this.ballPath.geometry.setFromPoints(points);
     this.ballGroup.visible = true;

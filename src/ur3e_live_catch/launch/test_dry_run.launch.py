@@ -1,4 +1,4 @@
-"""Dry-run launch: test_ball_node (publish_frame=base) + live_catch_node (archi step 2–5).
+"""Dry-run launch: test_ball_node (publish_frame=base_link) + live_catch_node.
 
 No robot command is emitted. ``/joint_states`` must come from somewhere — bring up
 ``use_fake_hardware:=true`` or URSim separately, or remap to a stub publisher.
@@ -23,8 +23,8 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            "publish_frame", default_value="base",
-            description="Frame the test ball is published in: base | <camera_frame>",
+            "publish_frame", default_value="base_link",
+            description="Frame the test ball is published in: base_link | <camera_frame>",
         ),
         Node(
             package="ur3e_live_catch",

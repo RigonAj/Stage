@@ -13,7 +13,7 @@ joint targets and optionally streams commands to the robot.
 
 ```text
 BallState + /joint_states
-  -> ball_frame
+  -> ball_frame (frame_id -> base_link)
   -> ObservationBuilder
   -> PolicyRunner
   -> ActionMapper
@@ -39,12 +39,15 @@ topics, to reduce latency.
 
 - `enable_command=false` is the safe default.
 - Unknown or empty `BallState.header.frame_id` must be rejected.
+- Current FirstTraining exports declare `observation_frame=base_link`; the live
+  node default `base_frame` and `test_ball_node` default `publish_frame` match it.
 - `BallState` should be native from `ball_tracking_cpp`; the legacy adapter is a
   fallback for old builds.
 - Command mode must refuse to run when no policy model is loaded.
 - Current Isaac exports use metadata-driven incremental action mapping; legacy
   absolute exports remain supported for fallback/debug only.
-- The disk fallback is dry-run/debug only; command mode requires `base -> hoop_center`.
+- The disk fallback is dry-run/debug only; command mode requires
+  `base_link -> hoop_center`.
 - Safety remains independent from policy output.
 
 ## See Also

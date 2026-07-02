@@ -60,6 +60,8 @@ THROW_SERVICE = "/test_ball_node/throw"            # std_srvs/Trigger (Test tab 
 TEST_BALL_GET_PARAMETERS_SERVICE = "/test_ball_node/get_parameters"
 TEST_BALL_SET_PARAMETERS_SERVICE = "/test_ball_node/set_parameters"
 ENABLE_COMMAND_SERVICE = "/live_catch_node/enable_command"  # std_srvs/SetBool (real-robot toggle)
+LIVE_CATCH_GET_PARAMETERS_SERVICE = "/live_catch_node/get_parameters"
+LIVE_CATCH_SET_PARAMETERS_SERVICE = "/live_catch_node/set_parameters"
 
 DASHBOARD_COMMANDS = ("play", "stop", "power_on", "power_off", "brake_release")
 
@@ -133,6 +135,7 @@ class StateSnapshot:
     catch_throw_ready: bool = False      # test_ball ~/throw service reachable
     catch_config_ready: bool = False     # test_ball parameter services reachable
     catch_command_ready: bool = False    # live_catch ~/enable_command service reachable
+    catch_model_ready: bool = False      # live_catch parameter services reachable
 
     @property
     def joint_states_alive(self) -> bool:
@@ -182,6 +185,8 @@ class RosBridge:
         self._test_ball_get_params_client: Any = None
         self._test_ball_set_params_client: Any = None
         self._enable_command_client: Any = None
+        self._live_catch_get_params_client: Any = None
+        self._live_catch_set_params_client: Any = None
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -219,6 +224,8 @@ class RosBridge:
         self._test_ball_get_params_client = node.create_client(GetParameters, TEST_BALL_GET_PARAMETERS_SERVICE)
         self._test_ball_set_params_client = node.create_client(SetParameters, TEST_BALL_SET_PARAMETERS_SERVICE)
         self._enable_command_client = node.create_client(SetBool, ENABLE_COMMAND_SERVICE)
+        self._live_catch_get_params_client = node.create_client(GetParameters, LIVE_CATCH_GET_PARAMETERS_SERVICE)
+        self._live_catch_set_params_client = node.create_client(SetParameters, LIVE_CATCH_SET_PARAMETERS_SERVICE)
         for command in DASHBOARD_COMMANDS:
             self._dashboard_clients[command] = node.create_client(Trigger, f"/dashboard_client/{command}")
 
@@ -316,6 +323,12 @@ class RosBridge:
         command_ready = (
             self._enable_command_client is not None and self._enable_command_client.service_is_ready()
         )
+        model_ready = (
+            self._live_catch_get_params_client is not None
+            and self._live_catch_get_params_client.service_is_ready()
+            and self._live_catch_set_params_client is not None
+            and self._live_catch_set_params_client.service_is_ready()
+        )
         with self._lock:
             self._snapshot.tcp_xyz = tcp_xyz
             self._snapshot.tcp_rpy = tcp_rpy
@@ -326,6 +339,7 @@ class RosBridge:
             self._snapshot.catch_throw_ready = throw_ready
             self._snapshot.catch_config_ready = config_ready
             self._snapshot.catch_command_ready = command_ready
+            self._snapshot.catch_model_ready = model_ready
 
         self._controller_poll_tick += 1
         if self._controller_poll_tick >= CONTROLLER_POLL_TICKS:
@@ -600,30 +614,32 @@ class RosBridge:
         return bool(response.success), str(response.message)
 
     async def get_test_ball_config(self) -> dict:
-        """Read the virtual ball p0, v0 and flight duration (restart_after_s)."""
+        """Read the virtual ball p0, v0, gravity and flight duration."""
         client = self._test_ball_get_params_client
         if client is None or not client.service_is_ready():
             raise ActionServerUnavailable(
                 f"test ball parameter service not available: {TEST_BALL_GET_PARAMETERS_SERVICE}"
             )
         request = GetParameters.Request()
-        request.names = ["p0", "v0", "restart_after_s"]
+        request.names = ["p0", "v0", "gravity", "restart_after_s"]
         response = await self._await_ros_future(client.call_async(request))
-        if len(response.values) != 3:
-            raise RuntimeError("test_ball_node did not return p0, v0 and restart_after_s")
+        if len(response.values) != 4:
+            raise RuntimeError("test_ball_node did not return p0, v0, gravity and restart_after_s")
         return {
             "p0": _parameter_value_to_vector(response.values[0], "p0"),
             "v0": _parameter_value_to_vector(response.values[1], "v0"),
-            "flight_s": _parameter_value_to_scalar(response.values[2], "restart_after_s"),
+            "gravity": _parameter_value_to_vector(response.values[2], "gravity"),
+            "flight_s": _parameter_value_to_scalar(response.values[3], "restart_after_s"),
         }
 
     async def set_test_ball_config(
         self,
         p0: Sequence[float],
         v0: Sequence[float],
+        gravity: Sequence[float] | None = None,
         flight_s: float | None = None,
     ) -> tuple[bool, str]:
-        """Update the virtual ball launch point, velocity and flight duration."""
+        """Update the virtual ball launch point, velocity, gravity and flight duration."""
         client = self._test_ball_set_params_client
         if client is None or not client.service_is_ready():
             raise ActionServerUnavailable(
@@ -634,6 +650,8 @@ class RosBridge:
             _double_array_parameter("p0", p0),
             _double_array_parameter("v0", v0),
         ]
+        if gravity is not None:
+            request.parameters.append(_double_array_parameter("gravity", gravity))
         if flight_s is not None:
             request.parameters.append(_double_parameter("restart_after_s", flight_s))
         response = await self._await_ros_future(client.call_async(request))
@@ -653,6 +671,35 @@ class RosBridge:
         request.data = bool(enable)
         response = await self._await_ros_future(client.call_async(request))
         return bool(response.success), str(response.message)
+
+    async def get_live_catch_model_path(self) -> str:
+        """Read live_catch_node.model_path."""
+        client = self._live_catch_get_params_client
+        if client is None or not client.service_is_ready():
+            raise ActionServerUnavailable(
+                f"live-catch parameter service not available: {LIVE_CATCH_GET_PARAMETERS_SERVICE}"
+            )
+        request = GetParameters.Request()
+        request.names = ["model_path"]
+        response = await self._await_ros_future(client.call_async(request))
+        if len(response.values) != 1:
+            raise RuntimeError("live_catch_node did not return model_path")
+        return _parameter_value_to_string(response.values[0], "model_path")
+
+    async def set_live_catch_model_path(self, model_path: str) -> tuple[bool, str]:
+        """Update live_catch_node.model_path; the node validates and loads it atomically."""
+        client = self._live_catch_set_params_client
+        if client is None or not client.service_is_ready():
+            raise ActionServerUnavailable(
+                f"live-catch parameter service not available: {LIVE_CATCH_SET_PARAMETERS_SERVICE}"
+            )
+        request = SetParameters.Request()
+        request.parameters = [_string_parameter("model_path", model_path)]
+        response = await self._await_ros_future(client.call_async(request))
+        for result in response.results:
+            if not result.successful:
+                return False, result.reason or "live_catch_node rejected model_path"
+        return True, "policy model updated"
 
 
 def _duration_from_seconds(seconds: float) -> Duration:
@@ -680,12 +727,28 @@ def _double_parameter(name: str, value: float) -> Parameter:
     return parameter
 
 
+def _string_parameter(name: str, value: str) -> Parameter:
+    parameter = Parameter()
+    parameter.name = name
+    parameter.value = ParameterValue(
+        type=ParameterType.PARAMETER_STRING,
+        string_value=str(value),
+    )
+    return parameter
+
+
 def _parameter_value_to_scalar(value: ParameterValue, name: str) -> float:
     if value.type == ParameterType.PARAMETER_DOUBLE:
         return float(value.double_value)
     if value.type == ParameterType.PARAMETER_INTEGER:
         return float(value.integer_value)
     raise RuntimeError(f"test_ball_node parameter {name} is not a number")
+
+
+def _parameter_value_to_string(value: ParameterValue, name: str) -> str:
+    if value.type == ParameterType.PARAMETER_STRING:
+        return str(value.string_value)
+    raise RuntimeError(f"live_catch_node parameter {name} is not a string")
 
 
 def _parameter_value_to_vector(

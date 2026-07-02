@@ -169,8 +169,8 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "publish_frame",
-                default_value="base",
-                description="Frame used by test_ball_node: base | <camera_frame>.",
+                default_value="base_link",
+                description="Frame used by test_ball_node: base_link | <camera_frame>.",
             ),
             DeclareLaunchArgument(
                 "trigger_mode",
@@ -184,21 +184,21 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "publish_hoop_tf",
-                default_value="false",
+                default_value="true",
                 description=(
-                    "Publish wrist_3_link -> hoop_center static TF. Keep false "
-                    "until the real hoop geometry is measured."
+                    "Publish wrist_3_link -> hoop_center static TF using the "
+                    "Isaac-matched hoop geometry unless overridden."
                 ),
             ),
             DeclareLaunchArgument(
                 "hoop_xyz",
-                default_value="0.0 0.0 0.0",
+                default_value="-0.5 0.0 0.0",
                 description="Static hoop translation x y z in wrist_3_link, metres.",
             ),
             DeclareLaunchArgument(
                 "hoop_quat",
-                default_value="0.0 0.0 0.0 1.0",
-                description="Static hoop quaternion qx qy qz qw in wrist_3_link.",
+                default_value="1.0 0.0 0.0 0.0",
+                description="Static hoop quaternion qx qy qz qw in wrist_3_link; maps +Z to Isaac normal -Z.",
             ),
             OpaqueFunction(function=_launch_driver),
             IncludeLaunchDescription(

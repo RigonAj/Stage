@@ -5,8 +5,8 @@ Pure logic, no rclpy / no numpy: the rigid-body transform is passed *as data*
 is unit-testable off-robot. The live node supplies the transform via tf2.
 
 Design rule (archi §4.3.1, §7): the consumer is **frame-aware and never assumes
-the camera**. It transforms ``header.frame_id -> base``:
-  - ``frame_id == base``           -> identity (ball already in base);
+the camera**. It transforms ``header.frame_id -> base_link`` by default:
+  - ``frame_id == base_frame``     -> identity (ball already in the policy frame);
   - any other frame                -> apply the supplied transform (e.g. hand-eye);
   - empty / unknown frame          -> caller rejects (raise), never guess.
 """
@@ -58,11 +58,11 @@ def _quat_rotate(q: Sequence[float], v: Sequence[float]) -> Vec3:
 
 
 class BallVelocityFilter:
-    """Filtered ball velocity from finite differences of base positions.
+    """Filtered ball velocity from finite differences of policy-frame positions.
 
     No direct velocity measurement exists — this is the noisy link (sim-to-real
-    §5.2). Because base = world - constant env origin, the finite difference of
-    base positions IS the world velocity ``ball_vel_w`` (archi §6 note).
+    §5.2). Because Isaac local = world - constant env origin, the finite
+    difference of base_link positions IS the world velocity ``ball_vel_w``.
     """
 
     def __init__(self, ema_alpha: float = 0.5, max_dt: float = 0.5) -> None:
@@ -103,11 +103,11 @@ class FrameError(ValueError):
 
 
 class BallFrameTransformer:
-    """Transform a declared ball position into ``base`` and filter its velocity."""
+    """Transform a declared ball position into the policy frame and filter velocity."""
 
     def __init__(
         self,
-        base_frame: str = "base",
+        base_frame: str = "base_link",
         *,
         units: str = "m",
         ema_alpha: float = 0.5,
@@ -127,9 +127,9 @@ class BallFrameTransformer:
         frame_id: str,
         transform: Optional[RigidTransform] = None,
     ) -> Vec3:
-        """Return the ball position in ``base``.
+        """Return the ball position in the configured policy frame.
 
-        ``transform`` is the ``frame_id -> base`` rigid transform (tf2 lookup).
+        ``transform`` is the ``frame_id -> base_frame`` rigid transform (tf2 lookup).
         It is ignored for the identity case (``frame_id == base_frame``) and
         required otherwise.
         """

@@ -1,6 +1,6 @@
 # Safety And Commanding
 
-> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29
+> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; live-catch README, 2026-07-01; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29; 2026-07-02 pendant incident analysis
 > Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md)
 
 ## Overview
@@ -16,6 +16,9 @@ controller switching or UI command gates.
 - `enable_command=true`: command mode. The node may switch to
   `forward_position_controller` and stream safe joint targets.
 - Command mode must fail closed when no policy is loaded.
+- Runtime `model_path` changes are accepted only while command mode is off. The
+  live node loads and validates the new policy before replacing the active
+  policy and rebuilding mapper/safety state.
 
 ## Mapping And Limits
 
@@ -25,10 +28,42 @@ controller switching or UI command gates.
 - `SafetyLimiter` applies position, velocity and acceleration constraints
   independently from the policy. With current exports, bounds come from
   `policy_metadata.json`; otherwise they fall back to URDF/config limits.
+  The fallback acceleration default is `12.5664 rad/s^2`; current Isaac exports
+  still override this with per-joint metadata.
 - `Watchdog` handles stale perception, budget overruns and tracking errors.
 - `CommandStreamer` publishes to `/forward_position_controller/commands`.
-- In command mode, missing `base -> hoop_center` TF is fail-closed: the node does
-  not use the disk fallback for robot motion.
+- `v_safe_scale` (default 1.0; bring-up config 0.5) scales metadata
+  `v_safe`/`a_safe` for both mapper and safety — a deliberate slow-down that
+  diverges from the trained contract; restore 1.0 for faithful runs.
+- In command mode, missing `base_link -> hoop_center` TF is fail-closed: the
+  node does not use the disk fallback for robot motion.
+
+## Streaming Rate And The UR Driver Velocity Check
+
+The UR driver validates consecutive servoj set-points every 2 ms against the
+joint velocity limits. A raw 60 Hz safe target step (`v_safe * dt`, ~0.105 rad
+on wrists at full metadata speed) lands in one 2 ms frame and is rejected with
+`Velocity ... exceeding the joint velocity limits`, after which the driver
+latches `Ignoring commands until a valid command is received`. The node
+therefore runs a high-rate command timer (`command_rate_hz`, default 500 Hz)
+that walks the published command toward the current 60 Hz safe target in
+per-frame steps capped at `v_safe / command_rate_hz` (`streaming.step_toward`).
+`command_substeps` burst upsampling is legacy and only used when
+`command_rate_hz <= loop_hz`.
+
+## Start-Pose Gate (±2π Branch Protection)
+
+Before the first command of a command session, the node refuses to stream when
+any measured joint exceeds `start_pose_limit_rad` (default 3.0 rad,
+`safety.start_pose_violations`). This catches `/joint_states` reporting a joint
+on a ±2π-wrapped branch (e.g. wrist_3 at 6.2832 ~ "360°" while the UR
+controller internally sits at ~0°): echoing that pose back looks like a
+full-turn jump to the driver, which rejects it and then ignores all commands
+(the 2026-07-02 incident). The gate re-checks every tick and arms streaming
+once the operator jogs/unwinds the joint (or reboots the arm) so
+`/joint_states` matches the pendant. Each `enable_command` toggle also resets
+`CommandStreamer` so a hold can never replay a pose recorded before the robot
+was moved by other means.
 
 ## Operator Gates
 
@@ -37,8 +72,9 @@ The real robot path is intentionally layered:
 1. Reduced robot speed and E-stop readiness.
 2. External Control / UR driver state checked.
 3. Controller availability checked.
-4. UI or launch explicitly enables command mode.
-5. Watchdog can return to a safe hold/stop path.
+4. Policy model changes are completed in dry-run before command mode.
+5. UI or launch explicitly enables command mode.
+6. Watchdog can return to a safe hold/stop path.
 
 ## Current Hardware Work
 

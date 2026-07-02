@@ -25,7 +25,7 @@ ur3e_live_catch/
 | Fichier | Rôle (réf. archi) |
 |---|---|
 | `joint_order.py` | ordre articulaire canonique + réordonnancement `/joint_states` |
-| `ball_frame.py` | `frame_id → base` via TF (identité si `base`) + filtre vitesse (§4.3.1) |
+| `ball_frame.py` | `frame_id → base_link` via TF (identité si `base_link`) + filtre vitesse (§4.3.1) |
 | `observation.py` | `ObservationBuilder` 33-D (§4.3.2, §6) |
 | `policy_runtime.py` | `PolicyRunner` (torch/onnx) + `ObsScaler` (§4.3.3) |
 | `action.py` | `ActionMapper` `faithful` \| `safe` (§4.3.4) |
@@ -34,7 +34,7 @@ ur3e_live_catch/
 | `streaming.py` | `CommandStreamer` → `forward_position_controller` (§4.3.6) |
 | `latency.py` | `LatencyStats` (budget de latence, §10) |
 | `live_catch_node.py` | nœud rclpy 60 Hz : dry-run **ou** commande (flag `enable_command`) |
-| `test_ball_node.py` | source de balle artificielle, `publish_frame` = `base` \| `<camera_frame>` (§4.2) |
+| `test_ball_node.py` | source de balle artificielle, `publish_frame` = `base_link` \| `<camera_frame>` (§4.2) |
 | `float32_adapter.py` | fallback legacy `Float32MultiArray → BallState` (§4.1) |
 | `latency_report.py` | nœud d'agrégation latence (`catch_telemetry` → percentiles) |
 
@@ -91,7 +91,7 @@ déplacé à la souris ou réglé par les champs `X/Y/Z`. Les champs `Vx/Vy/Vz`
 règlent la vitesse initiale `v0`, puis **Launch virtual ball** applique ces
 valeurs au `test_ball_node` et lance un vol. Les défauts suivent la configuration
 locale documentée : `robot_ip:=192.168.0.5`, `reverse_ip:=192.168.0.3`, balle en
-`publish_frame:=base` et `trigger_mode:=true`. Le lancement reste en
+`publish_frame:=base_link` et `trigger_mode:=true`. Le lancement reste en
 `enable_command:=false` par défaut :
 le robot ne reçoit aucune commande tant que l'UI n'active pas explicitement
 **Run on real robot** avec confirmation E-stop/workspace.
@@ -111,22 +111,32 @@ ros2 launch ur3e_live_catch virtual_ball_robot.launch.py launch_moveit:=false ui
 
 Le launch utilise `$HOME/ur3e_calibration.yaml` s'il existe ; sinon il laisse le
 driver charger la cinématique par défaut de `ur_description`. `publish_hoop_tf`
-reste `false` par défaut : ne le passer à `true` avec `hoop_xyz` / `hoop_quat`
-qu'après mesure réelle de la géométrie `wrist_3_link -> hoop_center`.
+est `true` par défaut avec la géométrie Isaac `wrist_3_link -> hoop_center`
+(`hoop_xyz=-0.5 0 0`, `hoop_quat=1 0 0 0`) ; remplacer ces valeurs si la mesure
+réelle du montage diffère.
 
 ## UI « Test » (balle virtuelle → robot)
 
 L'onglet **Test** de `ur3e_web_ui` pilote la chaîne sans ligne de commande, via deux
 services ajoutés sur les nœuds :
 
-- Repère cyan **Launch frame** → paramètres `p0` / `v0` du `test_ball_node`
-  via ses services ROS 2 de paramètres. Le repère se déplace dans la vue 3D ;
-  la flèche jaune prévisualise la vitesse initiale.
+- Repère cyan **Launch frame** → paramètres `p0` / `v0` / `gravity` du
+  `test_ball_node` via ses services ROS 2 de paramètres. Le repère se déplace
+  dans la vue 3D ; la flèche jaune prévisualise la vitesse initiale et l'arc
+  utilise l'accélération configurée.
+- **Policy model** → choix `latest` / `best` depuis `data/models/`. L'UI appelle
+  `/live_catch_node/set_parameters` pour changer `model_path`; le nœud charge et
+  valide le modèle avant de l'activer. Le changement est refusé tant que
+  `enable_command=true`.
 - **Launch virtual ball** → applique `p0` / `v0`, puis appelle `~/throw`
   (`std_srvs/Trigger`) sur `test_ball_node`. Avec `trigger_mode:=true`, le nœud
   reste **inactif** (`valid=False`) entre deux lancers et ne renvoie qu'**un**
   vol de parabole par appel. Le **fantôme vert** de la vue 3D suit `joint_target`
   (la pose commandée par le réseau) ; le marqueur rouge + l'arc, la balle.
+- **Isaac random** → échantillonne la même distribution que
+  `firsttraining_env_cfg.py`: `p0.x=(-0.6,-0.2)`, `p0.y=(1.2,2.1)`,
+  `p0.z=(0.5,1.2)`, bruit position `0.01 m`, `v0.x=(-0.7,0.6)`,
+  `v0.y=(-5.0,-3.5)`, `v0.z=(-0.1,1.5)`, avec gravité `-9.81 m/s^2`.
 - **Run on real robot** (case de confirmation) → `~/enable_command` (`std_srvs/SetBool`)
   sur `live_catch_node` : bascule la commande robot **à chaud** (sans relancer le nœud) ;
   **Stop / back to safe** la coupe et restaure `scaled_joint_trajectory_controller`.

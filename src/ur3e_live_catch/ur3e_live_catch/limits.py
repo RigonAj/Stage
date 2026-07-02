@@ -104,6 +104,29 @@ def v_safe_vector(
     return [b.v_safe for b in bounds]
 
 
+def scale_bounds(bounds: Sequence[JointBound], scale: float) -> list[JointBound]:
+    """Scale ``v_safe``/``a_safe`` of metadata bounds by a bring-up factor.
+
+    Position limits are untouched. ``scale < 1`` slows the whole command chain
+    (ActionMapper integrator AND SafetyLimiter share the returned bounds), which
+    intentionally diverges from the trained metadata contract — a bring-up
+    safety knob, not a fidelity mode.
+    """
+    if not (0.0 < scale <= 1.0):
+        raise ValueError(f"scale must be in (0, 1], got {scale}")
+    if scale == 1.0:
+        return list(bounds)
+    return [
+        JointBound(
+            min_position=b.min_position,
+            max_position=b.max_position,
+            v_safe=b.v_safe * scale,
+            a_safe=b.a_safe * scale,
+        )
+        for b in bounds
+    ]
+
+
 def nominal_ur3e_limits() -> dict[str, JointLimit]:
     """The documented UR3e nominal limits, used as a fallback."""
     return {

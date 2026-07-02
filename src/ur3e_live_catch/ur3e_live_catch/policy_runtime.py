@@ -108,3 +108,18 @@ class PolicyRunner:
 def load_metadata(path: Path | str) -> dict:
     """Read ``policy_metadata.json`` (obs/action dims, action_scale, dt, joints)."""
     return json.loads(Path(path).read_text())
+
+
+def policy_model_candidates(configured: str, default_candidates: Sequence[str]) -> list[str]:
+    """Return model load attempts, including ONNX/TorchScript siblings for explicit paths."""
+    if not configured:
+        return [candidate for candidate in default_candidates if candidate]
+
+    path = Path(configured)
+    candidates = [configured]
+    suffix = path.suffix.lower()
+    if suffix == ".onnx":
+        candidates.append(str(path.with_suffix(".ts")))
+    elif suffix in (".ts", ".pt"):
+        candidates.append(str(path.with_suffix(".onnx")))
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))

@@ -178,21 +178,24 @@ Modules (classes appelées directement) :
   - `frame_id` **vide ou inconnu de TF** ⇒ **rejet** + drapeau watchdog (§9) : jamais d'hypothèse
     silencieuse de repère, qui enverrait la balle au mauvais endroit.
   Gère mm→m si nécessaire.
-- **Filtre de vitesse balle** (Kalman, ou EMA sur différence finie) sur les positions `base` →
+- **Filtre de vitesse balle** (Kalman, ou EMA sur différence finie) sur les positions `base_link` →
   `ball_vel`. Aucune mesure directe de vitesse n'existe : c'est le maillon bruité (cf.
   sim-to-real §5.2).
 - **Gestion de la péremption** (staleness) : si plus de détection depuis `T_stale`, geler ou
   extrapoler brièvement, et lever un **drapeau watchdog** (§9).
 - **TF cerceau obligatoire en commande réelle** : le fallback `disk_pos_fallback`
   sert au dry-run/debug, mais `live_catch_node` refuse de streamer si la TF
-  `base -> hoop_center` manque en mode commande.
+  `base_link -> hoop_center` manque en mode commande.
 
 #### 4.3.2 `observation.py` (ObservationBuilder) — observation 33-D
 Reconstruit l'observation **dans l'ordre et les unités exacts** de
 `firsttraining_env.py:197-208` (détail complet en §6). Miroir strict de `_get_observations`,
 `_update_local_pose_tensors` et `detect_pass_through` : changement de signe du plan
-du cerceau, rayon de trigger `disk_radius=0.1 m` pour l'export 2026-06-30, distance
-radiale projetée hors normale. **Aucun degré**, tout en rad/rad/s/m/m·s⁻¹.
+du cerceau, rayon de trigger `disk_radius=0.05 m` dans `FirstTraining`, distance
+radiale projetée hors normale. Comme Isaac met à jour `prev_disk_signed_dist` et
+`pass_through_count` dans `_get_dones()` avant l'observation suivante, le builder
+live émet le flag signé et le compteur déjà actualisés pour l'état courant.
+**Aucun degré**, tout en rad/rad/s/m/m·s⁻¹.
 
 #### 4.3.3 `policy_runtime.py` (PolicyRunner) — inférence
 - Charge l'export déterministe canonique `data/models/policy_deterministic.ts`
@@ -296,8 +299,8 @@ Ordre **exact** (somme = 6+6+3+3+3+1+3+1+6+1 = **33**), miroir de `firsttraining
 |---|---|---:|---|---|
 | 1 | `joint_pos` | 6 | `/joint_states` réordonné (joint order §4.3) | facile |
 | 2 | `joint_vel` | 6 | `/joint_states` | facile |
-| 3 | `disk_pos_local` | 3 | FK `base → hoop_center` (TF statique `wrist_3_link → hoop`) | calibrage montage |
-| 4 | `ball_pos_local` | 3 | balle en `base` (module `ball_frame`) | **critique** (perception+extrinsèque) |
+| 3 | `disk_pos_local` | 3 | FK `base_link → hoop_center` (TF statique `wrist_3_link → hoop`) | calibrage montage |
+| 4 | `ball_pos_local` | 3 | balle en `base_link` (module `ball_frame`) | **critique** (perception+extrinsèque) |
 | 5 | `direction` | 3 | `ball_pos_local − disk_pos_local` | dérivé |
 | 6 | `distance` | 1 | `‖direction‖` | dérivé |
 | 7 | `ball_vel_w` | 3 | vitesse balle **filtrée** | **critique** (bruit) |

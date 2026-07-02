@@ -4,7 +4,7 @@
 live_catch_node:
   ros__parameters:
     loop_hz: 60.0                 # control rate, aligned on the sim dt = 1/60 (archi §1.2)
-    base_frame: "base"            # NOT base_link (π-about-Z trap, archi §7)
+    base_frame: "base_link"       # Isaac FirstTraining observation frame
     hoop_frame: "hoop_center"     # TF wrist_3_link -> hoop_center (static, mount geometry)
     ball_topic: "ball_state"
     joint_states_topic: "/joint_states"
@@ -13,11 +13,11 @@ live_catch_node:
     model_path: ""                # "" => data/models/ then dated export fallback
     stale_after_s: 0.1
 
-    # Disk geometry fallback used only when TF base->hoop is missing. PLACEHOLDER:
-    # to be replaced by the Isaac-sourced / measured mount geometry (archi §6 comp 3/8/10).
+    # Dry-run fallback only. Serious inference/command tests require TF
+    # base_link->hoop_center from the measured or Isaac-matched hoop geometry.
     disk_pos_fallback: [0.0, 0.0, 0.5]
     disk_normal_fallback: [0.0, 0.0, 1.0]
-    disk_radius: 0.1              # Isaac run 2026-06-30_19-02-25 used disk_radius=0.1 m
+    disk_radius: 0.05             # Current FirstTraining cfg.disk_radius
 
     # --- step 6: ActionMapper / safety / streaming (archi §4.3.4-§4.3.6, §8, §9) ---
     enable_command: false         # false => DRY-RUN, no robot command. true => stream to robot.
@@ -28,11 +28,25 @@ live_catch_node:
     command_controller: "forward_position_controller"
     trajectory_controller: "scaled_joint_trajectory_controller"
     auto_switch_controller: true  # switch traj->forward controller before streaming (archi §8)
-    command_substeps: 1           # >1 upsamples 60 Hz targets (hardware also interpolates)
+    command_substeps: 1           # legacy burst upsampling; only used when command_rate_hz <= loop_hz
+    # High-rate command interpolation: the UR driver validates consecutive servoj
+    # set-points every 2 ms; raw 60 Hz steps (v_safe*dt ~ 0.1 rad on wrists) are
+    # rejected ("Velocity ... exceeding the joint velocity limits") and the driver
+    # then ignores commands. The fast timer walks toward the 60 Hz safe target in
+    # v_safe/command_rate_hz steps.
+    command_rate_hz: 500.0
+    # Bring-up slowdown applied to metadata v_safe AND a_safe (mapper + safety).
+    # 1.0 restores the trained contract; 0.5 halves robot speed for early tests.
+    v_safe_scale: 0.5
+    # Refuse the first command of a session when |q_measured| exceeds this: catches
+    # ±2π-wrapped /joint_states branches (wrist reading 6.28 rad ~ "360°" while the
+    # UR controller internally sits at ~0°), which the robot rejects as a
+    # full-turn jump — the 2026-07-02 pendant incident.
+    start_pose_limit_rad: 3.0
     # Fallback only when policy_metadata.json lacks joint safety limits. Current
     # Isaac exports use metadata limits instead: 3.1416/3.1416/3.1416/6.2832/...
     v_safe_factor: 0.5            # fallback -> 1.571/1.571/1.571/3.142/3.142/3.142 rad/s
-    a_safe: 10.0                  # rad/s^2 acceleration cap (tune on hardware)
+    a_safe: 12.5664               # fallback accel cap; metadata overrides current Isaac exports
     loop_budget_s: 0.02           # watchdog: per-tick compute budget (archi §9)
     max_tracking_error: 0.5       # rad; |q_measured - last_command| watchdog threshold
     joint_limits_path: ""         # "" => use ur_description from the currently sourced ROS distro
@@ -40,18 +54,20 @@ live_catch_node:
 test_ball_node:
   ros__parameters:
     output_topic: "ball_state"
-    publish_frame: "base"         # base | <camera_frame> (parity test, archi §12)
-    base_frame: "base"
+    publish_frame: "base_link"    # base_link | <camera_frame> (parity test, archi §12)
+    base_frame: "base_link"
     rate_hz: 30.0                 # perception cadence
     source: "parabola"            # parabola | csv
     trigger_mode: false           # true => idle until ~/throw (web UI "Launch virtual ball")
     noise_std: 0.0                # inject Gaussian position noise (m) to stress filtering
     dropout_prob: 0.0             # simulate detection gaps
-    p0: [-1.0, 1.5, 0.4]
-    v0: [1.5, -1.0, 2.5]
+    # Isaac FirstTraining midpoint defaults. The Web UI "Isaac random" button
+    # samples the full ranges documented in firsttraining_env_cfg.py.
+    p0: [-0.4, 1.65, 0.85]
+    v0: [-0.05, -4.25, 0.7]
     gravity: [0.0, 0.0, -9.81]
-    restart_after_s: 2.0
-    # camera pose in base (base<-camera), only used when publish_frame != base:
+    restart_after_s: 4.0
+    # camera pose in base_link (base_link<-camera), only used when publish_frame != base_link:
     camera_translation: [0.0, 0.0, 0.0]
     camera_quaternion: [0.0, 0.0, 0.0, 1.0]
     csv_path: ""

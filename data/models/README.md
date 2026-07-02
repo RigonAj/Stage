@@ -57,15 +57,31 @@ ros2 launch ur3e_live_catch live_catch.launch.py \
   model_path:=data/models/best/policy_deterministic.ts
 ```
 
+Depuis le 2026-07-01, l'onglet **Test** du Web UI expose aussi un sélecteur
+autorisé `latest` / `best`. Le backend préfère
+`data/models/<nom>/policy_deterministic.onnx`, puis
+`policy_deterministic.ts` si l'ONNX n'existe pas, et envoie ce chemin au
+paramètre ROS `/live_catch_node model_path`. Si l'ONNX existe mais que
+`onnxruntime` n'est pas disponible dans l'interpréteur du nœud, `live_catch_node`
+essaie automatiquement le `policy_deterministic.ts` voisin. Le nœud charge et
+valide le nouveau modèle avant de remplacer la policy active, et refuse tout
+changement pendant `enable_command=true`.
+
 ## Contrat actuel
 
 Les deux exports 2026-06-30 utilisent :
 
 - observation 33-D ;
+- observation construite en frame `base_link` (`observation_frame=base_link`) ;
 - action 6-D ;
 - `dt_s = 1/60` ;
 - `joint_names = [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]` ;
-- `disk_radius_m = 0.1` pour le trigger de passage dans le cerceau ;
+- `disk_radius_m = 0.05` pour le trigger de passage dans le cerceau ;
+- géométrie cerceau Isaac : centre `(-0.5, 0, 0)` et normale `(0, 0, -1)` dans
+  `wrist_3_link` ;
+- distribution balle FirstTraining : `p0.x=(-0.6,-0.2)`, `p0.y=(1.2,2.1)`,
+  `p0.z=(0.5,1.2)`, bruit position `0.01 m`, `v0.x=(-0.7,0.6)`,
+  `v0.y=(-5.0,-3.5)`, `v0.z=(-0.1,1.5)` ;
 - policy SKRL exportée avec `clip_actions: False`; le clipping `[-1, 1]`
   appartient au contrat de l'environnement/action mapper, pas au modèle ;
 - sémantique d'action incrémentale :

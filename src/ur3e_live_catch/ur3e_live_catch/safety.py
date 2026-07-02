@@ -8,10 +8,45 @@ the action mode. Current Isaac exports supply bounds through
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 Vec = Sequence[float]
+
+TWO_PI = 2.0 * math.pi
+
+
+def start_pose_violations(
+    q: Vec,
+    joint_names: Sequence[str],
+    limit_rad: float,
+) -> list[str]:
+    """Sanity-check the measured pose before the FIRST command of a session.
+
+    The UR controller keeps its own internal joint representation; after a
+    power cycle or a wound wrist, ``/joint_states`` can report a joint on a
+    ±2π-shifted branch (e.g. wrist_3 = 6.2832 while the pendant shows ~0°).
+    Echoing that pose back as a command then looks like a full-turn jump to the
+    driver, which rejects it ("Velocity ... exceeding the joint velocity
+    limits") and latches "Ignoring commands until a valid command is received".
+
+    Returns one human-readable message per violating joint (empty = safe).
+    """
+    if len(q) != len(joint_names):
+        raise ValueError("q and joint_names must have the same length")
+    violations: list[str] = []
+    for name, value in zip(joint_names, q):
+        if abs(value) <= limit_rad:
+            continue
+        wrapped = math.remainder(value, TWO_PI)  # principal value in (-pi, pi]
+        violations.append(
+            f"{name} measured at {value:+.4f} rad ({math.degrees(value):+.1f} deg), "
+            f"beyond start-pose limit ±{limit_rad:.2f} rad; principal angle is "
+            f"{wrapped:+.4f} rad — likely a ±2π-wrapped branch. Jog/unwind the "
+            f"joint (or reboot the arm) until /joint_states matches the pendant."
+        )
+    return violations
 
 
 def _clip(value: float, lo: float, hi: float) -> float:
