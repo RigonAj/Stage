@@ -23,7 +23,8 @@ Camera intrinsics, hand-eye calibration and TF contracts.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire hand-eye workflow, base_link parity validation gates and current blockers. | 2026-07-02 |
+| [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire hand-eye workflow, aligned result path, base_link parity validation gates and current blockers. | 2026-07-06 |
+| [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md) | Operator checklist for the physical eye-to-hand session: prerequisites, self-tests, capture, solve acceptance gates, TF publication and validation. | 2026-07-06 |
 | [Frames And Transforms](calibration/frames-and-transforms.md) | `base_link` policy frame, TF, UI robot orientation, hoop radius distinction and unit contracts used by perception, live catch and UI. | 2026-07-02 |
 
 ## robot-control

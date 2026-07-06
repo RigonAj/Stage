@@ -222,3 +222,25 @@
 - Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
 - Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
 - Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+
+## [2026-07-06] ingest | Extrinsic calibration runbook and result-path alignment
+
+- Source: code verification pass before the physical eye-to-hand session
+  (solver/collector self-tests, web UI calibration tests all pass); result
+  path aligned on `calibration/handeye_result.yaml` (run_handeye_session.sh
+  doc, solve_handeye.py now creates output parent dirs); new French operator
+  doc `docs/Robot_Control/procedure_calibration_extrinseque.md`; comparison
+  with the standalone repo `event-camera-ca` (confirmed to be a subset of
+  this workspace's scripts, nothing borrowed).
+- Created: [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md)
+- Updated: [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md)
+
+## [2026-07-06] ingest | Support3D ghost clocking fixed; mire chain verified
+
+- Source: operator report (viewer ghost 90 deg off about the tool roll axis);
+  verification of the full mire chain (serve_phone_mire.py layout self-test,
+  physical-pixel drawing in phone_mire.html, screen-center object-point
+  origin, fullscreen gate in fetch_external_layout, TF base->tool0 reads);
+  `support_mount.json` yaw set to +pi/2 about tool0 Z with the plate offset
+  rotated accordingly (display-only, T_tool0_mire stays hand-eye co-solved).
+- Updated: [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md)

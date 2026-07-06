@@ -34,6 +34,12 @@ the UR3e tool. Main tools:
 The key convention risk is OpenCV hand-eye argument naming. The docs specify a
 verified derivation and require synthetic tests before accepting real data.
 
+Session samples land in `recordings/mire_calibration/handeye/`; the solve
+result must be written to `calibration/handeye_result.yaml`, the path expected
+by the web UI (`GET /api/calibration/camera`) and `publish_camera_tf.py`
+(aligned 2026-07-06). The operator procedure is the
+[Extrinsic Calibration Runbook](extrinsic-calibration-runbook.md).
+
 ## Current Blockers
 
 - Physical eye-to-hand session still needs acceptance.
@@ -44,6 +50,7 @@ verified derivation and require synthetic tests before accepting real data.
 
 ## See Also
 
+- [Extrinsic Calibration Runbook](extrinsic-calibration-runbook.md)
 - [Frames And Transforms](frames-and-transforms.md)
 - [Current Status And Blockers](../live-catch/current-status-and-blockers.md)
 - [Live Catch Loop](../live-catch/live-catch-loop.md)

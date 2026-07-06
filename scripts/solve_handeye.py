@@ -386,6 +386,7 @@ def write_result_yaml(path: Path, report: Dict[str, object]) -> None:
 
     lines = ["# Hand-eye calibration result (eye-to-hand, UR3e + DVXplorer)"]
     lines.extend(emit(report, 0))
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -794,7 +795,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         write_result_yaml(Path(args.output_yaml), report)
         print(f"YAML result: {args.output_yaml}")
     if args.output_json:
-        with Path(args.output_json).open("w", encoding="utf-8") as handle:
+        json_path = Path(args.output_json)
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        with json_path.open("w", encoding="utf-8") as handle:
             json.dump(report, handle, indent=2)
         print(f"JSON report: {args.output_json}")
     return 0

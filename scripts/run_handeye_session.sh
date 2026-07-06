@@ -18,9 +18,10 @@
 #   auto-rejected if the robot moved, dots are missing, or the IPPE
 #   ambiguity is too high at low tilt.
 #
-# Then solve offline:
+# Then solve offline (calibration/handeye_result.yaml is the path the web UI
+# viewer and publish_camera_tf.py expect):
 #   python3 scripts/solve_handeye.py recordings/mire_calibration/handeye/handeye_samples_*.json \
-#       --output-yaml recordings/mire_calibration/handeye/handeye_result.yaml
+#       --output-yaml calibration/handeye_result.yaml
 
 set -euo pipefail
 

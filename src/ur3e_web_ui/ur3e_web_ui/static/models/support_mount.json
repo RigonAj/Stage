@@ -1,7 +1,7 @@
 {
-  "comment": "Display-only pose of the Support3D.glb origin in tool0 (ROS axes, meters/radians). GLB body axes: +X is the long axis with the flange-mounting plate at GLB +X=+0.1595 (plate normal +X, plate centered at GLB y=+0.0079); the broad holder faces are perpendicular to GLB Y, with the phone screen opening toward GLB -Y. rpy=[0,+pi/2,0] maps GLB +X -> tool0 -Z, so the plate seats on the flange plane (tool0 z=0, centered on the tool0 axis) and the support EXITS along tool0 +Z, which on a UR points outward from the flange. The screen then faces tool0 -Y and the mire Z (into the screen) points tool0 +Y. The in-plane clocking around tool0 Z and the metrology-grade T_tool0_mire are co-solved by hand-eye calibration; this mount is only a visual aid.",
+  "comment": "Display-only pose of the Support3D.glb origin in tool0 (ROS axes, meters/radians; rpy applied as ROS extrinsic XYZ = Rz(yaw)*Ry(pitch)*Rx(roll)). GLB body axes: +X is the long axis with the flange-mounting plate at GLB +X=+0.1595 (plate normal +X, plate centered at GLB y=+0.0079); the broad holder faces are perpendicular to GLB Y, with the phone screen opening toward GLB -Y. rpy=[0,+pi/2,+pi/2] first maps GLB +X -> tool0 -Z (plate seats on the flange plane, support EXITS along tool0 +Z), then clocks the body +90 deg CCW around tool0 Z to match the observed physical mounting (2026-07-06 operator report); the xyz offset is the plate-centering offset rotated by the same yaw. The screen now faces tool0 +X and the mire Z (into the screen) points tool0 -X. If the physical clocking is the other way, negate the yaw (rpy z = -1.5707963268) and the x offset (xyz_m = [-0.0079, 0.0, 0.1595]). The in-plane clocking around tool0 Z and the metrology-grade T_tool0_mire are co-solved by hand-eye calibration; this mount is only a visual aid.",
   "glb_url": "/static/models/Support3D.glb",
-  "xyz_m": [0.0, -0.0079, 0.1595],
-  "rpy_rad": [0.0, 1.5707963268, 0.0],
+  "xyz_m": [0.0079, 0.0, 0.1595],
+  "rpy_rad": [0.0, 1.5707963268, 1.5707963268],
   "scale": 1.0
 }
