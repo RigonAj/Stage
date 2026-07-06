@@ -323,19 +323,29 @@ export class Viewer3D {
     }
     const gltf = await new GLTFLoader().loadAsync(config.glb_url);
     const mesh = gltf.scene;
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xdce7ee,
+    // Lit material (like the hoop/ball) so the scene lights shade the surface
+    // and the 3D form reads; MeshBasicMaterial is unlit and renders a flat,
+    // depthless silhouette.
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xb9c6d4,
+      roughness: 0.55,
+      metalness: 0.1,
       transparent: false,
       opacity: 1.0,
       depthWrite: true,
       side: THREE.DoubleSide,
-      toneMapped: false,
+      flatShading: false,
     });
     mesh.traverse((child) => {
       if (child.isMesh) {
         child.material = material;
         child.castShadow = false;
         child.receiveShadow = false;
+        // A lit material needs normals; CAD exports sometimes ship without
+        // them, which would render the surface unshaded.
+        if (child.geometry && !child.geometry.getAttribute("normal")) {
+          child.geometry.computeVertexNormals();
+        }
       }
     });
     // Children of a URDF link live in ROS axes (the Y-up fix is applied at
