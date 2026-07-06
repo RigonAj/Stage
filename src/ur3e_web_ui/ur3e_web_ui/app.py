@@ -66,6 +66,8 @@ BALL_VELOCITY_BOUNDS_M_S = ((-10.0, 10.0), (-10.0, 10.0), (-10.0, 10.0))
 BALL_GRAVITY_BOUNDS_M_S2 = ((-20.0, 20.0), (-20.0, 20.0), (-20.0, 20.0))
 BALL_FLIGHT_BOUNDS_S = (0.2, 10.0)  # test_ball_node restart_after_s (flight duration)
 CATCH_MODEL_NAMES = ("latest", "best")
+CATCH_V_SAFE_SCALE_MAX = 4.0
+CATCH_V_SAFE_SCALE_PRESETS = (0.5, 0.7, 0.85, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0)
 
 REPLAY_PRESETS = {
     "safe": SafetyLimits(
@@ -134,6 +136,10 @@ class CatchBallConfigRequest(BaseModel):
 
 class CatchModelRequest(BaseModel):
     name: str
+
+
+class CatchVSafeScaleRequest(BaseModel):
+    scale: float
 
 
 class TcpTargetRequest(BaseModel):
@@ -676,6 +682,36 @@ def create_app(bridge: RosBridge, settings: Settings) -> FastAPI:
             raise HTTPException(status_code=409, detail=message)
         return {"ok": True, "message": message, "active": model["name"], "model": model}
 
+    @app.get("/api/catch/v_safe_scale")
+    async def catch_v_safe_scale_get() -> dict:
+        try:
+            scale = await bridge.get_live_catch_v_safe_scale()
+        except ActionServerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return {
+            "scale": scale,
+            "max": CATCH_V_SAFE_SCALE_MAX,
+            "presets": list(CATCH_V_SAFE_SCALE_PRESETS),
+        }
+
+    @app.post("/api/catch/v_safe_scale")
+    async def catch_v_safe_scale_set(body: CatchVSafeScaleRequest) -> dict:
+        scale = _validate_v_safe_scale(body)
+        snapshot = bridge.get_snapshot()
+        if snapshot.catch_command_enabled:
+            raise HTTPException(status_code=409, detail="stop command mode before changing v_safe_scale")
+        try:
+            success, message = await bridge.set_live_catch_v_safe_scale(scale)
+        except ActionServerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        if not success:
+            raise HTTPException(status_code=409, detail=message)
+        return {"ok": True, "message": message, "scale": scale}
+
     @app.post("/api/catch/command")
     async def catch_command(body: CatchCommandRequest) -> dict:
         if body.enable and not body.confirm:
@@ -1020,6 +1056,16 @@ def _validate_ball_config(
         gravity,
         flight_s,
     )
+
+
+def _validate_v_safe_scale(body: CatchVSafeScaleRequest) -> float:
+    scale = float(body.scale)
+    if not math.isfinite(scale) or not (0.0 < scale <= CATCH_V_SAFE_SCALE_MAX):
+        raise HTTPException(
+            status_code=400,
+            detail=f"v_safe_scale must be finite and in (0, {CATCH_V_SAFE_SCALE_MAX:g}]",
+        )
+    return scale
 
 
 def _ensure_vector_bounds(

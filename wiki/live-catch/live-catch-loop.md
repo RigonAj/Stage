@@ -1,7 +1,7 @@
 # Live Catch Loop
 
-> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; package README, 2026-06-29
-> Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Package README](../../src/ur3e_live_catch/README.md)
+> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; package README, 2026-06-29; ball regression publisher, 2026-07-03
+> Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Package README](../../src/ur3e_live_catch/README.md); [Ball regression](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression.py)
 
 ## Overview
 
@@ -26,7 +26,13 @@ topics, to reduce latency.
 
 ## Main Modules
 
-- `ball_frame.py`: frame transform and ball velocity estimate.
+- `ball_frame.py`: frame transform, ball velocity estimate and
+  producer-velocity trust helper.
+- `ball_regression.py` + `ball_regression_node.py`: optional ballistic
+  regression publisher between the raw ball source and the live node
+  (`use_ball_regression` launch arg): fits x/y linear + z fixed-gravity in
+  `base_link`, publishes a smoothed/predicted `BallState` with fit-derived
+  velocity at 60 Hz once the start gate passes ("Isaac pop parity").
 - `observation.py`: 33-D policy observation.
 - `policy_runtime.py`: TorchScript/ONNX runtime.
 - `action.py`: policy action mapping.

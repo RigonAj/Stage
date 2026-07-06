@@ -2679,7 +2679,12 @@ Trace3DAnalysis AnalyzeTrace3D(
 
     if (analysis.worldPoints.size() >= 3 && !analysis.widthSamples.empty()) {
         analysis.valid = true;
-        analysis.currentWorld = analysis.worldPoints[analysis.worldPoints.size() / 2];
+        const std::size_t midIndex = analysis.worldPoints.size() / 2;
+        analysis.currentWorld = analysis.worldPoints[midIndex];
+        analysis.currentWorldTimestampUs =
+            traceTimeOriginUs
+            + static_cast<int64_t>(std::llround(
+                  static_cast<double>(analysis.times[midIndex]) * 1.0e6));
         const float medianWidth = Quantile(analysis.widthSamples, 0.50f);
         analysis.poseText = std::format(
             "Trace 3D position (m): X={:.3f}  Y={:.3f}  Z={:.3f} | W={:.1f}px",

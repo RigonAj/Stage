@@ -1,7 +1,7 @@
 # Message Contracts And Topics
 
-> Sources: live-catch architecture, 2026-06-29; implementation status, 2026-06-29; package README, 2026-06-29; inconsistency review, 2026-06-29; heartbeat telemetry change, 2026-07-02
-> Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [ur3e_live_catch README](../../src/ur3e_live_catch/README.md); [Incoherences](../../docs/incoherences_code_logique.md)
+> Sources: live-catch architecture, 2026-06-29; implementation status, 2026-06-29; package README, 2026-06-29; inconsistency review, 2026-06-29; heartbeat telemetry change, 2026-07-02; ball regression publisher, 2026-07-03
+> Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [ur3e_live_catch README](../../src/ur3e_live_catch/README.md); [Incoherences](../../docs/incoherences_code_logique.md); [BallState.msg](../../src/ur3e_catch_msgs/msg/BallState.msg); [Ball regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py)
 
 ## Overview
 
@@ -13,12 +13,20 @@ consumer/producer assumptions.
 
 `ur3e_catch_msgs/BallState` is the contract between perception and live catch:
 
-- `header.stamp`: event/perception time when available.
+- `header.stamp`: event/perception time when available. Exception: the
+  regression node stamps at EVALUATION time (now + lead), which is deliberate
+  latency compensation — see
+  [Observation Latency And Models](../sim-to-real/observation-latency-and-models.md).
 - `header.frame_id`: declared frame of `position`; must be nonempty.
 - `position`: meters.
-- `velocity`: optional; live catch can recompute/filter velocity.
+- `velocity`: optional. Convention: exactly `(0,0,0)` means "not provided"
+  (both the C++ tracker and `test_ball_node` leave it zero) and the live node
+  falls back to its EMA finite-difference filter. The regression node fills it
+  from the fit derivative; `live_catch_node` trusts it when
+  `use_ball_state_velocity=true` (default), rotating it into `base_link`.
 - `valid`: whether the ball sample is usable.
-- `confidence`: producer confidence when available.
+- `confidence`: producer confidence when available. The regression node makes
+  it meaningful: support/residual quality, decaying while coasting.
 
 `ur3e_catch_msgs/CatchTelemetry` is debug/visualization, not hot-path control:
 
@@ -43,7 +51,8 @@ termination — an underground ball is out-of-distribution for the policy.
 
 | Topic | Producer | Consumer | Notes |
 |---|---|---|---|
-| `ball_state` | `ball_tracking_cpp`, `test_ball_node`, or legacy adapter | `live_catch_node`, UI/debug tools | Preferred perception contract. |
+| `ball_state` | `ball_tracking_cpp`, `test_ball_node`, legacy adapter, or `ball_regression_node` | `live_catch_node`, UI/debug tools | Preferred perception contract. The tracker's `pose_source` selects trace (bring-up config) or legacy circle poses. |
+| `ball_state_raw` | raw sources when `use_ball_regression:=true` | `ball_regression_node` | Launch re-points tracker/adapter/test-ball here; the regression republishes the fitted `BallState` on `ball_state` at 60 Hz (valid=False heartbeats before the start gate and after flight end). |
 | `ball_position_3d_mm` | old tracker path | `float32_adapter.py` only | Legacy fallback; timestamps at reception. |
 | `/joint_states` | UR driver or fake hardware | live catch, web UI | Must match canonical joint order through reorder helpers. |
 | `/catch_telemetry` | `live_catch_node` | web UI, `latency_report` | Debug/visualization only. |

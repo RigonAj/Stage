@@ -71,10 +71,20 @@ def test_scale_bounds_halves_velocity_and_accel_only():
         assert s.max_position == pytest.approx(b.max_position)
 
 
+def test_scale_bounds_can_overdrive_velocity_and_accel_for_limit_tests():
+    bounds = build_joint_bounds(nominal_ur3e_limits(), v_safe_factor=1.0, a_safe=10.0)
+    scaled = scale_bounds(bounds, 4.0)
+    for b, s in zip(bounds, scaled):
+        assert s.v_safe == pytest.approx(b.v_safe * 4.0)
+        assert s.a_safe == pytest.approx(b.a_safe * 4.0)
+        assert s.min_position == pytest.approx(b.min_position)
+        assert s.max_position == pytest.approx(b.max_position)
+
+
 def test_scale_bounds_identity_and_validation():
     bounds = build_joint_bounds(nominal_ur3e_limits())
     assert scale_bounds(bounds, 1.0) == list(bounds)
     with pytest.raises(ValueError):
         scale_bounds(bounds, 0.0)
     with pytest.raises(ValueError):
-        scale_bounds(bounds, 1.5)
+        scale_bounds(bounds, 4.1)

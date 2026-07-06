@@ -61,6 +61,18 @@ ros2 launch ur3e_live_catch virtual_ball_robot.launch.py \
 ros2 launch ur3e_live_catch live_catch.launch.py \
   use_test_ball:=true trigger_mode:=true publish_frame:=base_link enable_command:=false
 ros2 service call /test_ball_node/throw std_srvs/srv/Trigger {}
+
+# Ballistic-regression ball publisher (Isaac pop parity): raw sources move to
+# ball_state_raw, the fitted BallState (position + velocity) lands on ball_state.
+ros2 launch ur3e_live_catch live_catch.launch.py \
+  use_test_ball:=true trigger_mode:=true use_ball_regression:=true
+```
+
+Note: `test_ball_node` reads `noise_std`/`dropout_prob` once at startup, so a
+noisy regression stress-test must set them at launch (or run the node with
+`-p noise_std:=0.02 -p dropout_prob:=0.2`), not via `ros2 param set`.
+
+```bash
 ```
 
 ## Tests
@@ -74,15 +86,22 @@ cd src/ur3e_sysid && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q
 
 ## Isaac Sim2real Checks
 
+The Isaac training repo now lives at
+`~/Documents/6-Dof-Ur3e-Catch-a-ball` (the former
+`~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining` checkout is gone);
+train/play/evaluate/export details are compiled in
+[Isaac Training Environment](../sim-to-real/isaac-training-environment.md).
+
 ```bash
-cd ~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining
+cd ~/Documents/6-Dof-Ur3e-Catch-a-ball
 source script.zsh
 sim2real_export
 sim2real_validate
 ```
 
 The 2026-06-30 Stage model transfer used explicit exports for both selected
-checkpoints. `main` keeps the model artifacts and metadata, but not the large
+checkpoints (paths below are the historical locations used that day). `main`
+keeps the model artifacts and metadata, but not the large
 `rollouts_10_episodes.json` validation files:
 
 ```bash
@@ -120,6 +139,8 @@ python3 scripts/update_agent_wiki.py
 
 ## See Also
 
+- [Real Robot Bring-Up Runbook](real-robot-bringup-runbook.md)
+- [Isaac Training Environment](../sim-to-real/isaac-training-environment.md)
 - [Wiki Maintenance](wiki-maintenance.md)
 - [Source Document Map](source-document-map.md)
 - [Current Status And Blockers](../live-catch/current-status-and-blockers.md)

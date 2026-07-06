@@ -160,3 +160,65 @@
 - Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
 - Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
 - Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
+
+## [2026-07-03] ingest | Add v_safe_scale Test-tab control
+
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
+
+## [2026-07-03] ingest | Extend v_safe_scale test range
+
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
+
+## [2026-07-03] ingest | Extend v_safe_scale overdrive to 4.0
+
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
+
+## [2026-07-03] ingest | Apply agent-review Volet 1: corrections, Isaac env page, runbook, latency plan
+
+- Source: raw/reviews/2026-07-02-stage-wiki-and-training-review.md (agent
+  review excerpt); raw/isaac/ snapshots of the Isaac FirstTraining README and
+  environment-and-frames doc.
+- Corrections: removed the false "ur3e_sysid untracked" claim (package is
+  tracked per `git ls-files`); the Isaac cfg limit halving/±π bounds verified
+  as uncommitted working-tree changes in the local Isaac checkout (not lost,
+  not committed) and both pages now say so.
+- Created: [Isaac Training Environment](sim-to-real/isaac-training-environment.md)
+- Created: [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Contract: AGENTS.md "How to Start" now defers to wiki/index.md instead of a
+  duplicated page list; sibling-repo (Isaac) sources are snapshotted into
+  raw/isaac/; docs/Agent_Wiki/Current_Status.md reduced to a navigation
+  pointer; SKILL.md ingest note updated.
+
+## [2026-07-03] ingest | Ballistic-regression ball publisher (Isaac pop parity)
+
+- Source: new code `src/ur3e_live_catch/ur3e_live_catch/ball_regression.py` /
+  `ball_regression_node.py`, `use_ball_regression` launch wiring, live-node
+  `use_ball_state_velocity` + velocity-filter reset bugfix; sim validation with
+  noisy/dropout virtual ball (single pop, fit velocity ≈ v0, ground end).
+- Updated: [Live Catch Loop](live-catch/live-catch-loop.md)
+- Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+
+## [2026-07-03] ingest | Tracker publishes Trace-pipeline pose (pose_source)
+
+- Source: code review of Ball_Tracking_Cpp confirming all three regression
+  paths (Update3DTrack, Trace ribbon, Draw3DScene stabilized curve) were
+  GUI-only; new `pose_source` parameter ("trace" in bring-up config, "circle"
+  code default) publishes the outlier-filtered mid-window Trace pose stamped at
+  its own event time, remap inverted back to camera_optical.
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)

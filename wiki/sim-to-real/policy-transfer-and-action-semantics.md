@@ -1,7 +1,7 @@
 # Policy Transfer And Action Semantics
 
-> Sources: sim-to-real plan, 2026-07-01; action-space decision, 2026-06-29; sim-to-real proposals, 2026-06-30; model README, 2026-07-01
-> Raw: [Sim-to-real plan](../../docs/Robot_Control/ur3e_ball_catch_sim_to_real.md); [Action-space decision](../../docs/Robot_Control/ur3e_choix_espace_action_isaac.md); [Proposals](../../docs/Robot_Control/ur3e_sim2real_propositions.md); [Model README](../../data/models/README.md)
+> Sources: sim-to-real plan, 2026-07-01; action-space decision, 2026-06-29; sim-to-real proposals, 2026-06-30; model README, 2026-07-01; agent review corrections, 2026-07-03
+> Raw: [Sim-to-real plan](../../docs/Robot_Control/ur3e_ball_catch_sim_to_real.md); [Action-space decision](../../docs/Robot_Control/ur3e_choix_espace_action_isaac.md); [Proposals](../../docs/Robot_Control/ur3e_sim2real_propositions.md); [Model README](../../data/models/README.md); [Agent review](../../raw/reviews/2026-07-02-stage-wiki-and-training-review.md)
 
 ## Overview
 
@@ -42,10 +42,12 @@ acceleration limits, `observation_frame=base_link`, `disk_radius_m=0.05`, and
 the incremental action semantics.
 Those exports carry the UR3e HARD velocity limits as `v_safe` (π rad/s base
 joints, 2π rad/s wrists) and ±2π position bounds, and the policy saturates its
-raw actions, so deployment runs every joint at full speed. On 2026-07-02 the
-Isaac `FirstTraining` cfg was changed to half velocities/accelerations and ±π
-position bounds — this only lands in metadata after retraining; until then the
-live node's `v_safe_scale` parameter provides the robot-side slow-down.
+raw actions, so deployment runs every joint at full speed. The halved
+velocities/accelerations and ±π position bounds exist in the Isaac
+`FirstTraining` cfg only as uncommitted working-tree changes in the local
+checkout (verified 2026-07-03, not in the last commit) — they only land in
+metadata after commit, retraining and re-export; until then the live node's
+`v_safe_scale` parameter provides the robot-side slow-down.
 The SKRL policy has `clip_actions=false`; the environment/action mapper clip to
 `[-1, 1]` before integration and feed back that clipped action in observation
 component 9.
@@ -66,6 +68,7 @@ component 9.
 
 ## See Also
 
+- [Isaac Training Environment](isaac-training-environment.md)
 - [Observation Latency And Models](observation-latency-and-models.md)
 - [Live Catch Loop](../live-catch/live-catch-loop.md)
 - [UR3e Actuator Identification](../system-id/ur3e-actuator-identification.md)

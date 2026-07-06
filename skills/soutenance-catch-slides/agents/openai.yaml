@@ -1,0 +1,4 @@
+interface:
+  display_name: "Soutenance Catch Slides"
+  short_description: "Slides LaTeX visuelles style Catch a ball"
+  default_prompt: "Use $soutenance-catch-slides to create or adjust LaTeX/TikZ soutenance slides in the Catch a ball visual style."

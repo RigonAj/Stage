@@ -105,15 +105,15 @@ def v_safe_vector(
 
 
 def scale_bounds(bounds: Sequence[JointBound], scale: float) -> list[JointBound]:
-    """Scale ``v_safe``/``a_safe`` of metadata bounds by a bring-up factor.
+    """Scale ``v_safe``/``a_safe`` of metadata bounds by a test factor.
 
-    Position limits are untouched. ``scale < 1`` slows the whole command chain
-    (ActionMapper integrator AND SafetyLimiter share the returned bounds), which
-    intentionally diverges from the trained metadata contract — a bring-up
-    safety knob, not a fidelity mode.
+    Position limits are untouched. The ActionMapper integrator and SafetyLimiter
+    share the returned bounds. ``scale=1`` is the trained metadata contract;
+    values below 1 are bring-up slowdowns, and values above 1 are deliberate
+    lab-test overdrives that can exceed metadata/UR nominal velocity limits.
     """
-    if not (0.0 < scale <= 1.0):
-        raise ValueError(f"scale must be in (0, 1], got {scale}")
+    if not (0.0 < scale <= 4.0):
+        raise ValueError(f"scale must be in (0, 4], got {scale}")
     if scale == 1.0:
         return list(bounds)
     return [

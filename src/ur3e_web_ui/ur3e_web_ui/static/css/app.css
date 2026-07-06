@@ -106,6 +106,20 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .row.gap { gap: 10px; flex-wrap: wrap; }
 
+.inline-field {
+  display: grid;
+  grid-template-columns: auto minmax(88px, 120px);
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inline-field input {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
 button {
   background: var(--panel2);
   color: var(--text);

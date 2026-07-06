@@ -27,6 +27,7 @@ setup(
             "float32_adapter = ur3e_live_catch.float32_adapter:main",
             "live_catch_node = ur3e_live_catch.live_catch_node:main",
             "latency_report = ur3e_live_catch.latency_report:main",
+            "ball_regression_node = ur3e_live_catch.ball_regression_node:main",
         ],
     },
 )

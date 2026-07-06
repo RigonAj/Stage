@@ -6,9 +6,11 @@ from fastapi import HTTPException
 from ur3e_web_ui.app import _strip_ros_args, build_parser
 from ur3e_web_ui.app import (
     CatchBallConfigRequest,
+    CatchVSafeScaleRequest,
     _active_model_name,
     _discover_catch_models,
     _validate_ball_config,
+    _validate_v_safe_scale,
 )
 
 
@@ -88,6 +90,39 @@ def test_validate_ball_config_rejects_out_of_bounds_flight_time():
             CatchBallConfigRequest(p0=[-1.0, 1.5, 0.4], v0=[1.5, -1.0, 2.5], flight_s=99.0),
             require_all=True,
         )
+
+
+def test_validate_v_safe_scale_accepts_staged_values():
+    assert _validate_v_safe_scale(CatchVSafeScaleRequest(scale=0.5)) == 0.5
+    assert _validate_v_safe_scale(CatchVSafeScaleRequest(scale=0.7)) == 0.7
+    assert _validate_v_safe_scale(CatchVSafeScaleRequest(scale=0.85)) == 0.85
+    assert _validate_v_safe_scale(CatchVSafeScaleRequest(scale=1.0)) == 1.0
+    assert _validate_v_safe_scale(CatchVSafeScaleRequest(scale=1.5)) == 1.5
+    assert _validate_v_safe_scale(CatchVSafeScaleRequest(scale=2.0)) == 2.0
+    assert _validate_v_safe_scale(CatchVSafeScaleRequest(scale=3.0)) == 3.0
+    assert _validate_v_safe_scale(CatchVSafeScaleRequest(scale=4.0)) == 4.0
+
+
+def test_validate_v_safe_scale_rejects_out_of_bounds_values():
+    for scale in (0.0, -0.1, 4.01):
+        with pytest.raises(HTTPException):
+            _validate_v_safe_scale(CatchVSafeScaleRequest(scale=scale))
+
+
+def test_catch_panel_exposes_v_safe_scale_operator_control():
+    root = Path(__file__).parents[1] / "ur3e_web_ui" / "static"
+    html = (root / "index.html").read_text()
+    source = (root / "js" / "catch_panel.js").read_text()
+
+    assert 'id="catch-v-safe-scale"' in html
+    assert 'id="btn-catch-v-safe-apply"' in html
+    for scale in ("0.5", "0.7", "0.85", "1.0", "1.25", "1.5", "2.0", "2.5", "3.0", "4.0"):
+        assert f'data-v-safe-scale="{scale}"' in html
+    assert 'api.get("/api/catch/v_safe_scale")' in source
+    assert 'api.post("/api/catch/v_safe_scale"' in source
+    assert "this.commandEnabled || !this.modelReady" in source
+    assert "v_safe_scale must be in (0, 4]" in source
+    assert "overdrive test" in source
 
 
 def _write_model(root, name, *, onnx=True, torch=True):

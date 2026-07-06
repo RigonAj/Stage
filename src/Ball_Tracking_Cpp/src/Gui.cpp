@@ -763,6 +763,7 @@ void Gui::UpdateTraceAnalysis() {
     traceGroundTruthEstimateWorld3D = std::move(traceAnalysis_.groundTruthEstimatePoints);
     trace3DValid = traceAnalysis_.valid;
     traceCurrentWorld3D = traceAnalysis_.currentWorld;
+    traceCurrentWorldTimestampUs_ = traceAnalysis_.currentWorldTimestampUs;
     tracePoseText3D = traceAnalysis_.poseText;
 }
 
@@ -2029,6 +2030,7 @@ void Gui::ResetTraceAccumulation() {
 void Gui::ClearTrace3D() {
     trace3DValid = false;
     traceCurrentWorld3D = {0.0f, 0.0f, 0.0f};
+    traceCurrentWorldTimestampUs_ = 0;
     traceWorld3D.clear();
     traceTimes3D.clear();
     traceGroundTruthWorld3D.clear();

@@ -102,6 +102,37 @@ class FrameError(ValueError):
     """The declared frame_id is empty or no transform is available for it."""
 
 
+def producer_velocity(
+    velocity: Sequence[float],
+    frame_id: str,
+    base_frame: str,
+    transform: Optional[RigidTransform] = None,
+    max_speed: Optional[float] = None,
+) -> Optional[Vec3]:
+    """Producer-supplied ball velocity in the policy frame, or ``None``.
+
+    Convention: an exactly-zero vector means "not provided" (the C++ tracker and
+    ``test_ball_node`` leave the field default-constructed); the regression node
+    always fills it from the fit derivative. Velocity is a free vector: only the
+    rotation of ``frame_id -> base_frame`` applies, never the translation.
+    ``max_speed`` guards the consumer against upstream bugs: an implausibly fast
+    velocity is treated as not provided so the EMA fallback runs instead.
+    """
+    v = (float(velocity[0]), float(velocity[1]), float(velocity[2]))
+    norm = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+    if norm <= 1e-9:
+        return None
+    if not all(math.isfinite(c) for c in v):
+        return None
+    if max_speed is not None and norm > max_speed:
+        return None
+    if frame_id == base_frame:
+        return v
+    if transform is None:
+        return None  # cannot express it in the policy frame; let the filter run
+    return _quat_rotate(transform.quaternion, v)
+
+
 class BallFrameTransformer:
     """Transform a declared ball position into the policy frame and filter velocity."""
 
@@ -120,6 +151,14 @@ class BallFrameTransformer:
         self._vel_filter = BallVelocityFilter(ema_alpha=ema_alpha)
         self.stale_after_s = float(stale_after_s)
         self._last_stamp: Optional[float] = None
+
+    def reset_velocity(self) -> None:
+        """Clear the velocity filter between throws (keeps staleness bookkeeping).
+
+        Without this, the EMA state of the previous flight leaks into the first
+        tick of the next throw (or the ``dt > max_dt`` branch replays it).
+        """
+        self._vel_filter.reset()
 
     def to_base(
         self,

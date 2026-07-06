@@ -704,6 +704,35 @@ class RosBridge:
                 return False, result.reason or "live_catch_node rejected model_path"
         return True, "policy model updated"
 
+    async def get_live_catch_v_safe_scale(self) -> float:
+        """Read live_catch_node.v_safe_scale."""
+        client = self._live_catch_get_params_client
+        if client is None or not client.service_is_ready():
+            raise ActionServerUnavailable(
+                f"live-catch parameter service not available: {LIVE_CATCH_GET_PARAMETERS_SERVICE}"
+            )
+        request = GetParameters.Request()
+        request.names = ["v_safe_scale"]
+        response = await self._await_ros_future(client.call_async(request))
+        if len(response.values) != 1:
+            raise RuntimeError("live_catch_node did not return v_safe_scale")
+        return _parameter_value_to_scalar(response.values[0], "v_safe_scale")
+
+    async def set_live_catch_v_safe_scale(self, scale: float) -> tuple[bool, str]:
+        """Update live_catch_node.v_safe_scale; the node rebuilds mapper/safety bounds."""
+        client = self._live_catch_set_params_client
+        if client is None or not client.service_is_ready():
+            raise ActionServerUnavailable(
+                f"live-catch parameter service not available: {LIVE_CATCH_SET_PARAMETERS_SERVICE}"
+            )
+        request = SetParameters.Request()
+        request.parameters = [_double_parameter("v_safe_scale", scale)]
+        response = await self._await_ros_future(client.call_async(request))
+        for result in response.results:
+            if not result.successful:
+                return False, result.reason or "live_catch_node rejected v_safe_scale"
+        return True, "v_safe_scale updated"
+
 
 def _duration_from_seconds(seconds: float) -> Duration:
     whole = int(math.floor(seconds))
@@ -745,7 +774,7 @@ def _parameter_value_to_scalar(value: ParameterValue, name: str) -> float:
         return float(value.double_value)
     if value.type == ParameterType.PARAMETER_INTEGER:
         return float(value.integer_value)
-    raise RuntimeError(f"test_ball_node parameter {name} is not a number")
+    raise RuntimeError(f"ROS parameter {name} is not a number")
 
 
 def _parameter_value_to_string(value: ParameterValue, name: str) -> str:

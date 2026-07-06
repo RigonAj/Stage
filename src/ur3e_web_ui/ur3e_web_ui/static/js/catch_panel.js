@@ -9,6 +9,16 @@ function fmtMs(seconds, digits = 0) {
   return seconds === null || seconds === undefined ? "–" : `${(seconds * 1000).toFixed(digits)} ms`;
 }
 
+function fmtScale(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "–";
+  return Number(value).toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function vSafeStatusText(scale) {
+  const label = fmtScale(scale);
+  return Number(scale) > 1.0 ? `v_safe_scale: ${label} (overdrive test)` : `v_safe_scale: ${label}`;
+}
+
 const DEFAULT_BALL_CONFIG = {
   p0: [-0.4, 1.65, 0.85],
   v0: [-0.05, -4.25, 0.7],
@@ -55,6 +65,8 @@ export class CatchPanel {
     this.mutingInputs = false;
     this.models = [];
     this.modelReady = false;
+    this.vSafeScale = null;
+    this.vSafeScaleLoaded = false;
     this.ballConfig = {
       p0: [...DEFAULT_BALL_CONFIG.p0],
       v0: [...DEFAULT_BALL_CONFIG.v0],
@@ -71,6 +83,11 @@ export class CatchPanel {
     }
     document.getElementById("catch-model-select").addEventListener("change", () => this.refreshButtons());
     document.getElementById("btn-catch-model-apply").addEventListener("click", () => this.applyModel());
+    document.getElementById("catch-v-safe-scale").addEventListener("input", () => this.refreshButtons());
+    document.getElementById("btn-catch-v-safe-apply").addEventListener("click", () => this.applyVSafeScale());
+    for (const button of document.querySelectorAll("[data-v-safe-scale]")) {
+      button.addEventListener("click", () => this.applyVSafeScale(Number.parseFloat(button.dataset.vSafeScale)));
+    }
     document.getElementById("btn-catch-apply-ball").addEventListener("click", () => this.applyBallConfig());
     document.getElementById("btn-catch-reset-ball").addEventListener("click", () => this.resetBallConfig());
     document.getElementById("btn-catch-isaac-random").addEventListener("click", () => this.throwIsaacRandomBall());
@@ -89,6 +106,7 @@ export class CatchPanel {
     }
     this.setLaunchMode("move");
     this.loadModels();
+    this.loadVSafeScale();
   }
 
   // Pick which gizmo the mouse drives: move p0 (translate) | aim v0 (rotate) | speed |v0| (scale).
@@ -151,6 +169,39 @@ export class CatchPanel {
     }
   }
 
+  async loadVSafeScale() {
+    try {
+      const result = await api.get("/api/catch/v_safe_scale");
+      this.vSafeScale = Number(result.scale);
+      this.vSafeScaleLoaded = true;
+      this.writeVSafeScale(this.vSafeScale);
+      this.setVSafeScaleStatus(this.vSafeScale);
+      this.refreshButtons();
+    } catch (error) {
+      this.vSafeScaleLoaded = false;
+      this.setVSafeScaleStatus(null, error.message);
+      this.refreshButtons();
+    }
+  }
+
+  async applyVSafeScale(scale = null) {
+    if (this.commandEnabled) return;
+    try {
+      const next = scale === null ? this.readVSafeScale() : scale;
+      this.writeVSafeScale(next);
+      const result = await api.post("/api/catch/v_safe_scale", { scale: next });
+      this.vSafeScale = Number(result.scale);
+      this.vSafeScaleLoaded = true;
+      this.writeVSafeScale(this.vSafeScale);
+      this.setVSafeScaleStatus(this.vSafeScale);
+      this.refreshButtons();
+    } catch (error) {
+      this.onError(`v_safe_scale: ${error.message}`);
+      this.setVSafeScaleStatus(null, error.message);
+      this.refreshButtons();
+    }
+  }
+
   resetBallConfig() {
     this.setBallConfig(DEFAULT_BALL_CONFIG, "launch frame reset");
   }
@@ -207,6 +258,7 @@ export class CatchPanel {
     this.commandEnabled = !!status.command_enabled;
 
     if (this.configReady && !this.configLoaded) this.loadBallConfig();
+    if (this.modelReady && !this.vSafeScaleLoaded) this.loadVSafeScale();
 
     document.getElementById("btn-catch-throw").disabled = !status.throw_ready || !this.configReady;
     document.getElementById("btn-catch-apply-ball").disabled = !this.configReady;
@@ -260,6 +312,22 @@ export class CatchPanel {
       modelSelect.disabled = this.commandEnabled || !this.models.length;
       modelButton.disabled =
         this.commandEnabled || !this.modelReady || !selected || !selected.available || selected.active;
+    }
+    const scaleInput = document.getElementById("catch-v-safe-scale");
+    const scaleButton = document.getElementById("btn-catch-v-safe-apply");
+    if (scaleInput && scaleButton) {
+      let scaleValid = false;
+      try {
+        this.readVSafeScale();
+        scaleValid = true;
+      } catch (_) {
+        scaleValid = false;
+      }
+      scaleInput.disabled = this.commandEnabled || !this.modelReady;
+      scaleButton.disabled = this.commandEnabled || !this.modelReady || !scaleValid;
+    }
+    for (const button of document.querySelectorAll("[data-v-safe-scale]")) {
+      button.disabled = this.commandEnabled || !this.modelReady;
     }
   }
 
@@ -323,6 +391,23 @@ export class CatchPanel {
     if (config.flight_s != null) {
       document.getElementById(FLIGHT_FIELD_ID).value = Number(config.flight_s).toFixed(2);
     }
+  }
+
+  readVSafeScale() {
+    const scale = this.readNumber("catch-v-safe-scale");
+    if (!(scale > 0.0 && scale <= 4.0)) throw new Error("v_safe_scale must be in (0, 4]");
+    return scale;
+  }
+
+  writeVSafeScale(scale) {
+    document.getElementById("catch-v-safe-scale").value = fmtScale(scale);
+  }
+
+  setVSafeScaleStatus(scale, error = null) {
+    const el = document.getElementById("catch-v-safe-status");
+    if (!el) return;
+    el.textContent = error ? `v_safe_scale: ${error}` : vSafeStatusText(scale);
+    el.className = "goal-status " + (!error && Number(scale) > 1.0 ? "active" : "");
   }
 
   writeModels(models, active) {

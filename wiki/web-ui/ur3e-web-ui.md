@@ -1,7 +1,7 @@
 # UR3e Web UI
 
-> Sources: web UI docs, 2026-07-01; robot control architecture, 2026-06-29; live-catch package README, 2026-07-01
-> Raw: [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live-catch README](../../src/ur3e_live_catch/README.md)
+> Sources: web UI docs, 2026-07-01; robot control architecture, 2026-06-29; live-catch package README, 2026-07-01; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03
+> Raw: [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
 
 ## Overview
 
@@ -20,16 +20,22 @@ target validation, rollout replay, calibration and live-catch test interaction.
 ## Live-Catch UI Role
 
 The Test tab can launch a virtual ball, display the ball trajectory and policy
-ghost, select the active `latest` or `best` model from `data/models/`, and
-toggle `live_catch_node` command mode through services. It is not on the hot
-path; it is telemetry and operator control.
+ghost, select the active `latest` or `best` model from `data/models/`, tune
+`live_catch_node.v_safe_scale`, and toggle `live_catch_node` command mode
+through services. It is not on the hot path; it is telemetry and operator
+control.
 
-Current gap: the Test tab does not expose `live_catch_node.v_safe_scale`. That
-scale is still configured in `src/ur3e_live_catch/config/live_catch.yaml`
-(`0.5` for conservative bring-up), so changing the live-catch speed currently
-requires config/launch work rather than a UI field. A future UI control should be
-disabled while command mode is active and should rebuild the live node's
-mapper/safety bounds explicitly after changing the parameter.
+The `v_safe_scale` control reads/writes `/live_catch_node` parameters through
+`/api/catch/v_safe_scale`. It exposes the staged values `0.5`, `0.7`, `0.85`,
+`1.0`, `1.25`, `1.5`, `2.0`, `2.5`, `3.0` and `4.0`, plus a numeric input
+constrained to `(0, 4]`.
+Values above `1.0` are labeled as overdrive tests because they exceed the trained
+metadata contract. The control is disabled while command mode is active, the
+FastAPI endpoint rejects changes when telemetry reports `command_enabled=true`,
+and `live_catch_node` also rejects runtime `v_safe_scale` parameter changes while
+command mode is enabled. Accepted changes rebuild the live node's mapper, safety
+bounds, streamer and dry-run simulation state explicitly, so operators no longer
+need to edit `src/ur3e_live_catch/config/live_catch.yaml` between dry-run trials.
 
 Model selection is deliberately narrow: the backend exposes only
 `data/models/latest` and `data/models/best`, prefers ONNX over TorchScript, and

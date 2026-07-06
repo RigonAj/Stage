@@ -342,6 +342,9 @@ int64_t TraceTimeOriginUs(const std::vector<TracePoint> &tracePoints);
 struct Trace3DAnalysis {
     bool valid = false;
     Vector3 currentWorld{0.0f, 0.0f, 0.0f};
+    // Absolute event time of currentWorld (the mid-window sample): trace
+    // times are relative to traceTimeOriginUs.
+    int64_t currentWorldTimestampUs = 0;
     std::vector<Vector3> worldPoints;
     std::vector<float> times;
     std::vector<Vector3> groundTruthPoints;

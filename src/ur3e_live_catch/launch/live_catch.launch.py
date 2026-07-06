@@ -30,7 +30,7 @@ import subprocess
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -93,6 +93,15 @@ def generate_launch_description() -> LaunchDescription:
     use_test_ball = LaunchConfiguration("use_test_ball")
     publish_frame = LaunchConfiguration("publish_frame")
     trigger_mode = LaunchConfiguration("trigger_mode")
+    use_ball_regression = LaunchConfiguration("use_ball_regression")
+    # With the regression node enabled, every raw source is re-pointed to
+    # ball_state_raw and the regression republishes the fitted BallState on
+    # ball_state (live_catch_node.ball_topic stays untouched). With the arg
+    # false this expression resolves to "ball_state": byte-identical wiring.
+    raw_ball_topic = PythonExpression(
+        ["'ball_state_raw' if '", use_ball_regression,
+         "'.lower() in ('true', '1') else 'ball_state'"]
+    )
 
     overrides = {
         "enable_command": ParameterValue(enable_command, value_type=bool),
@@ -118,6 +127,9 @@ def generate_launch_description() -> LaunchDescription:
                               description="test_ball_node frame: base_link | <camera_frame> (archi §12)"),
         DeclareLaunchArgument("trigger_mode", default_value="false",
                               description="test_ball_node: true => throw on demand (~/throw service, web UI)"),
+        DeclareLaunchArgument("use_ball_regression", default_value="false",
+                              description="insert the ballistic-regression ball publisher: raw sources "
+                                          "publish ball_state_raw, the fitted BallState lands on ball_state"),
         DeclareLaunchArgument("policy_python", default_value=policy_python_default,
                               description="python interpreter for live_catch_node; empty => ROS Python"),
         LogInfo(msg=interpreter_note),
@@ -133,7 +145,7 @@ def generate_launch_description() -> LaunchDescription:
             package="ball_tracking_cpp",
             executable="talker",
             name="ball_tracking_cpp",
-            parameters=[config],
+            parameters=[config, {"ball_state_topic": raw_ball_topic}],
             output="screen",
             condition=IfCondition(use_tracker),
         ),
@@ -141,7 +153,7 @@ def generate_launch_description() -> LaunchDescription:
             package="ur3e_live_catch",
             executable="float32_adapter",
             name="ball_float32_adapter",
-            parameters=[config],
+            parameters=[config, {"output_topic": raw_ball_topic}],
             output="screen",
             condition=IfCondition(use_adapter),
         ),
@@ -151,10 +163,19 @@ def generate_launch_description() -> LaunchDescription:
             name="test_ball_node",
             parameters=[
                 config,
+                {"output_topic": raw_ball_topic},
                 {"publish_frame": publish_frame},
                 {"trigger_mode": ParameterValue(trigger_mode, value_type=bool)},
             ],
             output="screen",
             condition=IfCondition(use_test_ball),
+        ),
+        Node(
+            package="ur3e_live_catch",
+            executable="ball_regression_node",
+            name="ball_regression_node",
+            parameters=[config],
+            output="screen",
+            condition=IfCondition(use_ball_regression),
         ),
     ])

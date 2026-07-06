@@ -31,7 +31,9 @@ Use `docs/Agent_Wiki/` only as a secondary navigation layer.
 
 - **Ingest**: add external sources to `raw/` or cite existing repository files,
   update/create concept pages under `wiki/`, cascade updates to related pages,
-  update `wiki/index.md`, append to `wiki/log.md`.
+  update `wiki/index.md`, append to `wiki/log.md`. Facts from the sibling Isaac
+  training repo are snapshotted into `raw/isaac/` (see AGENTS.md); `Raw:` links
+  must resolve inside this repository.
 - **Query**: read `wiki/index.md`, then relevant compiled pages. Prefer wiki
   content over model memory and cite project-root paths in the answer. Do not
   write files unless asked to save/archive.

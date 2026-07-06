@@ -123,6 +123,7 @@ private:
     int64_t traceMotionTimestampUs = std::numeric_limits<int64_t>::min();
     bool trace3DValid = false;
     Vector3 traceCurrentWorld3D{0.0f, 0.0f, 0.0f};
+    int64_t traceCurrentWorldTimestampUs_ = 0;
     std::vector<Vector3> traceWorld3D;
     std::vector<float> traceTimes3D;
     std::vector<Vector3> traceGroundTruthWorld3D;
@@ -222,6 +223,18 @@ public:
     void ClearTraceMotionWindow();
     void ResetTraceAccumulation();
     void ClearTrace3D();
+    // Outlier-filtered mid-window trace pose for external consumers (ROS
+    // publication). worldMeters uses the ToMeters convention ({x, z, -y} of
+    // the camera frame, meters); timestampUs is the sample's own event time,
+    // so consumers can deduplicate by requiring it to advance.
+    struct TracePoseSample {
+        bool valid = false;
+        Vector3 worldMeters{0.0f, 0.0f, 0.0f};
+        int64_t timestampUs = 0;
+    };
+    TracePoseSample CurrentTracePoseSample() const {
+        return {trace3DValid, traceCurrentWorld3D, traceCurrentWorldTimestampUs_};
+    }
     const CalibrationData *ReaderCalibrationOverride() const;
     const std::string &ReaderEventPath() const { return path_reader_; }
 

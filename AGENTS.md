@@ -20,22 +20,9 @@ only to verify details or resolve contradictions.
 
 1. Read `wiki/index.md`.
 2. Read `wiki/log.md` only if recent wiki history matters.
-3. Read the relevant compiled page:
-   - `wiki/perception/trace-ball-tracking.md`
-   - `wiki/calibration/camera-and-handeye-calibration.md`
-   - `wiki/calibration/frames-and-transforms.md`
-   - `wiki/robot-control/ur3e-control-stack.md`
-   - `wiki/live-catch/live-catch-loop.md`
-   - `wiki/live-catch/message-contracts-and-topics.md`
-   - `wiki/live-catch/safety-and-commanding.md`
-   - `wiki/live-catch/current-status-and-blockers.md`
-   - `wiki/sim-to-real/policy-transfer-and-action-semantics.md`
-   - `wiki/sim-to-real/observation-latency-and-models.md`
-   - `wiki/system-id/ur3e-actuator-identification.md`
-   - `wiki/replay/rollout-replay-and-driver-setup.md`
-   - `wiki/web-ui/ur3e-web-ui.md`
-   - `wiki/operations/testing-and-commands.md`
-   - `wiki/operations/source-document-map.md`
+3. Pick the relevant compiled page from the `wiki/index.md` tables.
+   `wiki/index.md` is the single authoritative list of articles; do not
+   duplicate that list here.
 4. Open raw repository docs linked in the page's `Raw:` field only when needed.
 5. Use `docs/Agent_Wiki/` as a secondary Obsidian/navigation layer, not the
    primary compiled wiki.
@@ -62,6 +49,13 @@ DVXplorer camera and UR3e robot interception. It combines:
 - Avoid loading `raygui.h` unless the issue is directly about raygui.
 - Prefer package-local tests and docs before scanning the whole repository.
 - Prefer `rg` / `rg --files` for discovery.
+
+## Soutenance Slide Requests
+
+When the user asks to create, modify, continue, or fix the soutenance
+diaporama/slides, read `skills/soutenance-catch-slides/SKILL.md` before editing
+the LaTeX deck. Follow that skill for the Catch a ball visual style, Okular
+video handling, layout validation, and common slide-design errors to avoid.
 
 ## Wiki Page Conventions
 
@@ -99,6 +93,11 @@ new project knowledge.
      and `Published` metadata.
    - Existing repository source: do not duplicate it into `raw/`; cite the
      existing path in the article `Raw:` field.
+   - Sibling-repo source (e.g. the Isaac training repo
+     `/home/rigon/Documents/6-Dof-Ur3e-Catch-a-ball`): treat it as external.
+     Snapshot the cited doc into `raw/isaac/YYYY-MM-DD-slug.md` with the same
+     metadata header; the lint rejects `Raw:` links that resolve outside this
+     repository, so never link the sibling checkout directly.
 2. Read `wiki/index.md` first to find the best topic and existing article.
 3. Merge into an existing article when it is the same concept. Create a new
    `wiki/<topic>/<concept-slug>.md` article only for a distinct concept.

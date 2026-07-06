@@ -47,7 +47,12 @@ from tf2_ros import Buffer, TransformListener
 
 from ur3e_catch_msgs.msg import BallState, CatchTelemetry
 from ur3e_live_catch.action import ActionMapper
-from ur3e_live_catch.ball_frame import BallFrameTransformer, FrameError, RigidTransform
+from ur3e_live_catch.ball_frame import (
+    BallFrameTransformer,
+    FrameError,
+    RigidTransform,
+    producer_velocity,
+)
 from ur3e_live_catch.joint_order import JointOrderError, reorder_by_name
 from ur3e_live_catch.joint_order import JOINT_ORDER
 from ur3e_live_catch.limits import (
@@ -108,6 +113,15 @@ class LiveCatchNode(Node):
         self.declare_parameter("units", "m")
         self.declare_parameter("model_path", "")  # "" => canonical then fallback
         self.declare_parameter("stale_after_s", 0.1)
+        # Trust a producer-supplied BallState.velocity (exactly-zero = not
+        # provided -> EMA fallback). The regression node fills it from the fit
+        # derivative so the policy sees a clean velocity from the first tick,
+        # like an Isaac spawn.
+        self.declare_parameter("use_ball_state_velocity", True)
+        # Consumer sanity bounds: an upstream bug (bad TF, corrupt velocity)
+        # must not reach the policy observation unchecked.
+        self.declare_parameter("max_ball_speed_m_s", 12.0)
+        self.declare_parameter("max_ball_distance_m", 4.0)
         # Dry-run fallback when no TF base_link->hoop is available. Command mode
         # refuses fallback; serious inference tests should publish hoop_center TF.
         self.declare_parameter("disk_pos_fallback", [0.0, 0.0, 0.5])
@@ -130,8 +144,8 @@ class LiveCatchNode(Node):
         # velocity violations. > loop_hz => a fast timer publishes interpolated
         # set-points; <= loop_hz => legacy one-command-per-tick behavior.
         self.declare_parameter("command_rate_hz", 500.0)
-        # Bring-up slowdown of metadata bounds (v_safe AND a_safe). 1.0 = trained
-        # contract; < 1.0 diverges from training but keeps early hardware runs slow.
+        # Test scaling of metadata bounds (v_safe AND a_safe). 1.0 = trained
+        # contract; < 1.0 slows bring-up, > 1.0 intentionally overdrives lab tests.
         self.declare_parameter("v_safe_scale", 1.0)
         # Refuse the FIRST command of a session when a measured joint exceeds this:
         # catches ±2π-wrapped /joint_states branches (wrist at "360°") that the UR
@@ -363,47 +377,87 @@ class LiveCatchNode(Node):
             dt=self._dt,
         )
 
-    def _rebuild_policy_dependent_state(self) -> None:
+    def _rebuild_policy_dependent_state(self, *, v_safe_scale: float | None = None) -> None:
         self._obs_builder = ObservationBuilder(disk_radius=self._disk_radius_from_metadata())
-        self._bounds = self._make_bounds()
+        self._bounds = self._make_bounds(v_safe_scale=v_safe_scale)
         self._action_mapper = self._make_action_mapper()
         self._safety = SafetyLimiter(self._bounds, self._dt)
         self._streamer = CommandStreamer(substeps=int(self.get_parameter("command_substeps").value))
         self._cmd_goal = None
         self._reset_sim()
 
-    def _set_model_path_runtime(self, configured: str) -> None:
+    def _set_model_path_runtime(self, configured: str, *, v_safe_scale: float | None = None) -> None:
         runner, metadata, model_path = self._load_policy_bundle(configured, allow_missing=False)
         assert runner is not None
         assert model_path is not None
         self._policy = runner
         self._policy_metadata = metadata
         self._policy_model_path = model_path
-        self._rebuild_policy_dependent_state()
+        self._rebuild_policy_dependent_state(v_safe_scale=v_safe_scale)
         self.get_logger().info(
             f"policy model switched: {model_path}, action_mode={self._action_mapper.mode}"
         )
 
+    def _set_v_safe_scale_runtime(self, scale: float) -> None:
+        self._rebuild_policy_dependent_state(v_safe_scale=scale)
+        self.get_logger().info(
+            "v_safe_scale updated: "
+            f"{scale:g}, v_safe=" + ", ".join(f"{b.v_safe:.3f}" for b in self._bounds) + " rad/s"
+        )
+
     def _on_set_parameters(self, parameters) -> SetParametersResult:
+        next_model_path = str(self.get_parameter("model_path").value or "")
+        next_v_safe_scale = self._v_safe_scale_value()
+        model_changed = False
+        scale_changed = False
+
         for parameter in parameters:
-            if parameter.name != "model_path":
-                continue
-            configured = str(parameter.value or "")
-            if configured == str(self.get_parameter("model_path").value or ""):
-                continue
-            if self._enable_command:
-                return SetParametersResult(
-                    successful=False,
-                    reason="cannot change model_path while command mode is enabled",
-                )
-            try:
-                self._set_model_path_runtime(configured)
-            except Exception as exc:
-                return SetParametersResult(successful=False, reason=str(exc))
+            if parameter.name == "model_path":
+                configured = str(parameter.value or "")
+                if configured != next_model_path:
+                    next_model_path = configured
+                    model_changed = True
+            elif parameter.name == "v_safe_scale":
+                try:
+                    scale = self._v_safe_scale_value(parameter.value)
+                except (TypeError, ValueError) as exc:
+                    return SetParametersResult(successful=False, reason=str(exc))
+                if scale != next_v_safe_scale:
+                    next_v_safe_scale = scale
+                    scale_changed = True
+
+        if not model_changed and not scale_changed:
+            return SetParametersResult(successful=True)
+        if self._enable_command:
+            names = []
+            if model_changed:
+                names.append("model_path")
+            if scale_changed:
+                names.append("v_safe_scale")
+            return SetParametersResult(
+                successful=False,
+                reason=f"cannot change {'/'.join(names)} while command mode is enabled",
+            )
+
+        try:
+            if model_changed:
+                self._set_model_path_runtime(next_model_path, v_safe_scale=next_v_safe_scale)
+            elif scale_changed:
+                self._set_v_safe_scale_runtime(next_v_safe_scale)
+        except Exception as exc:
+            return SetParametersResult(successful=False, reason=str(exc))
         return SetParametersResult(successful=True)
 
-    def _make_bounds(self):
-        metadata_bounds = self._bounds_from_metadata()
+    def _v_safe_scale_value(self, value: Any | None = None) -> float:
+        raw = self.get_parameter("v_safe_scale").value if value is None else value
+        scale = float(raw)
+        if not (0.0 < scale <= 4.0):
+            raise ValueError(f"v_safe_scale must be in (0, 4], got {scale:g}")
+        return scale
+
+    def _make_bounds(self, *, v_safe_scale: float | None = None):
+        scale = self._v_safe_scale_value(v_safe_scale)
+        metadata_bounds = self._bounds_from_metadata(v_safe_scale=scale)
         if metadata_bounds is not None:
             self.get_logger().info("using policy_metadata.json joint limits for action/safety bounds")
             return metadata_bounds
@@ -440,7 +494,7 @@ class LiveCatchNode(Node):
                 return value
         return float(self.get_parameter("disk_radius").value)
 
-    def _bounds_from_metadata(self) -> Optional[list[JointBound]]:
+    def _bounds_from_metadata(self, *, v_safe_scale: float | None = None) -> Optional[list[JointBound]]:
         lower = self._metadata_vector("joint_position_lower_rad")
         upper = self._metadata_vector("joint_position_upper_rad")
         v_safe = self._metadata_vector("joint_velocity_safe_rad_s")
@@ -456,13 +510,19 @@ class LiveCatchNode(Node):
             )
             for i in range(6)
         ]
-        scale = float(self.get_parameter("v_safe_scale").value)
+        scale = self._v_safe_scale_value(v_safe_scale)
         if scale != 1.0:
             bounds = scale_bounds(bounds, scale)
-            self.get_logger().warn(
-                f"v_safe_scale={scale:g}: metadata velocity/acceleration bounds scaled "
-                "down for bring-up (closed-loop dynamics diverge from training)"
-            )
+            if scale < 1.0:
+                self.get_logger().warn(
+                    f"v_safe_scale={scale:g}: metadata velocity/acceleration bounds scaled "
+                    "down for bring-up (closed-loop dynamics diverge from training)"
+                )
+            else:
+                self.get_logger().warn(
+                    f"v_safe_scale={scale:g}: metadata velocity/acceleration bounds scaled "
+                    "above the trained/UR nominal contract for lab limit testing"
+                )
         return bounds
 
     def _setup_command_mode(self) -> bool:
@@ -743,6 +803,9 @@ class LiveCatchNode(Node):
         self._safety.reset()
         self._action_mapper.reset()
         self._obs_builder.reset()
+        # Clear the ball velocity EMA too: without this, the previous flight's
+        # velocity leaks into the first tick of the next throw.
+        self._ball_frame.reset_velocity()
         self._prev_action = [0.0] * 6
 
     def _on_tick(self) -> None:
@@ -786,9 +849,28 @@ class LiveCatchNode(Node):
                 (ball.position.x, ball.position.y, ball.position.z),
                 frame_id, stamp_s, transform=transform,
             )
+            if bool(self.get_parameter("use_ball_state_velocity").value):
+                pv = producer_velocity(
+                    (ball.velocity.x, ball.velocity.y, ball.velocity.z),
+                    frame_id, self._ball_frame.base_frame, transform,
+                    max_speed=float(self.get_parameter("max_ball_speed_m_s").value),
+                )
+                if pv is not None:
+                    ball_vel = pv  # fit-derived velocity beats the EMA recompute
         except FrameError as exc:
             self.get_logger().warn(f"ball frame rejected: {exc}", throttle_duration_sec=2.0)
             self._controlled_stop(real_q, ["ball_frame_rejected"])
+            self._publish_heartbeat_telemetry(real_q)
+            return
+
+        # Sanity bound: a ball placed implausibly far (bad TF/extrinsics) is
+        # out-of-distribution for the policy; treat the tick as invalid.
+        max_dist = float(self.get_parameter("max_ball_distance_m").value)
+        if (ball_pos[0] ** 2 + ball_pos[1] ** 2 + ball_pos[2] ** 2) > max_dist * max_dist:
+            self.get_logger().warn(
+                f"ball out of range ({ball_pos[0]:.2f},{ball_pos[1]:.2f},{ball_pos[2]:.2f})"
+                f" > {max_dist:.1f} m: rejecting tick", throttle_duration_sec=2.0)
+            self._controlled_stop(real_q, ["ball_out_of_range"])
             self._publish_heartbeat_telemetry(real_q)
             return
 

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -49,9 +50,18 @@ public:
         const std::string legacy_pose_topic =
             this->declare_parameter<std::string>("legacy_pose_topic", "ball_position_3d_mm");
         publish_legacy_pose_ = this->declare_parameter<bool>("publish_legacy_pose", true);
+        // Which 3D estimate feeds BallState: "circle" = per-detection circle-fit
+        // pose (legacy algorithm, historical default); "trace" = outlier-filtered
+        // mid-window pose from the Trace ribbon pipeline (the primary algorithm:
+        // depth from trail width), stamped at the sample's own event time.
+        pose_source_ = this->declare_parameter<std::string>("pose_source", "circle");
 
         if (camera_frame_id_.empty()) {
             throw std::runtime_error("camera_frame_id must not be empty");
+        }
+        if (pose_source_ != "circle" && pose_source_ != "trace") {
+            throw std::runtime_error(
+                "pose_source must be 'circle' or 'trace', got '" + pose_source_ + "'");
         }
 
         ball_state_publisher_ =
@@ -62,9 +72,10 @@ public:
         }
         RCLCPP_INFO(
             this->get_logger(),
-            "Publishing BallState on '%s' in frame '%s'%s",
+            "Publishing BallState on '%s' in frame '%s' (pose_source=%s)%s",
             ball_state_topic.c_str(),
             camera_frame_id_.c_str(),
+            pose_source_.c_str(),
             publish_legacy_pose_ ? " and legacy ball_position_3d_mm" : "");
 
         timer_ = this->create_wall_timer(1ms, std::bind(&Pub::timer_callback, this));
@@ -80,6 +91,9 @@ private:
     void resetTracks();
     void applyInputCalibration();
     void publishBallPose(const BallPose3D &pose);
+    void publishBallSample(const cv::Point3f &positionMm, int64_t timestampUs);
+    void publishTracePose();
+    static cv::Point3f traceWorldToCameraMm(const Vector3 &worldMeters);
     builtin_interfaces::msg::Time eventStampToRosTime(int64_t eventTimestampUs);
     void draw2DOverlay(const BallPose3D &pose);
     void drawTrackerResult(const BallTrackerResult &result);
@@ -100,8 +114,11 @@ private:
     rclcpp::Publisher<ur3e_catch_msgs::msg::BallState>::SharedPtr ball_state_publisher_;
     std::string camera_frame_id_;
     bool publish_legacy_pose_ = true;
+    std::string pose_source_ = "circle";
+    int64_t last_published_trace_stamp_us_ = std::numeric_limits<int64_t>::min();
     std::optional<int64_t> timestamp_anchor_event_us_;
     std::optional<rclcpp::Time> timestamp_anchor_ros_time_;
+    std::optional<rclcpp::Time> last_stamp_conversion_ros_time_;
     cv::Size resolution;
     Box box;
 
@@ -337,7 +354,9 @@ void Pub::timer_callback() {
     drawTrackerResult(tracking);
 
     if (tracking.pose.has_value()) {
-        publishBallPose(*tracking.pose);
+        if (pose_source_ == "circle") {
+            publishBallPose(*tracking.pose);
+        }
         draw2DOverlay(*tracking.pose);
     }
     else if (!ui.CircleFittingEnabled()) {
@@ -354,6 +373,12 @@ void Pub::timer_callback() {
     gui.ms_loop = std::chrono::duration<double, std::milli>(t_end - t_loop_start).count();
 
     gui.Update();
+
+    // The trace analysis is refreshed inside gui.Update(), so the trace pose
+    // is published after it, from this frame's ribbon fit.
+    if (pose_source_ == "trace") {
+        publishTracePose();
+    }
 }
 
 std::vector<BallTrackerClusterInput> Pub::buildTrackerClusters() const {
@@ -506,6 +531,8 @@ void Pub::resetTracks() {
     gui.ClearCurrentBall3D();
     timestamp_anchor_event_us_.reset();
     timestamp_anchor_ros_time_.reset();
+    last_stamp_conversion_ros_time_.reset();
+    last_published_trace_stamp_us_ = std::numeric_limits<int64_t>::min();
 }
 
 builtin_interfaces::msg::Time Pub::eventStampToRosTime(const int64_t eventTimestampUs) {
@@ -514,12 +541,24 @@ builtin_interfaces::msg::Time Pub::eventStampToRosTime(const int64_t eventTimest
         return now;
     }
 
+    // Re-anchor the event->ROS mapping after every publish gap: the DVS clock
+    // drifts against ROS time, and a single session-long anchor would slowly
+    // push stamps outside downstream freshness guards (silent perception
+    // death). Between-throw silence gives a drift-free re-anchor point while
+    // intra-flight stamps stay monotonic (publishes are milliseconds apart).
+    constexpr double REANCHOR_AFTER_GAP_S = 0.5;
+    const bool gap_expired =
+        last_stamp_conversion_ros_time_.has_value()
+        && (now - *last_stamp_conversion_ros_time_).seconds() > REANCHOR_AFTER_GAP_S;
+
     if (!timestamp_anchor_event_us_.has_value()
         || !timestamp_anchor_ros_time_.has_value()
-        || eventTimestampUs < *timestamp_anchor_event_us_) {
+        || eventTimestampUs < *timestamp_anchor_event_us_
+        || gap_expired) {
         timestamp_anchor_event_us_ = eventTimestampUs;
         timestamp_anchor_ros_time_ = now;
     }
+    last_stamp_conversion_ros_time_ = now;
 
     const int64_t deltaNs = (eventTimestampUs - *timestamp_anchor_event_us_) * 1000;
     return (*timestamp_anchor_ros_time_ + rclcpp::Duration::from_nanoseconds(deltaNs));
@@ -529,15 +568,39 @@ void Pub::publishBallPose(const BallPose3D &pose) {
     if (!pose.valid) {
         return;
     }
+    publishBallSample(pose.positionMm, pose.timestampUs);
+}
 
-    const cv::Point3f &position = pose.positionMm;
+cv::Point3f Pub::traceWorldToCameraMm(const Vector3 &worldMeters) {
+    // Inverse of the util.hpp ToMeters remap (camera mm {x,y,z} -> world m
+    // {x, z, -y}): back to the camera_optical pinhole convention (x right,
+    // y down, z forward) that this node declares in frame_id.
+    return {
+        worldMeters.x * 1.0e3f,
+        -worldMeters.z * 1.0e3f,
+        worldMeters.y * 1.0e3f,
+    };
+}
+
+void Pub::publishTracePose() {
+    const Gui::TracePoseSample sample = gui.CurrentTracePoseSample();
+    // The mid-window sample only advances when new trace events arrive;
+    // requiring a strictly newer stamp deduplicates repeated render frames.
+    if (!sample.valid || sample.timestampUs <= last_published_trace_stamp_us_) {
+        return;
+    }
+    last_published_trace_stamp_us_ = sample.timestampUs;
+    publishBallSample(traceWorldToCameraMm(sample.worldMeters), sample.timestampUs);
+}
+
+void Pub::publishBallSample(const cv::Point3f &position, const int64_t timestampUs) {
     if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
         return;
     }
 
     if (ball_state_publisher_) {
         ur3e_catch_msgs::msg::BallState msg;
-        msg.header.stamp = eventStampToRosTime(pose.timestampUs);
+        msg.header.stamp = eventStampToRosTime(timestampUs);
         msg.header.frame_id = camera_frame_id_;
         msg.position.x = static_cast<double>(position.x) * 1.0e-3;
         msg.position.y = static_cast<double>(position.y) * 1.0e-3;

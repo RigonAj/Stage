@@ -1,7 +1,7 @@
 # Trace Ball Tracking
 
-> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29
-> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md)
+> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03
+> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp)
 
 ## Overview
 
@@ -35,11 +35,26 @@ and converts that apparent diameter into depth.
 
 ## Output Contract
 
-- Native topic: `ball_state`.
+- Native topic: `ball_state` (parameter `ball_state_topic`; the launch re-points
+  it to `ball_state_raw` when the regression publisher is enabled).
 - Message: `ur3e_catch_msgs/BallState`.
-- Position is in meters.
+- Position is in meters, `header.stamp` is event time.
 - `header.frame_id` must be nonempty and match the camera TF frame.
+- `pose_source` parameter selects the published estimate:
+  - `"trace"` (bring-up config): the outlier-filtered mid-window pose from the
+    Trace ribbon pipeline (`Trace3DAnalysis.currentWorld`), stamped at that
+    sample's own event time and deduplicated by requiring the stamp to advance.
+    The internal remapped world frame is converted back to `camera_optical`
+    before publishing. This makes the primary algorithm feed ROS and removes
+    the dependency on the circle-fitting GUI toggle.
+  - `"circle"` (code default): legacy per-detection circle-fit pose, previous
+    behavior.
 - Legacy `ball_position_3d_mm` may still exist, but it is a fallback path.
+- The per-axis temporal regressions inside the tracker (`Update3DTrack`,
+  `Gui::Draw3DScene` trace curve, `StabilizeTraceCurve`) remain GUI diagnostics
+  only; trajectory fitting for deployment lives in the Stage
+  `ball_regression_node` (see
+  [Live Catch Loop](../live-catch/live-catch-loop.md)).
 
 ## Risks
 

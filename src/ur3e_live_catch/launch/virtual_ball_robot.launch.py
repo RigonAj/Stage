@@ -178,6 +178,14 @@ def generate_launch_description() -> LaunchDescription:
                 description="true => virtual ball flies only after /test_ball_node/throw.",
             ),
             DeclareLaunchArgument(
+                "use_ball_regression",
+                default_value="false",
+                description=(
+                    "Insert the ballistic-regression ball publisher between the "
+                    "raw ball source and live_catch (Isaac pop parity)."
+                ),
+            ),
+            DeclareLaunchArgument(
                 "launch_latency_report",
                 default_value="false",
                 description="Start ur3e_live_catch latency_report.",
@@ -217,6 +225,7 @@ def generate_launch_description() -> LaunchDescription:
                     "use_adapter": "false",
                     "trigger_mode": LaunchConfiguration("trigger_mode"),
                     "publish_frame": LaunchConfiguration("publish_frame"),
+                    "use_ball_regression": LaunchConfiguration("use_ball_regression"),
                     "enable_command": LaunchConfiguration("enable_command"),
                     "action_mode": LaunchConfiguration("action_mode"),
                     "model_path": LaunchConfiguration("model_path"),

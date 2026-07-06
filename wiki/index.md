@@ -15,7 +15,7 @@ Event-camera ball tracking and 3D pose estimation.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, output contracts and depth-estimation risks. | 2026-07-01 |
+| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, pose_source trace/circle output contract and depth-estimation risks. | 2026-07-03 |
 
 ## calibration
 
@@ -40,10 +40,10 @@ Closed-loop perception-to-policy-to-robot path.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Live Catch Loop](live-catch/live-catch-loop.md) | Single-process 60 Hz live-catch pipeline, modules, metadata-driven action mapping, safety and tests. | 2026-07-01 |
-| [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState`, `CatchTelemetry`, topics, producers, base_link policy-frame telemetry, idle heartbeat/`ball_valid` contract and timestamp rules. | 2026-07-02 |
-| [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model-switch gate, metadata/model limits, safety limiter, watchdog, controller switching, 500 Hz interpolated streaming, start-pose ±2π gate, hardware gates and slow bring-up tuning. | 2026-07-02 |
-| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, real-UR3e virtual-ball validation, remaining speed/UI/perception blockers, 2026-07-02 pendant incident diagnosis and current model/action status. | 2026-07-02 |
+| [Live Catch Loop](live-catch/live-catch-loop.md) | Single-process 60 Hz live-catch pipeline, modules, optional ballistic-regression ball publisher, metadata-driven action mapping, safety and tests. | 2026-07-03 |
+| [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState` (velocity convention, regression stamps), `ball_state_raw`, `CatchTelemetry`, topics, producers, idle heartbeat/`ball_valid` contract and timestamp rules. | 2026-07-03 |
+| [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model/v_safe_scale runtime gates, metadata/model limits, safety limiter, watchdog, controller switching, 500 Hz interpolated streaming, start-pose ±2π gate, hardware gates and slow bring-up tuning. | 2026-07-03 |
+| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, real-UR3e virtual-ball validation, ballistic-regression ball publisher (sim-validated), Test-tab v_safe_scale tuning, remaining speed/perception blockers, 2026-07-02 pendant incident diagnosis, uncommitted Isaac cfg limit change and current model/action status. | 2026-07-03 |
 
 ## sim-to-real
 
@@ -51,8 +51,9 @@ PPO transfer, policy semantics, action space and latency.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md) | Legacy absolute vs current incremental target-integrator semantics, metadata-driven mapper selection and full-speed metadata limits vs bring-up slow-down. | 2026-07-02 |
-| [Observation Latency And Models](sim-to-real/observation-latency-and-models.md) | Observation construction, latency instrumentation, current model exports, Web UI model selection and metadata validation. | 2026-07-01 |
+| [Isaac Training Environment](sim-to-real/isaac-training-environment.md) | FirstTraining 33-D observation layout, action integrator, reward, terminations, ball distribution, cfg-limit state, train/play/evaluate/export commands and cross-repo export sync. | 2026-07-03 |
+| [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md) | Legacy absolute vs current incremental target-integrator semantics, metadata-driven mapper selection and full-speed metadata limits vs bring-up slow-down (Isaac limit halving still uncommitted). | 2026-07-03 |
+| [Observation Latency And Models](sim-to-real/observation-latency-and-models.md) | Observation construction, ball velocity source (fit vs EMA), latency instrumentation, regression stamp semantics, p50/p95/p99 measurement plan with acceptance anchors, current model exports and metadata validation. | 2026-07-03 |
 
 ## system-id
 
@@ -76,7 +77,7 @@ Browser UI and visualization/control panels.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [UR3e Web UI](web-ui/ur3e-web-ui.md) | FastAPI/Three.js UI structure, base_link robot/viewer contract, Isaac hoop visual, Test tab, model selector, missing v_safe_scale control, calibration tab, rollout tab and API scope. | 2026-07-02 |
+| [UR3e Web UI](web-ui/ur3e-web-ui.md) | FastAPI/Three.js UI structure, base_link robot/viewer contract, Isaac hoop visual, Test tab, model selector, v_safe_scale control, calibration tab, rollout tab and API scope. | 2026-07-03 |
 
 ## operations
 
@@ -84,6 +85,7 @@ Agent workflow, commands and wiki maintenance.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, package tests, Isaac sim2real export/check commands and wiki maintenance commands. | 2026-07-02 |
+| [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, package tests, Isaac sim2real export/check commands (current Isaac repo path) and wiki maintenance commands. | 2026-07-03 |
+| [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md) | Operator checklist before enable_command, ±2π start-pose gate procedure, staged v_safe_scale ramp-up and monitoring points. | 2026-07-03 |
 | [Wiki Maintenance](operations/wiki-maintenance.md) | Ingest/query/lint rules adapted from the Karpathy LLM wiki pattern. | 2026-06-29 |
 | [Source Document Map](operations/source-document-map.md) | How the raw Markdown docs are combined or split into compiled wiki concepts. | 2026-06-29 |

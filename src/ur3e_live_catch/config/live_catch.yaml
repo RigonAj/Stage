@@ -35,8 +35,8 @@ live_catch_node:
     # then ignores commands. The fast timer walks toward the 60 Hz safe target in
     # v_safe/command_rate_hz steps.
     command_rate_hz: 500.0
-    # Bring-up slowdown applied to metadata v_safe AND a_safe (mapper + safety).
-    # 1.0 restores the trained contract; 0.5 halves robot speed for early tests.
+    # Test scale applied to metadata v_safe AND a_safe (mapper + safety).
+    # 1.0 restores the trained contract; 0.5 halves speed; >1.0..4.0 is lab overdrive.
     v_safe_scale: 0.5
     # Refuse the first command of a session when |q_measured| exceeds this: catches
     # ±2π-wrapped /joint_states branches (wrist reading 6.28 rad ~ "360°" while the
@@ -50,6 +50,15 @@ live_catch_node:
     loop_budget_s: 0.02           # watchdog: per-tick compute budget (archi §9)
     max_tracking_error: 0.5       # rad; |q_measured - last_command| watchdog threshold
     joint_limits_path: ""         # "" => use ur_description from the currently sourced ROS distro
+    # Trust a producer-supplied BallState.velocity for the observation (the
+    # regression node fills it from the fit derivative; exactly-zero = not
+    # provided => internal EMA finite-difference fallback).
+    use_ball_state_velocity: true
+    # Consumer sanity bounds: upstream bugs (bad TF, corrupt velocity) must not
+    # reach the policy observation. Velocity above the bound falls back to the
+    # EMA filter; a ball farther than the bound invalidates the tick.
+    max_ball_speed_m_s: 12.0
+    max_ball_distance_m: 4.0
 
 test_ball_node:
   ros__parameters:
@@ -75,6 +84,60 @@ test_ball_node:
     camera_quaternion: [0.0, 0.0, 0.0, 1.0]
     csv_path: ""
 
+# Ballistic-regression ball publisher (Isaac "pop" parity). Enabled by the
+# use_ball_regression launch arg: raw sources are re-pointed to ball_state_raw
+# and this node publishes the fitted BallState on ball_state at rate_hz.
+# Nothing valid is published before the start gate (min_samples/min_span_s/
+# max_rms_m/speed bounds); after a dropout or near the robot the fit freezes
+# and keeps predicting (coast) until ground_z_m (Isaac ball_on_ground parity).
+ball_regression_node:
+  ros__parameters:
+    input_topic: "ball_state_raw"
+    output_topic: "ball_state"
+    base_frame: "base_link"       # fit frame: gravity is -z here
+    units: "m"
+    rate_hz: 60.0                 # output cadence, matches the policy loop
+    max_stamp_age_s: 0.5          # drop raw samples with skewed stamps
+    gravity_m_s2: 9.81            # FIXED in the fit (z quadratic term)
+    max_samples: 240              # full-flight buffer (flights last 0.3-0.5 s)
+    irls_iterations: 2            # robust (Cauchy/MAD) reweighting passes
+    sigma_floor_m: 0.01
+    recency_lambda: 1.0           # 0 disables recency weighting
+    gate_floor_m: 0.10            # sample acceptance: max(gate_floor, gate_k*rms)
+    gate_k: 3.0
+    reorder_tolerance_s: 0.01
+    min_sample_interval_s: 0.003  # decimate kHz-rate raw sources (trace bursts)
+    # Publish-start gate ("enough support"). Keep the pop <= ~100 ms after the
+    # first detection: slower gates make the ball first appear closer than the
+    # Isaac spawn range (y >= 1.2 m), i.e. out of the training distribution.
+    min_samples: 4
+    min_span_s: 0.06
+    max_rms_m: 0.035
+    min_speed_m_s: 0.5            # HORIZONTAL speed floor: a static cluster can fake
+                                  # an apparent vz (gravity linearization) but never vx/vy
+    max_speed_m_s: 10.0
+    require_approach: false       # optionally demand vy < 0 (toward the robot)
+    ground_z_m: 0.05              # Isaac ball_on_ground parity
+    # Pop corridor: flights may only START farther than this from base_link.
+    # Real throws are born far away; near-robot pops (hands, hoop deflections)
+    # would move the arm toward them.
+    min_pop_distance_m: 0.6
+    # Ballistic consistency monitor: abort tracks that are not in free fall
+    # (a hand at 1 m/s passes the speed gate but has no -g/2 curvature).
+    ballistic_check_span_s: 0.15
+    ballistic_rms_ratio: 2.0
+    ballistic_rms_floor_m: 0.015
+    collect_timeout_s: 0.3        # give up on a cluster that never passes the gate
+    max_collect_span_s: 0.5
+    coast_after_s: 0.10           # freeze the fit after this sample starvation
+    freeze_distance_m: 0.35       # freeze near the robot (occlusion/arm clusters)
+    reject_streak_n: 4            # consistent rejected burst => new throw restart
+    max_coast_s: 0.25             # end the flight after coasting this long
+    coast_conf_tau_s: 0.15        # confidence decay time constant while coasting
+    max_flight_s: 1.0
+    refractory_s: 0.3             # ignore samples after flight end (floor bounces)
+    lead_time_s: 0.0              # evaluate the fit at now + lead (prediction)
+
 ball_float32_adapter:
   ros__parameters:
     input_topic: "ball_position_3d_mm"
@@ -88,3 +151,8 @@ ball_tracking_cpp:
     camera_frame_id: "camera_optical"
     publish_legacy_pose: true
     legacy_pose_topic: "ball_position_3d_mm"
+    # Which 3D estimate feeds BallState: "trace" = outlier-filtered mid-window
+    # pose from the Trace ribbon pipeline (primary algorithm, depth from trail
+    # width, stamped at the sample's own event time); "circle" = legacy
+    # per-detection circle-fit pose (code default for bare ros2 run).
+    pose_source: "trace"

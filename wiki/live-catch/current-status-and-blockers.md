@@ -1,7 +1,7 @@
 # Current Status And Blockers
 
-> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02
-> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md)
+> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; agent review corrections, 2026-07-03; ball regression publisher, 2026-07-03
+> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
 
 ## Overview
 
@@ -28,9 +28,28 @@ calibration, TF, watchdog and latency validation work.
   keeps command state live between trigger-mode throws.
 - `test_ball_node` terminates virtual flights at `ground_z_m=0.05` by default,
   matching Isaac `ball_on_ground` and avoiding underground policy inputs.
+- The Web UI Test tab can change `v_safe_scale` through the live node parameter
+  service while command mode is off, with staged buttons from `0.5` through
+  `4.0`; values above `1.0` are explicit overdrive tests.
 - User hardware report, 2026-07-02: virtual ball -> policy -> 500 Hz streaming
   -> real UR3e follows and holds after the ball grounds. It works, but the robot
   response is still slow and needs tuning/optimization.
+- 2026-07-03: `ball_tracking_cpp` can now publish the Trace-pipeline pose
+  (`pose_source: "trace"` in the bring-up config): the outlier-filtered
+  mid-window sample, stamped at its own event time — the primary algorithm
+  finally feeds ROS instead of the legacy circle fit (`"circle"` remains the
+  code default and fallback). Not yet validated on live camera data.
+- 2026-07-03: the ballistic-regression ball publisher (`ball_regression_node`,
+  `use_ball_regression:=true`) is implemented and sim-validated: single pop per
+  throw, fit-derived velocity within 0.3 m/s of the analytic throw at pop and
+  converging to exact by flight end under 2 cm noise + 20 % dropout, clean
+  ground termination and 60 Hz output. `live_catch_node` now trusts
+  `BallState.velocity` (`use_ball_state_velocity`) and resets its EMA velocity
+  filter between throws (bugfix). Known tuning point: at a 30 Hz raw rate with
+  dropout, the start gate can take ~150 ms, making the ball first appear
+  slightly closer than the Isaac spawn envelope (y >= 1.2 m); the real event
+  tracker's higher raw rate shortens this, and `min_samples`/`min_span_s` are
+  tunable.
 
 ## Blockers Before Real Perception
 
@@ -56,9 +75,13 @@ arm) until `/joint_states` matches the pendant.
 
 Also observed: the current policy outputs saturated raw actions (±7..±24), so
 after clipping every joint runs at full metadata `v_safe` (UR3e hard limits).
-The Isaac `FirstTraining` cfg now halves `joint_velocity_safe_rad_s` /
-`joint_acceleration_safe_rad_s2` and keeps joints within ±π — effective only
-after retraining and re-export.
+The halving of `joint_velocity_safe_rad_s` / `joint_acceleration_safe_rad_s2`
+and the ±π position bounds exist in the Isaac `FirstTraining` cfg only as
+**uncommitted working-tree changes** in the local checkout (verified via
+`git diff` on 2026-07-03; the last commit still has the full limits). They must
+be committed to survive, and are effective only after retraining and re-export
+(review Volet 3, action B4). See
+[Isaac Training Environment](../sim-to-real/isaac-training-environment.md).
 
 Follow-up the same day: the retry attempt looked like "the controller goes
 inactive", but driver logs show the controller stayed active and no throw ever
@@ -77,10 +100,8 @@ basic command-path failure.
 
 - Optimize the real-robot virtual-ball response. Current bring-up uses
   `v_safe_scale=0.5`, and the current policy still saturates actions against
-  metadata limits, so the working behavior is intentionally conservative.
-- Add an operator-facing control for `v_safe_scale`; today the Test tab cannot
-  change it, and the standard real-robot stack inherits `0.5` from
-  `live_catch.yaml`.
+  metadata limits, so use the Test tab to step through virtual balls before
+  full-speed or overdrive real throws.
 - Test watchdog behavior on hardware.
 - Tune safety parameters on the real robot (`v_safe_scale`, `a_safe`,
   `loop_budget_s`, `max_tracking_error`, `start_pose_limit_rad`).
@@ -95,10 +116,10 @@ basic command-path failure.
   through metadata.
 - `src/ur3e_catch_msgs/README.md` is documented as obsolete.
 - `handeye_result.yaml` path conventions are not fully unified.
-- `src/ur3e_sysid/` is present locally but untracked in the current worktree.
 
 ## See Also
 
+- [Real Robot Bring-Up Runbook](../operations/real-robot-bringup-runbook.md)
 - [Live Catch Loop](live-catch-loop.md)
 - [Safety And Commanding](safety-and-commanding.md)
 - [Message Contracts And Topics](message-contracts-and-topics.md)

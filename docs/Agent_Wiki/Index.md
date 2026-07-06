@@ -20,7 +20,8 @@ the earlier organization. Agents should use `wiki/index.md` first.
   order.
 - [[Project_Map]]: package map and data flow.
 - [[Source_Docs]]: curated map of the Markdown documentation.
-- [[Current_Status]]: current blockers, risks and bring-up order.
+- [[Current_Status]]: pointer to the primary wiki status page (content moved
+  to `wiki/live-catch/current-status-and-blockers.md`).
 - [[Inventory]]: generated list of packages and Markdown docs.
 - [[Testing_and_Commands]]: build, launch and test commands.
 - [[Agent_Workflow]]: how an agent should use and maintain this wiki.
@@ -42,8 +43,9 @@ the earlier organization. Agents should use `wiki/index.md` first.
 
 - Need a broad overview: read [[Project_Map]], then `docs/Context/synthese_projet.md`.
 - Need to edit perception: read [[Perception_Trace]], then `README.md`.
-- Need to bring up live catch: read [[Current_Status]], [[UR3e_Live_Catch]], then
-  `docs/reste_a_faire.md`.
+- Need to bring up live catch: read
+  `wiki/live-catch/current-status-and-blockers.md` and
+  `wiki/operations/real-robot-bringup-runbook.md`, then [[UR3e_Live_Catch]].
 - Need calibration: read [[Calibration]], then
   `docs/Robot_Control/ur3e_camera_base_calibration.md`.
 - Need robot motion/UI: read [[Robot_Control]], [[Web_UI]], then

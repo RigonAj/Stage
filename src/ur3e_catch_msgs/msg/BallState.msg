@@ -7,6 +7,8 @@
 #            (ball_frame) transforme vers le frame policy base_link selon ce seul champ.
 std_msgs/Header        header
 geometry_msgs/Point    position      # mètres
-geometry_msgs/Vector3  velocity      # m/s (optionnel ; sinon recalculée côté ball_frame)
+geometry_msgs/Vector3  velocity      # m/s (optionnel ; (0,0,0) = non fournie => recalcul EMA
+                                     #  côté ball_frame ; ball_regression_node la remplit
+                                     #  depuis la dérivée du fit balistique)
 bool                   valid         # estimation exploitable ?
 float32                confidence    # qualité (résidu/visibilité)
