@@ -15,7 +15,13 @@ const VEL_REF_DIR = new THREE.Vector3(0, 1, 0);
 const VEL_SPEED_MIN = 0.2;
 const VEL_SPEED_MAX = 10.0;
 const ISAAC_HOOP_LINK = "wrist_3_link";
-const ISAAC_HOOP_CENTER_M = [-0.5, 0.0, 0.0];
+// Hoop center in wrist_3_link per racket hold side (facing the robot); the
+// left mount is the right one rotated 180 deg about wrist_3 Z. The disk
+// normal is -Z in both cases.
+const ISAAC_HOOP_CENTER_BY_SIDE = {
+  right: [-0.5, 0.0, 0.0],
+  left: [0.5, 0.0, 0.0],
+};
 const ISAAC_HOOP_NORMAL = [0.0, 0.0, -1.0];
 const ISAAC_HOOP_VISUAL_RADIUS_M = 0.15;
 const ISAAC_HOOP_VALIDATION_RADIUS_M = 0.05;
@@ -61,6 +67,7 @@ export class Viewer3D {
     this.targetFrame = null;
     this.targetCallback = null;
     this.targetUpdateMuted = false;
+    this.hoopHoldSide = "right";
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x14171c);
@@ -144,6 +151,27 @@ export class Viewer3D {
     link.add(this.buildIsaacHoop(kind));
   }
 
+  // Move the hoop visuals to the other wrist side when the racket hold side
+  // changes (right = historical -0.5 m on wrist_3 X, left = +0.5 m).
+  setHoopHoldSide(side) {
+    const next = side === "left" ? "left" : "right";
+    if (next === this.hoopHoldSide) return;
+    this.hoopHoldSide = next;
+    const roots = [
+      [this.robot, "robot"],
+      [this.ghost, "ghost"],
+      [this.replayGhost, "ghost"],
+      [this.policyGhost, "ghost"],
+    ];
+    for (const [root, kind] of roots) {
+      const link = root && root.links && root.links[ISAAC_HOOP_LINK];
+      if (!link) continue;
+      const previous = link.getObjectByName("isaac_hoop_visual");
+      if (previous) link.remove(previous);
+      link.add(this.buildIsaacHoop(kind));
+    }
+  }
+
   buildIsaacHoop(kind = "robot") {
     const isGhost = kind !== "robot";
     const hoopGroup = new THREE.Group();
@@ -166,7 +194,8 @@ export class Viewer3D {
       side: THREE.DoubleSide,
     });
 
-    const [cx, cy, cz] = ISAAC_HOOP_CENTER_M;
+    const hoopCenter = ISAAC_HOOP_CENTER_BY_SIDE[this.hoopHoldSide];
+    const [cx, cy, cz] = hoopCenter;
     const centerGroup = new THREE.Group();
     centerGroup.position.set(cx, cy, cz);
     // Three.js torus normals start on +Z. Isaac's disk normal is -Z in wrist_3_link;
@@ -201,7 +230,8 @@ export class Viewer3D {
 
     hoopGroup.userData = {
       frame: ISAAC_HOOP_LINK,
-      center_m: ISAAC_HOOP_CENTER_M,
+      hold_side: this.hoopHoldSide,
+      center_m: hoopCenter,
       normal: ISAAC_HOOP_NORMAL,
       visual_radius_m: ISAAC_HOOP_VISUAL_RADIUS_M,
       validation_radius_m: ISAAC_HOOP_VALIDATION_RADIUS_M,

@@ -1,13 +1,15 @@
 # Isaac Training Environment
 
-> Sources: Isaac FirstTraining env/cfg working tree, 2026-07-03; Isaac README snapshot, 2026-07-03; Isaac environment-and-frames snapshot, 2026-07-03; policy metadata `latest`, 2026-06-30; agent review, 2026-07-02
+> Sources: Isaac FirstTraining env/cfg working tree, 2026-07-03; Isaac README snapshot, 2026-07-03; Isaac environment-and-frames snapshot, 2026-07-03; policy metadata `latest`, 2026-06-30; agent review, 2026-07-02; left-hand (hold_side) variant implementation, 2026-07-06
 > Raw: [Isaac README snapshot](../../raw/isaac/2026-07-03-firsttraining-readme.md); [Environment and frames snapshot](../../raw/isaac/2026-07-03-environment-and-frames.md); [Policy metadata](../../data/models/latest/policy_metadata.json); [Agent review](../../raw/reviews/2026-07-02-stage-wiki-and-training-review.md)
 
 ## Overview
 
-The deployed policy is trained in the sibling Isaac Lab repository
-`/home/rigon/Documents/6-Dof-Ur3e-Catch-a-ball` (task
-`Template-Firsttraining-Direct-v0`, direct workflow, SKRL PPO). This page
+The deployed policy is trained in the sibling Isaac Lab repository — on this
+PC `/home/rigon/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining` (task
+`Template-Firsttraining-Direct-v0`, direct workflow, SKRL PPO; the older
+`/home/rigon/Documents/6-Dof-Ur3e-Catch-a-ball` path is another checkout of
+the same project and is absent here). This page
 compiles the environment definition the Stage live node must mirror:
 observation layout, action integrator, reward, terminations, commands and the
 cross-repo export/sync procedure. Authoritative code:
@@ -111,9 +113,42 @@ committed, retrained and re-exported; until then the Stage-side `v_safe_scale`
 parameter is the operative slow-down (see
 [Safety And Commanding](../live-catch/safety-and-commanding.md)).
 
+## Left-Hand Variant (hold_side)
+
+Since 2026-07-06 the repo carries a mirrored task
+`Template-Firsttraining-Direct-Left-v0` (cfg `FirsttrainingEnvCfgLeft`,
+skrl cfg `skrl_ppo_cfg_left.yaml`, checkpoints under
+`logs/skrl/cartpole_direct_left/`). It is the yz-plane mirror (`x -> -x`) of
+the historical right-hand setup, seen from in front of the robot:
+
+- The racket USD is rotated 180 deg about wrist_3 Z:
+  `USD_File/UR-with-gripper-left.usd`, generated from `UR-with-gripper.usd`
+  by `scripts/make_left_hand_usd.py` (run with the `~/env_isaaclab` python;
+  the disk offset read at startup becomes `(+0.5, 0, 0)` and the disk normal
+  stays `(0, 0, -1)` in `wrist_3_link`).
+- Ball distribution x components are mirrored: spawn x `(0.2, 0.6)`,
+  velocity x `(-0.6, 0.7)`. y/z ranges and everything else are inherited.
+- The cfg exposes `hold_side` (`right` in the base cfg, `left` in the
+  variant); `play.py` writes it to `policy_metadata.json` together with the
+  disk offset/normal/radius and ball ranges, and
+  `sim2real_validate_export.py` cross-checks `hold_side` against the sign of
+  `disk_offset_wrist_3_link_m[0]` when present.
+
+Observation, reward and termination math is side-agnostic (it derives from
+the disk pose read from the USD), so no env-code change was needed. A policy
+trained on one side is not expected to work on the other; deployment must
+match the physical mount, the `hold_side` launch argument of the Stage
+bring-up and the model metadata (see
+[Policy Transfer And Action Semantics](policy-transfer-and-action-semantics.md)).
+
 ## Commands
 
-From the Isaac repo root (`source script.zsh` provides the aliases):
+From the Isaac repo root (`source env.zsh` provides the aliases; the older
+`script.zsh` was renamed). All commands honor
+`FT_TASK=Template-Firsttraining-Direct-Left-v0` to target the left-hand
+variant (which also switches the default checkpoint root to
+`logs/skrl/cartpole_direct_left`), and `train-left` / `train-right` /
+`play-left` / `play-right` are shortcuts that pin the task per hold side:
 
 ```bash
 # Train (headless, 12000 envs by default in the README invocation)
@@ -141,23 +176,27 @@ snapshot. Checkpoints and exports land under `logs/skrl/cartpole_direct/`
 
 1. Export from the chosen checkpoint with `--export_policy --export_onnx
    --export_dir=<Stage>/data/models/<latest|best>` (or copy the
-   `exports/` directory).
+   `exports/` directory). Left-hand trainings go to
+   `data/models/latest-left` / `best-left` — the web UI allowlist only knows
+   these four names.
 2. `data/models/latest` is the canonical deployment model; the root
    `policy_deterministic.ts` is a copy of it.
-3. Verify metadata parity before deployment:
+3. Verify the export before deployment (the validator also needs the
+   `rollouts_*_episodes.json` recorded by `sim2real_export`):
 
 ```bash
-python3 /home/rigon/Documents/6-Dof-Ur3e-Catch-a-ball/scripts/sim2real_validate_export.py \
-  --exports data/models/latest --metadata-only
+python3 /home/rigon/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining/scripts/sim2real_validate_export.py \
+  --exports data/models/latest
 ```
 
 4. Check `policy_metadata.json` fields the live node consumes:
    `observation_space=33`, `action_space=6`, `dt_s=1/60`, `joint_names`,
    `action_semantics` (incremental integrator), `observation_frame=base_link`,
    per-joint `joint_velocity_safe_rad_s` / `joint_acceleration_safe_rad_s2` /
-   position bounds, `disk_radius_m`, hoop offset/normal in `wrist_3_link`.
-   Any cfg limit change is invisible to deployment until it appears in this
-   file.
+   position bounds, `disk_radius_m`, hoop offset/normal in `wrist_3_link`,
+   and `hold_side` (`right`/`left`; exports predating 2026-07-06 lack the
+   field and are all right-hand). Any cfg limit change is invisible to
+   deployment until it appears in this file.
 5. The live node validates metadata on load and rejects model switches while
    command mode is active.
 

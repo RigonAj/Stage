@@ -1,7 +1,7 @@
 {
-  "task": "Template-Firsttraining-Direct-v0",
-  "checkpoint": "/home/rigon/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining/logs/skrl/cartpole_direct/2026-06-30_19-02-25_ppo_torch/checkpoints/agent_118000.pt",
-  "log_dir": "/home/rigon/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining/logs/skrl/cartpole_direct/2026-06-30_19-02-25_ppo_torch",
+  "task": "Template-Firsttraining-Direct-Left-v0",
+  "checkpoint": "/home/rigon/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining/logs/skrl/cartpole_direct_left/2026-07-06_14-29-14_ppo_torch/checkpoints/agent_194000.pt",
+  "log_dir": "/home/rigon/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining/logs/skrl/cartpole_direct_left/2026-07-06_14-29-14_ppo_torch",
   "ml_framework": "torch",
   "algorithm": "ppo",
   "dt_s": 0.016666666666666666,
@@ -18,10 +18,6 @@
     "wrist_3_joint"
   ],
   "action_semantics": "incremental joint target integrator: previous joint_position_target_rad + clamp(action_normalized, -1, 1) * joint_velocity_safe_rad_s * dt_s, then acceleration- and joint-limit-clamped",
-  "observation_frame": "base_link",
-  "ball_position_frame": "base_link",
-  "disk_position_frame": "base_link",
-  "ball_velocity_frame": "world",
   "action_delta_scale_rad": [
     0.05236,
     0.05236,
@@ -33,53 +29,6 @@
   "action_clip": [
     -1.0,
     1.0
-  ],
-  "hold_side": "right",
-  "disk_link_name": "wrist_3_link",
-  "disk_offset_wrist_3_link_m": [
-    -0.5,
-    0.0,
-    0.0
-  ],
-  "disk_normal_wrist_3_link": [
-    0.0,
-    0.0,
-    -1.0
-  ],
-  "disk_radius_m": 0.05,
-  "ball_spawn_ranges_m": {
-    "x": [
-      -0.6,
-      -0.2
-    ],
-    "y": [
-      1.2,
-      2.1
-    ],
-    "z": [
-      0.5,
-      1.2
-    ]
-  },
-  "ball_position_noise_std_m": 0.01,
-  "ball_velocity_ranges_m_s": {
-    "x": [
-      -0.7,
-      0.6
-    ],
-    "y": [
-      -5.0,
-      -3.5
-    ],
-    "z": [
-      -0.1,
-      1.5
-    ]
-  },
-  "gravity_m_s2": [
-    0.0,
-    0.0,
-    -9.81
   ],
   "joint_velocity_safe_rad_s": [
     3.1416,
@@ -98,21 +47,72 @@
     25.1328
   ],
   "joint_position_lower_rad": [
-    -6.283185307179586,
-    -6.283185307179586,
     -3.141592653589793,
-    -6.283185307179586,
-    -6.283185307179586,
-    -6.283185307179586
+    -3.141592653589793,
+    -3.141592653589793,
+    -3.141592653589793,
+    -3.141592653589793,
+    -3.141592653589793
   ],
   "joint_position_upper_rad": [
-    6.283185307179586,
-    6.283185307179586,
     3.141592653589793,
-    6.283185307179586,
-    6.283185307179586,
-    6.283185307179586
+    3.141592653589793,
+    3.141592653589793,
+    3.141592653589793,
+    3.141592653589793,
+    3.141592653589793
   ],
+  "hold_side": "left",
+  "disk_link_name": "wrist_3_link",
+  "disk_offset_wrist_3_link_m": [
+    0.5,
+    9.269277789769603e-09,
+    -1.6375789613221059e-15
+  ],
+  "disk_normal_wrist_3_link": [
+    0.0,
+    4.85722573273506e-16,
+    -1.0
+  ],
+  "disk_radius_m": 0.1,
+  "ball_spawn_ranges_m": {
+    "x": [
+      0.2,
+      0.6
+    ],
+    "y": [
+      1.2,
+      2.1
+    ],
+    "z": [
+      0.5,
+      1.2
+    ]
+  },
+  "ball_position_noise_std_m": 0.05,
+  "ball_velocity_ranges_m_s": {
+    "x": [
+      -0.6,
+      0.7
+    ],
+    "y": [
+      -5.0,
+      -4.0
+    ],
+    "z": [
+      0.2,
+      1.5
+    ]
+  },
+  "gravity_m_s2": [
+    0.0,
+    0.0,
+    -9.81
+  ],
+  "observation_frame": "base_link",
+  "ball_position_frame": "base_link",
+  "disk_position_frame": "base_link",
+  "ball_velocity_frame": "world",
   "legacy_policy_compatibility": "incompatible: retrain policies trained with absolute action targets",
   "rollout_schema_version": 2,
   "sim_reference": {

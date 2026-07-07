@@ -266,6 +266,15 @@
           <select id="catch-model-select" aria-label="Policy model"></select>
           <button id="btn-catch-model-apply">Apply model</button>
         </div>
+        <div class="row gap" id="catch-hold-side">
+          <span class="hint" style="align-self:center">Racket hold:</span>
+          <button class="mode-button" data-hold-side="right">Right</button>
+          <button class="mode-button" data-hold-side="left">Left</button>
+        </div>
+        <p class="hint">Hold side (seen facing the robot) drives the 3D hoop, the
+        ball defaults and the Isaac random ranges. It must match the physical
+        mount, the launch <code>hold_side</code> argument and the model's
+        training side.</p>
         <div id="catch-model-status" class="goal-status">model: –</div>
         <h2>Speed scale</h2>
         <div class="row gap">

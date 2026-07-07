@@ -1,6 +1,6 @@
 # Testing And Commands
 
-> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02
+> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02; hold-side variant and Isaac repo path check, 2026-07-06
 > Raw: [README](../../README.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md)
 
 ## Environment
@@ -58,6 +58,11 @@ Direct ROS equivalents:
 ros2 launch ur3e_live_catch virtual_ball_robot.launch.py use_fake_hardware:=true
 ros2 launch ur3e_live_catch virtual_ball_robot.launch.py \
   robot_ip:=192.168.0.5 reverse_ip:=192.168.0.3 use_fake_hardware:=false
+
+# Racket mounted to the left (hoop TF at +0.5 m on wrist_3 X); must match the
+# physical mount and the model's hold_side metadata.
+ros2 launch ur3e_live_catch virtual_ball_robot.launch.py \
+  use_fake_hardware:=true hold_side:=left
 ros2 launch ur3e_live_catch live_catch.launch.py \
   use_test_ball:=true trigger_mode:=true publish_frame:=base_link enable_command:=false
 ros2 service call /test_ball_node/throw std_srvs/srv/Trigger {}
@@ -86,17 +91,23 @@ cd src/ur3e_sysid && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q
 
 ## Isaac Sim2real Checks
 
-The Isaac training repo now lives at
-`~/Documents/6-Dof-Ur3e-Catch-a-ball` (the former
-`~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining` checkout is gone);
-train/play/evaluate/export details are compiled in
+On this PC the Isaac training repo lives at
+`~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining` (checked 2026-07-06;
+the `~/Documents/6-Dof-Ur3e-Catch-a-ball` checkout named by older notes is
+absent here). Train/play/evaluate/export details are compiled in
 [Isaac Training Environment](../sim-to-real/isaac-training-environment.md).
 
 ```bash
-cd ~/Documents/6-Dof-Ur3e-Catch-a-ball
-source script.zsh
+cd ~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining
+source env.zsh   # replaces the former script.zsh
 sim2real_export
 sim2real_validate
+
+# Left-hand (racket held left) variant: same commands, mirrored task.
+train-left            # = FT_TASK=Template-Firsttraining-Direct-Left-v0 train
+play-left best        # play pinned to the left task/checkpoint root
+train-right           # explicit right-hand pin; plain train also defaults to right
+FT_TASK=Template-Firsttraining-Direct-Left-v0 sim2real_export
 ```
 
 The 2026-06-30 Stage model transfer used explicit exports for both selected

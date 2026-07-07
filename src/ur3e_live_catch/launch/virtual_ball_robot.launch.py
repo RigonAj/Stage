@@ -76,13 +76,29 @@ def _split_vector(raw: str, expected: int, name: str) -> list[str]:
     return parts
 
 
+# Isaac-matched hoop geometry per racket hold side (seen from in front of the
+# robot). "left" is the right-hand setup rotated 180 deg about wrist_3 Z:
+# translation x flips sign and the frame rotation becomes 180 deg about Y
+# (Rz(pi) * Rx(pi)); both map hoop +Z to the Isaac disk normal -Z.
+HOOP_SIDE_DEFAULTS = {
+    "right": ("-0.5 0.0 0.0", "1.0 0.0 0.0 0.0"),
+    "left": ("0.5 0.0 0.0", "0.0 1.0 0.0 0.0"),
+}
+
+
 def _launch_hoop_tf(context, *_, **__):
     enabled = LaunchConfiguration("publish_hoop_tf").perform(context).lower()
     if enabled not in ("1", "true", "yes", "on"):
         return []
 
-    xyz = _split_vector(LaunchConfiguration("hoop_xyz").perform(context), 3, "hoop_xyz")
-    quat = _split_vector(LaunchConfiguration("hoop_quat").perform(context), 4, "hoop_quat")
+    side = LaunchConfiguration("hold_side").perform(context).strip().lower()
+    if side not in HOOP_SIDE_DEFAULTS:
+        raise RuntimeError(f"hold_side must be 'right' or 'left', got {side!r}")
+    default_xyz, default_quat = HOOP_SIDE_DEFAULTS[side]
+    raw_xyz = LaunchConfiguration("hoop_xyz").perform(context).strip() or default_xyz
+    raw_quat = LaunchConfiguration("hoop_quat").perform(context).strip() or default_quat
+    xyz = _split_vector(raw_xyz, 3, "hoop_xyz")
+    quat = _split_vector(raw_quat, 4, "hoop_quat")
     return [
         Node(
             package="tf2_ros",
@@ -199,14 +215,30 @@ def generate_launch_description() -> LaunchDescription:
                 ),
             ),
             DeclareLaunchArgument(
+                "hold_side",
+                default_value="right",
+                description=(
+                    "Racket hold side seen from in front of the robot: right "
+                    "(historical, hoop at -0.5 m on wrist_3 X) or left "
+                    "(180 deg about wrist_3 Z, hoop at +0.5 m). Must match "
+                    "the physical mount and the loaded model's hold_side."
+                ),
+            ),
+            DeclareLaunchArgument(
                 "hoop_xyz",
-                default_value="-0.5 0.0 0.0",
-                description="Static hoop translation x y z in wrist_3_link, metres.",
+                default_value="",
+                description=(
+                    "Static hoop translation x y z in wrist_3_link, metres. "
+                    "Empty => derived from hold_side."
+                ),
             ),
             DeclareLaunchArgument(
                 "hoop_quat",
-                default_value="1.0 0.0 0.0 0.0",
-                description="Static hoop quaternion qx qy qz qw in wrist_3_link; maps +Z to Isaac normal -Z.",
+                default_value="",
+                description=(
+                    "Static hoop quaternion qx qy qz qw in wrist_3_link; maps "
+                    "+Z to Isaac normal -Z. Empty => derived from hold_side."
+                ),
             ),
             OpaqueFunction(function=_launch_driver),
             IncludeLaunchDescription(

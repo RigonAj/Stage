@@ -67,7 +67,8 @@ def test_viewer_attaches_isaac_hoop_visual_to_wrist_3_link():
     source = VIEWER_SOURCE.read_text(encoding="utf-8")
 
     assert 'const ISAAC_HOOP_LINK = "wrist_3_link";' in source
-    assert "const ISAAC_HOOP_CENTER_M = [-0.5, 0.0, 0.0];" in source
+    assert "right: [-0.5, 0.0, 0.0]," in source
+    assert "left: [0.5, 0.0, 0.0]," in source
     assert "const ISAAC_HOOP_NORMAL = [0.0, 0.0, -1.0];" in source
     assert "const ISAAC_HOOP_VISUAL_RADIUS_M = 0.15;" in source
     assert "const ISAAC_HOOP_VALIDATION_RADIUS_M = 0.05;" in source

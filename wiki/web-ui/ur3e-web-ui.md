@@ -1,6 +1,6 @@
 # UR3e Web UI
 
-> Sources: web UI docs, 2026-07-01; robot control architecture, 2026-06-29; live-catch package README, 2026-07-01; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03
+> Sources: web UI docs, 2026-07-01; robot control architecture, 2026-06-29; live-catch package README, 2026-07-01; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; racket hold-side toggle, 2026-07-06
 > Raw: [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
 
 ## Overview
@@ -38,11 +38,32 @@ bounds, streamer and dry-run simulation state explicitly, so operators no longer
 need to edit `src/ur3e_live_catch/config/live_catch.yaml` between dry-run trials.
 
 Model selection is deliberately narrow: the backend exposes only
-`data/models/latest` and `data/models/best`, prefers ONNX over TorchScript, and
-sends the selected path to `/live_catch_node` as the `model_path` parameter. The
-live node loads and validates the new policy before replacing the active policy;
-if ONNX cannot load because `onnxruntime` is missing, it tries the sibling
-TorchScript export. Model changes are rejected while command mode is active.
+`data/models/latest`, `best`, `latest-left` and `best-left`, prefers ONNX over
+TorchScript, and sends the selected path to `/live_catch_node` as the
+`model_path` parameter. Each model entry carries a `hold_side` (read from
+`policy_metadata.json`, defaulting to `right` for pre-2026-07-06 exports) that
+the selector shows in the option label. The live node loads and validates the
+new policy before replacing the active policy; if ONNX cannot load because
+`onnxruntime` is missing, it tries the sibling TorchScript export. Model
+changes are rejected while command mode is active.
+
+## Racket Hold-Side Toggle
+
+The Test tab has a `Racket hold: Right | Left` toggle next to the model
+selector. It follows the active model's `hold_side` until the operator picks a
+side explicitly, and it drives three things client-side:
+
+- the 3D hoop visual moves to the matching wrist side
+  (`viewer3d.setHoopHoldSide`, `right` at `(-0.5, 0, 0)`, `left` at
+  `(0.5, 0, 0)` in `wrist_3_link`);
+- the current launch frame is mirrored across the yz plane (`x -> -x` on `p0`
+  and `v0`), and the `Reset` default follows the side;
+- the `Isaac random` ranges mirror their x components when `left` is active.
+
+The model status line shows a mismatch warning when the active model's
+`hold_side` differs from the toggle. The toggle does not republish the robot's
+`hoop_center` TF: that side is fixed at launch time by the `hold_side` launch
+argument (see [Frames And Transforms](../calibration/frames-and-transforms.md)).
 
 The Test tab's launch frame, ball telemetry and predicted arcs now use the
 policy frame `base_link`, not the UR `base` frame used by the TCP target panel.
@@ -64,7 +85,8 @@ ball overlays use the separate `base_link -> Three.js` conversion.
 
 The viewer adds an Isaac-style hoop visual to the live robot and robot ghosts.
 It is a primitive torus and support rod attached to `wrist_3_link`, centered at
-`(-0.5, 0, 0)` m with disk normal `(0, 0, -1)`. The displayed hoop radius is
+`(-0.5, 0, 0)` m (`right` hold) or `(0.5, 0, 0)` m (`left` hold) with disk
+normal `(0, 0, -1)`. The displayed hoop radius is
 `0.15 m`; the smaller `0.05 m` ring is only the policy/pass-through validation
 radius, not the physical hoop size.
 

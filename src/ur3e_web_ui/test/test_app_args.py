@@ -125,16 +125,34 @@ def test_catch_panel_exposes_v_safe_scale_operator_control():
     assert "overdrive test" in source
 
 
-def _write_model(root, name, *, onnx=True, torch=True):
+def test_catch_panel_exposes_hold_side_toggle():
+    root = Path(__file__).parents[1] / "ur3e_web_ui" / "static"
+    html = (root / "index.html").read_text()
+    panel = (root / "js" / "catch_panel.js").read_text()
+    viewer = (root / "js" / "viewer3d.js").read_text()
+
+    assert 'id="catch-hold-side"' in html
+    assert 'data-hold-side="right"' in html
+    assert 'data-hold-side="left"' in html
+    # The toggle mirrors the ball across the yz plane and moves the 3D hoop.
+    assert "mirrorBallConfigX" in panel
+    assert "setHoopHoldSide" in panel
+    assert "hold_side" in panel  # model labels + mismatch warning
+    assert "ISAAC_HOOP_CENTER_BY_SIDE" in viewer
+    assert "setHoopHoldSide(side)" in viewer
+
+
+def _write_model(root, name, *, onnx=True, torch=True, hold_side=None):
     directory = root / "data" / "models" / name
     directory.mkdir(parents=True)
     if onnx:
         (directory / "policy_deterministic.onnx").write_bytes(b"onnx")
     if torch:
         (directory / "policy_deterministic.ts").write_bytes(b"torch")
-    (directory / "policy_metadata.json").write_text(
-        '{"observation_space": 33, "action_space": 6, "action_semantics": "test"}'
-    )
+    metadata = '{"observation_space": 33, "action_space": 6, "action_semantics": "test"}'
+    if hold_side is not None:
+        metadata = metadata[:-1] + f', "hold_side": "{hold_side}"}}'
+    (directory / "policy_metadata.json").write_text(metadata)
     return directory
 
 
@@ -145,11 +163,25 @@ def test_discover_catch_models_prefers_onnx(tmp_path):
     models = _discover_catch_models(tmp_path)
     by_name = {model["name"]: model for model in models}
 
-    assert set(by_name) == {"latest", "best"}
+    assert set(by_name) == {"latest", "best", "latest-left", "best-left"}
     assert by_name["latest"]["available"]
     assert by_name["latest"]["model_path"] == str(latest_dir / "policy_deterministic.onnx")
     assert by_name["best"]["available"]
     assert by_name["best"]["model_path"] == str(best_dir / "policy_deterministic.ts")
+    assert not by_name["latest-left"]["available"]
+    assert not by_name["best-left"]["available"]
+
+
+def test_discover_catch_models_hold_side_defaults_to_right(tmp_path):
+    _write_model(tmp_path, "latest")
+    _write_model(tmp_path, "latest-left", hold_side="left")
+
+    models = _discover_catch_models(tmp_path)
+    by_name = {model["name"]: model for model in models}
+
+    assert by_name["latest"]["hold_side"] == "right"
+    assert by_name["latest-left"]["available"]
+    assert by_name["latest-left"]["hold_side"] == "left"
 
 
 def test_active_model_name_defaults_to_latest(tmp_path):

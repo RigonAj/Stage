@@ -65,7 +65,9 @@ BALL_POSITION_BOUNDS_M = ((-2.0, 2.0), (-2.0, 2.0), (0.0, 2.5))
 BALL_VELOCITY_BOUNDS_M_S = ((-10.0, 10.0), (-10.0, 10.0), (-10.0, 10.0))
 BALL_GRAVITY_BOUNDS_M_S2 = ((-20.0, 20.0), (-20.0, 20.0), (-20.0, 20.0))
 BALL_FLIGHT_BOUNDS_S = (0.2, 10.0)  # test_ball_node restart_after_s (flight duration)
-CATCH_MODEL_NAMES = ("latest", "best")
+# Allowed data/models/<name> exports; the *-left entries hold policies trained
+# with the racket held to the left (metadata hold_side=left).
+CATCH_MODEL_NAMES = ("latest", "best", "latest-left", "best-left")
 CATCH_V_SAFE_SCALE_MAX = 4.0
 CATCH_V_SAFE_SCALE_PRESETS = (0.5, 0.7, 0.85, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0)
 
@@ -977,6 +979,8 @@ def _discover_catch_models(workspace_root: Path | None = None) -> list[dict]:
                 "action_semantics": str(metadata.get("action_semantics", "")),
                 "observation_space": metadata.get("observation_space"),
                 "action_space": metadata.get("action_space"),
+                # Exports predating the field are all right-hand trainings.
+                "hold_side": str(metadata.get("hold_side", "right")),
                 "error": metadata_error,
                 "active": False,
             }

@@ -32,6 +32,20 @@ const ISAAC_RANDOM_BALL = {
   positionNoiseStd: 0.01,
 };
 
+// yz-plane mirror (x -> -x) used when the racket is held on the left: the
+// defaults and Isaac ranges above describe the historical right-hand setup.
+function mirrorRangeX([lo, hi]) {
+  return [-hi, -lo];
+}
+
+function mirrorBallConfigX(config) {
+  return {
+    ...config,
+    p0: [-config.p0[0], config.p0[1], config.p0[2]],
+    v0: [-config.v0[0], config.v0[1], config.v0[2]],
+  };
+}
+
 const BALL_FIELD_IDS = {
   p0: ["catch-p0-x", "catch-p0-y", "catch-p0-z"],
   v0: ["catch-v0-x", "catch-v0-y", "catch-v0-z"],
@@ -65,6 +79,12 @@ export class CatchPanel {
     this.mutingInputs = false;
     this.models = [];
     this.modelReady = false;
+    this.activeModelName = "";
+    this.modelStatusSuffix = "";
+    // Racket hold side (seen facing the robot). Follows the active model's
+    // metadata until the operator picks a side explicitly.
+    this.holdSide = "right";
+    this.holdSideUserSet = false;
     this.vSafeScale = null;
     this.vSafeScaleLoaded = false;
     this.ballConfig = {
@@ -104,6 +124,10 @@ export class CatchPanel {
     for (const button of document.querySelectorAll("[data-launch-mode]")) {
       button.addEventListener("click", () => this.setLaunchMode(button.dataset.launchMode));
     }
+    for (const button of document.querySelectorAll("[data-hold-side]")) {
+      button.addEventListener("click", () => this.setHoldSide(button.dataset.holdSide, { fromUser: true }));
+    }
+    this.writeHoldSide();
     this.setLaunchMode("move");
     this.loadModels();
     this.loadVSafeScale();
@@ -143,15 +167,37 @@ export class CatchPanel {
       const result = await api.get("/api/catch/models");
       this.models = result.models || [];
       this.modelReady = !!result.live_catch_ready;
+      this.activeModelName = result.active || "";
       this.writeModels(this.models, result.active);
-      const label = result.active ? `model: ${result.active}` : "model: –";
-      const suffix = this.modelReady ? "" : " (live_catch node not found)";
-      this.setText("catch-model-status", `${label}${suffix}`);
+      const activeModel = this.models.find((model) => model.name === this.activeModelName);
+      if (activeModel && !this.holdSideUserSet) {
+        this.setHoldSide(activeModel.hold_side, { fromUser: false });
+      }
+      this.modelStatusSuffix = this.modelReady ? "" : " (live_catch node not found)";
+      this.updateModelStatus();
       this.refreshButtons();
     } catch (error) {
       this.modelReady = false;
       this.setText("catch-model-status", `model: ${error.message}`);
       this.refreshButtons();
+    }
+  }
+
+  activeModel() {
+    return this.models.find((model) => model.name === this.activeModelName) || null;
+  }
+
+  updateModelStatus() {
+    const label = this.activeModelName ? `model: ${this.activeModelName}` : "model: –";
+    const active = this.activeModel();
+    const mismatch = active && active.hold_side !== this.holdSide;
+    const warning = mismatch
+      ? ` — WARNING: model trained hold ${active.hold_side}, UI hold ${this.holdSide}`
+      : "";
+    const el = document.getElementById("catch-model-status");
+    if (el) {
+      el.textContent = `${label}${this.modelStatusSuffix}${warning}`;
+      el.className = "goal-status " + (mismatch ? "active" : "");
     }
   }
 
@@ -202,16 +248,51 @@ export class CatchPanel {
     }
   }
 
+  // Toggle the racket hold side: swaps the 3D hoop side and mirrors the
+  // current launch frame across the yz plane (x -> -x) so the throw keeps
+  // aiming at the racket.
+  setHoldSide(side, { fromUser = false } = {}) {
+    const next = side === "left" ? "left" : "right";
+    if (fromUser) this.holdSideUserSet = true;
+    if (next === this.holdSide) {
+      this.writeHoldSide();
+      return;
+    }
+    this.holdSide = next;
+    this.writeHoldSide();
+    this.viewer.setHoopHoldSide(next);
+    this.setBallConfig(mirrorBallConfigX(this.ballConfig), `hold side: ${next} (ball mirrored)`);
+    this.updateModelStatus();
+  }
+
+  writeHoldSide() {
+    for (const button of document.querySelectorAll("[data-hold-side]")) {
+      button.classList.toggle("active", button.dataset.holdSide === this.holdSide);
+    }
+  }
+
+  defaultBallConfig() {
+    return this.holdSide === "left" ? mirrorBallConfigX(DEFAULT_BALL_CONFIG) : DEFAULT_BALL_CONFIG;
+  }
+
+  isaacRandomBall() {
+    if (this.holdSide !== "left") return ISAAC_RANDOM_BALL;
+    return {
+      ...ISAAC_RANDOM_BALL,
+      p0Ranges: [mirrorRangeX(ISAAC_RANDOM_BALL.p0Ranges[0]), ...ISAAC_RANDOM_BALL.p0Ranges.slice(1)],
+      v0Ranges: [mirrorRangeX(ISAAC_RANDOM_BALL.v0Ranges[0]), ...ISAAC_RANDOM_BALL.v0Ranges.slice(1)],
+    };
+  }
+
   resetBallConfig() {
-    this.setBallConfig(DEFAULT_BALL_CONFIG, "launch frame reset");
+    this.setBallConfig(this.defaultBallConfig(), "launch frame reset");
   }
 
   sampleIsaacRandomBallConfig() {
+    const ranges = this.isaacRandomBall();
     return {
-      p0: ISAAC_RANDOM_BALL.p0Ranges.map(
-        (range) => uniform(range) + gaussian(ISAAC_RANDOM_BALL.positionNoiseStd),
-      ),
-      v0: ISAAC_RANDOM_BALL.v0Ranges.map((range) => uniform(range)),
+      p0: ranges.p0Ranges.map((range) => uniform(range) + gaussian(ranges.positionNoiseStd)),
+      v0: ranges.v0Ranges.map((range) => uniform(range)),
       gravity: [...this.ballConfig.gravity],
       flight_s: this.ballConfig.flight_s,
     };
@@ -417,7 +498,8 @@ export class CatchPanel {
     for (const model of models) {
       const option = document.createElement("option");
       option.value = model.name;
-      option.textContent = model.available ? model.name : `${model.name} (missing)`;
+      const side = model.hold_side === "left" ? "left" : "right";
+      option.textContent = model.available ? `${model.name} — hold ${side}` : `${model.name} (missing)`;
       option.disabled = !model.available;
       select.appendChild(option);
     }

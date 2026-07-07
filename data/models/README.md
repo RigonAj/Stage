@@ -17,9 +17,31 @@ ne pas dépendre d'un chemin d'export d'entraînement daté.
 
 Plusieurs modèles → un sous-dossier par modèle (ex. `data/models/<nom>/`).
 
+## Côté de tenue de la raquette (`hold_side`)
+
+Chaque `policy_metadata.json` porte un champ `hold_side` (`right` ou `left`),
+vu de face du robot :
+
+- `right` — montage historique : centre du cerceau `(-0.5, 0, 0)` dans
+  `wrist_3_link`, balle lancée depuis `x < 0`. Tous les exports antérieurs au
+  2026-07-06 sont `right` (le champ a été ajouté rétroactivement).
+- `left` — raquette tournée de 180° autour du Z de `wrist_3` : centre
+  `(+0.5, 0, 0)`, distribution balle en miroir du plan yz (`x → -x`). Tâche
+  Isaac `Template-Firsttraining-Direct-Left-v0`, exports attendus dans
+  `data/models/latest-left/` et `data/models/best-left/`.
+
+Un modèle ne doit être utilisé que si le montage physique de la raquette, la
+TF `hoop_center` (argument `hold_side` du launch `ur3e_live_catch`) et son
+`hold_side` concordent. Le sélecteur du Web UI affiche le côté de chaque
+modèle et avertit en cas d'incohérence avec le toggle de tenue.
+
 ## Source actuelle
 
-Export Isaac du 2026-06-30 depuis :
+`data/models/latest-left/` : export Isaac du 2026-07-06 (`hold_side=left`,
+task `Template-Firsttraining-Direct-Left-v0`) depuis
+`logs/skrl/cartpole_direct_left/2026-07-06_14-29-14_ppo_torch/checkpoints/agent_194000.pt`.
+
+Modèles droite (`latest`, `best`) : export Isaac du 2026-06-30 depuis :
 
 ```
 ~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining/logs/skrl/cartpole_direct/

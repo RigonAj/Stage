@@ -244,3 +244,28 @@
   `support_mount.json` yaw set to +pi/2 about tool0 Z with the plate offset
   rotated accordingly (display-only, T_tool0_mire stays hand-eye co-solved).
 - Updated: [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md)
+
+## [2026-07-06] ingest | Left-hand racket (hold_side) variant across Isaac and Stage
+
+- Source: implementation session 2026-07-06 — Isaac FirstTraining left-hand
+  task (`Template-Firsttraining-Direct-Left-v0`, mirrored USD
+  `UR-with-gripper-left.usd` via `scripts/make_left_hand_usd.py`, mirrored
+  ball x ranges, `hold_side` + disk/ball fields in the metadata export,
+  `FT_TASK` env.zsh switch); Stage side: `hold_side` launch argument for the
+  hoop_center TF, `hold_side=right` retro-annotation of deployed models,
+  web UI allowlist `latest-left`/`best-left`, racket hold-side toggle
+  (hoop visual + yz-mirrored ball defaults/Isaac ranges + mismatch warning).
+  Also corrected the stale Isaac repo path claim: on this PC the training
+  repo is `~/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining`.
+- Updated: [Isaac Training Environment](sim-to-real/isaac-training-environment.md)
+- Updated: [Frames And Transforms](calibration/frames-and-transforms.md)
+- Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+
+## [2026-07-06] ingest | Hold-side train/play shortcuts in Isaac env.zsh
+
+- Source: user request; env.zsh now defines train-left / train-right /
+  play-left / play-right wrappers pinning FT_TASK (and thus the checkpoint
+  root) per racket hold side.
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Updated: [Isaac Training Environment](sim-to-real/isaac-training-environment.md)

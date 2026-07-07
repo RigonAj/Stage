@@ -25,7 +25,7 @@ Camera intrinsics, hand-eye calibration and TF contracts.
 |---------|---------|---------|
 | [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire hand-eye workflow, aligned result path, base_link parity validation gates and current blockers. | 2026-07-06 |
 | [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md) | Operator checklist for the physical eye-to-hand session: prerequisites, self-tests, capture, solve acceptance gates, TF publication and validation. | 2026-07-06 |
-| [Frames And Transforms](calibration/frames-and-transforms.md) | `base_link` policy frame, TF, UI robot orientation, hoop radius distinction and unit contracts used by perception, live catch and UI. | 2026-07-02 |
+| [Frames And Transforms](calibration/frames-and-transforms.md) | `base_link` policy frame, TF, UI robot orientation, hold_side-driven hoop_center TF (right/left racket mount), hoop radius distinction and unit contracts used by perception, live catch and UI. | 2026-07-06 |
 
 ## robot-control
 
@@ -52,7 +52,7 @@ PPO transfer, policy semantics, action space and latency.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Isaac Training Environment](sim-to-real/isaac-training-environment.md) | FirstTraining 33-D observation layout, action integrator, reward, terminations, ball distribution, cfg-limit state, train/play/evaluate/export commands and cross-repo export sync. | 2026-07-03 |
+| [Isaac Training Environment](sim-to-real/isaac-training-environment.md) | FirstTraining 33-D observation layout, action integrator, reward, terminations, ball distribution, left-hand (hold_side) mirrored task variant, cfg-limit state, train/play/evaluate/export commands and cross-repo export sync. | 2026-07-06 |
 | [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md) | Legacy absolute vs current incremental target-integrator semantics, metadata-driven mapper selection and full-speed metadata limits vs bring-up slow-down (Isaac limit halving still uncommitted). | 2026-07-03 |
 | [Observation Latency And Models](sim-to-real/observation-latency-and-models.md) | Observation construction, ball velocity source (fit vs EMA), latency instrumentation, regression stamp semantics, p50/p95/p99 measurement plan with acceptance anchors, current model exports and metadata validation. | 2026-07-03 |
 
@@ -78,7 +78,7 @@ Browser UI and visualization/control panels.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [UR3e Web UI](web-ui/ur3e-web-ui.md) | FastAPI/Three.js UI structure, base_link robot/viewer contract, Isaac hoop visual, Test tab, model selector, v_safe_scale control, calibration tab, rollout tab and API scope. | 2026-07-03 |
+| [UR3e Web UI](web-ui/ur3e-web-ui.md) | FastAPI/Three.js UI structure, base_link robot/viewer contract, Isaac hoop visual, Test tab, model selector with hold_side labels, racket hold-side toggle (mirrored ball + hoop visual), v_safe_scale control, calibration tab, rollout tab and API scope. | 2026-07-06 |
 
 ## operations
 
@@ -86,7 +86,7 @@ Agent workflow, commands and wiki maintenance.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, package tests, Isaac sim2real export/check commands (current Isaac repo path) and wiki maintenance commands. | 2026-07-03 |
+| [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, hold_side:=left bring-up, package tests, Isaac sim2real export/check commands (current Isaac repo path, FT_TASK left variant) and wiki maintenance commands. | 2026-07-06 |
 | [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md) | Operator checklist before enable_command, ±2π start-pose gate procedure, staged v_safe_scale ramp-up and monitoring points. | 2026-07-03 |
 | [Wiki Maintenance](operations/wiki-maintenance.md) | Ingest/query/lint rules adapted from the Karpathy LLM wiki pattern. | 2026-06-29 |
 | [Source Document Map](operations/source-document-map.md) | How the raw Markdown docs are combined or split into compiled wiki concepts. | 2026-06-29 |
