@@ -149,6 +149,8 @@ ball_tracking_cpp:
   ros__parameters:
     ball_state_topic: "ball_state"
     camera_frame_id: "camera_optical"
+    camera_calibration_file: "recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml"
+    ball_radius_mm: 20.0
     publish_legacy_pose: true
     legacy_pose_topic: "ball_position_3d_mm"
     # Which 3D estimate feeds BallState: "trace" = outlier-filtered mid-window

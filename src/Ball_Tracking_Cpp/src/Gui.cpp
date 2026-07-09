@@ -1550,12 +1550,17 @@ void Gui::DrawHudTexts() {
 }
 
 void Gui::DrawView() {
-    int64_t t_min = View.getLowestTime();
-    int64_t t_max = View.getHighestTime();
+    const dv::EventStore &view = displayView != nullptr ? *displayView : View;
+    if (view.isEmpty()) {
+        return;
+    }
+
+    int64_t t_min = view.getLowestTime();
+    int64_t t_max = view.getHighestTime();
     int64_t t_range = t_max - t_min;
     Color min_color = {0, 0, 255, 255};
     Color max_color = {255, 128, 0, 255};
-    std::for_each(std::execution::par_unseq, View.begin(), View.end(), [&](const auto &e) {
+    std::for_each(std::execution::par_unseq, view.begin(), view.end(), [&](const auto &e) {
         int x = static_cast<int>(e.x());
         int y = static_cast<int>(e.y());
 

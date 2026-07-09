@@ -60,6 +60,8 @@ class DvCamera {
 public:
     DvCamera();
 
+    bool LoadOpenCvCalibrationFile(const std::string &path);
+
     void NextBatch();
     void Filter();
     void Undistort();
@@ -82,6 +84,7 @@ public:
 
     int64_t EventCount() const { return Events ? static_cast<int64_t>(Events->size()) : 0; }
     int64_t FilteredCount() const { return static_cast<int64_t>(Filtered.size()); }
+    int64_t SampleCount() const { return static_cast<int64_t>(Samples.size()); }
 
     CalibrationData calibration;
 
@@ -94,9 +97,6 @@ private:
     static constexpr int HEIGHT = 480;
 
     const cv::Size resolution_{WIDTH, HEIGHT};
-    const std::string kCalibrationFile = "calibration_camera_DVXplorer_DXA00265-2026_04_23_13_33_50.xml";
-
-    void loadOpenCvCalibrationFile();
 
     std::unique_ptr<dv::io::camera::DVXplorer> capture_;
     dv::noise::BackgroundActivityNoiseFilter<dv::EventStore> filter_;

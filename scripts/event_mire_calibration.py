@@ -539,23 +539,6 @@ def build_square_layout(
     return dots, meta
 
 
-def split_sorted_into_groups(values: np.ndarray, groups: int) -> Optional[List[np.ndarray]]:
-    if len(values) < groups:
-        return None
-    order = np.argsort(values)
-    sorted_values = values[order]
-    gaps = np.diff(sorted_values)
-    if len(gaps) < groups - 1:
-        return None
-    cut_positions = np.argsort(gaps)[-(groups - 1) :] + 1
-    cut_positions = np.sort(cut_positions)
-    group_indices = np.split(order, cut_positions)
-    if len(group_indices) != groups or any(len(g) == 0 for g in group_indices):
-        return None
-    group_indices.sort(key=lambda idxs: float(np.mean(values[idxs])))
-    return group_indices
-
-
 def robust_weighted_center(
     yy: np.ndarray,
     xx: np.ndarray,
@@ -743,14 +726,217 @@ def grid_dimensions_from_dots(dots: Sequence[ScreenDot]) -> Tuple[int, int]:
     return rows, cols
 
 
-def expected_cols_by_row_from_dots(dots: Sequence[ScreenDot]) -> Dict[int, List[int]]:
-    rows: Dict[int, List[int]] = {}
-    for dot in dots:
-        rows.setdefault(dot.row, []).append(dot.col)
-    return {row: sorted(cols) for row, cols in rows.items()}
+def _apply_homography(points: np.ndarray, homography: np.ndarray) -> np.ndarray:
+    """Map an (N, 2) array of points through a 3x3 homography."""
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 1, 2)
+    mapped = cv.perspectiveTransform(pts, homography)
+    return mapped.reshape(-1, 2)
+
+
+def grid_corner_cycle(points: np.ndarray) -> List[int]:
+    """Indices of the four grid corners, ordered around the rectangle.
+
+    Ranking is done in the point cloud's own principal-axis frame, so the result
+    is stable under arbitrary in-plane rotation of the grid in the image.
+    """
+    centered = points - points.mean(axis=0)
+    covariance = centered.T @ centered
+    _, eigvecs = np.linalg.eigh(covariance)
+    axes = eigvecs[:, ::-1].T  # major principal axis first
+    projected = centered @ axes.T
+    u = projected[:, 0]
+    v = projected[:, 1]
+    return [
+        int(np.argmin(u + v)),  # (min u, min v)
+        int(np.argmax(u - v)),  # (max u, min v)
+        int(np.argmax(u + v)),  # (max u, max v)
+        int(np.argmin(u - v)),  # (min u, max v)
+    ]
+
+
+def polygon_area(points: np.ndarray, indices: Sequence[int]) -> float:
+    polygon = points[list(indices)]
+    x = polygon[:, 0]
+    y = polygon[:, 1]
+    return float(0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+
+
+def order_cycle_around_centroid(points: np.ndarray, indices: Sequence[int]) -> List[int]:
+    coords = points[list(indices)]
+    center = np.mean(coords, axis=0)
+    angles = np.arctan2(coords[:, 1] - center[1], coords[:, 0] - center[0])
+    return [int(idx) for _, idx in sorted(zip(angles.tolist(), indices))]
+
+
+def is_convex_quadrilateral(points: np.ndarray, indices: Sequence[int]) -> bool:
+    if len(indices) != 4 or len(set(indices)) != 4:
+        return False
+    polygon = points[list(indices)]
+    cross_values = []
+    for idx in range(4):
+        a = polygon[idx]
+        b = polygon[(idx + 1) % 4]
+        c = polygon[(idx + 2) % 4]
+        ab = b - a
+        bc = c - b
+        cross_values.append(float(ab[0] * bc[1] - ab[1] * bc[0]))
+    nonzero = [value for value in cross_values if abs(value) > 1e-9]
+    if len(nonzero) < 4:
+        return False
+    return all(value > 0.0 for value in nonzero) or all(value < 0.0 for value in nonzero)
+
+
+def corner_candidate_cycles(points: np.ndarray) -> List[List[int]]:
+    """Return plausible four-corner cycles for a projected dot grid.
+
+    A single PCA min/max cycle can collapse to duplicate corners on real
+    trapezoidal views, especially when the grid is rolled and one side is
+    compressed. The convex hull gives a stronger set of candidates while still
+    staying small for clean blob detections.
+    """
+    if len(points) < 4:
+        return []
+
+    cycles: List[List[int]] = []
+    seen: set = set()
+
+    def add_cycle(indices: Sequence[int]) -> None:
+        if len(indices) != 4 or len(set(indices)) != 4:
+            return
+        ordered = order_cycle_around_centroid(points, indices)
+        if not is_convex_quadrilateral(points, ordered):
+            return
+        if polygon_area(points, ordered) <= 1e-6:
+            return
+        key = tuple(sorted(int(idx) for idx in ordered))
+        if key in seen:
+            return
+        seen.add(key)
+        cycles.append(ordered)
+
+    add_cycle(grid_corner_cycle(points))
+
+    hull = cv.convexHull(points.astype(np.float32), returnPoints=False)
+    if hull is not None:
+        hull_indices = [int(idx) for idx in hull.reshape(-1).tolist()]
+        if len(hull_indices) == 4:
+            add_cycle(hull_indices)
+        elif len(hull_indices) > 4:
+            # A clean grid often has extra hull vertices along the same border.
+            # Trying all hull quadrilaterals is cheap here and avoids relying on
+            # one brittle definition of "the" four extremes.
+            max_hull = 16
+            if len(hull_indices) > max_hull:
+                step = len(hull_indices) / float(max_hull)
+                sampled = [
+                    hull_indices[int(round(i * step)) % len(hull_indices)]
+                    for i in range(max_hull)
+                ]
+                hull_indices = sorted(set(sampled), key=hull_indices.index)
+            for combo in itertools.combinations(hull_indices, 4):
+                add_cycle(combo)
+
+    cycles.sort(key=lambda cycle: polygon_area(points, cycle), reverse=True)
+    return cycles
+
+
+def median_neighbor_spacing(points: np.ndarray) -> float:
+    """Median nearest-neighbor distance, used to gate assignment distances."""
+    if len(points) < 2:
+        return 0.0
+    diff = points[:, None, :] - points[None, :, :]
+    dist = np.linalg.norm(diff, axis=2)
+    np.fill_diagonal(dist, np.inf)
+    return float(np.median(np.min(dist, axis=1)))
+
+
+def assign_dots_to_blobs(
+    projected: np.ndarray, blob_points: np.ndarray, gate: float
+) -> Optional[List[int]]:
+    """Greedy unique nearest-neighbor match of projected dots to blobs.
+
+    Returns dot_index -> blob_index, or None if any dot has no free blob within
+    ``gate`` pixels (which rejects a wrong grid orientation).
+    """
+    dist = np.linalg.norm(projected[:, None, :] - blob_points[None, :, :], axis=2)
+    n_dots, n_blobs = dist.shape
+    pairs = [
+        (float(dist[i, j]), i, j)
+        for i in range(n_dots)
+        for j in range(n_blobs)
+        if dist[i, j] <= gate
+    ]
+    pairs.sort()
+    dot_to_blob = [-1] * n_dots
+    used_dots: set = set()
+    used_blobs: set = set()
+    for _, i, j in pairs:
+        if i in used_dots or j in used_blobs:
+            continue
+        dot_to_blob[i] = j
+        used_dots.add(i)
+        used_blobs.add(j)
+        if len(used_dots) == n_dots:
+            break
+    if len(used_dots) != n_dots:
+        return None
+    return dot_to_blob
+
+
+def fit_grid_homography(
+    obj_points: np.ndarray,
+    blob_points: np.ndarray,
+    obj_corners: Sequence[int],
+    img_corners: Sequence[int],
+    max_iterations: int = 6,
+) -> Optional[Tuple[List[int], np.ndarray, float]]:
+    """Seed a homography from four corner correspondences, then refine by ICP.
+
+    Returns ``(dot_to_blob, homography, rms_px)`` on a full bijection, else None.
+    """
+    src = obj_points[list(obj_corners)].astype(np.float32)
+    dst = blob_points[list(img_corners)].astype(np.float32)
+    try:
+        homography = cv.getPerspectiveTransform(src, dst)
+    except cv.error:
+        return None
+    if homography is None or not np.all(np.isfinite(homography)):
+        return None
+
+    assignment: Optional[List[int]] = None
+    previous: Optional[List[int]] = None
+    for _ in range(max_iterations):
+        projected = _apply_homography(obj_points, homography)
+        spacing = median_neighbor_spacing(projected)
+        if spacing <= 0.0:
+            return None
+        assignment = assign_dots_to_blobs(projected, blob_points, 0.75 * spacing)
+        if assignment is None:
+            return None
+        if assignment == previous:
+            break
+        previous = assignment
+        refined, _ = cv.findHomography(obj_points, blob_points[assignment], method=0)
+        if refined is None or not np.all(np.isfinite(refined)):
+            break
+        homography = refined
+
+    if assignment is None:
+        return None
+    projected = _apply_homography(obj_points, homography)
+    residuals = np.linalg.norm(projected - blob_points[assignment], axis=1)
+    rms = float(np.sqrt(np.mean(residuals ** 2)))
+    return assignment, homography, rms
 
 
 def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) -> Tuple[List[Match], str]:
+    """Match detected blobs to known dots, robust to rotation and perspective.
+
+    A dot grid is a planar target, so its projection into the image is an exact
+    homography. We seed that homography from the four grid corners, then refine
+    it by iterated closest-point assignment. This handles any viewing angle,
+    unlike a fixed row/column split of the image axes.
+    """
     expected = len(dots)
     rows, _cols = grid_dimensions_from_dots(dots)
     if expected <= 0 or rows <= 0:
@@ -758,94 +944,57 @@ def associate_blobs_to_layout(blobs: Sequence[Blob], dots: Sequence[ScreenDot]) 
     if len(blobs) < expected:
         return [], f"not enough blobs: {len(blobs)}/{expected}"
 
-    selected = list(blobs[:expected])
-    points = np.array([[blob.x, blob.y] for blob in selected], dtype=np.float64)
-    mean = np.mean(points, axis=0)
-    centered = points - mean
-    covariance = centered.T @ centered / max(1, len(points) - 1)
-    eigvals, eigvecs = np.linalg.eigh(covariance)
-    order = np.argsort(eigvals)[::-1]
-    axes = eigvecs[:, order].T
+    blob_points = np.array([[blob.x, blob.y] for blob in blobs], dtype=np.float64)
+    obj_points = np.array(
+        [[dot.object_x_mm, dot.object_y_mm] for dot in dots], dtype=np.float64
+    )
 
-    projections = centered @ axes.T
-    range0 = float(np.ptp(projections[:, 0]))
-    range1 = float(np.ptp(projections[:, 1]))
-    if range1 > range0:
-        axes = axes[[1, 0], :]
-        projections = centered @ axes.T
+    img_cycles = corner_candidate_cycles(blob_points)
+    obj_cycles = corner_candidate_cycles(obj_points)
+    if not img_cycles or not obj_cycles:
+        return [], "could not isolate grid corners"
 
-    anchor_idx = int(np.argmax([blob.weight for blob in selected]))
-    anchor_dot = next((dot for dot in dots if dot.anchor), min(dots, key=lambda dot: (dot.row, dot.col)))
-    expected_cols_by_row = expected_cols_by_row_from_dots(dots)
-    expected_row_counts = [len(expected_cols_by_row.get(row, [])) for row in range(rows)]
-    best_groups: Optional[List[np.ndarray]] = None
-    best_coords: Optional[np.ndarray] = None
-    best_score = math.inf
+    # The anchor dot is drawn larger, so it is the highest-activity blob. It
+    # resolves the 180-degree symmetry of a full grid.
+    anchor_dot_idx = next(
+        (i for i, dot in enumerate(dots) if dot.anchor),
+        min(range(len(dots)), key=lambda i: (dots[i].row, dots[i].col)),
+    )
+    anchor_blob_idx = int(np.argmax([blob.weight for blob in blobs]))
 
-    for sx in (-1.0, 1.0):
-        for sy in (-1.0, 1.0):
-            coords = projections.copy()
-            coords[:, 0] *= sx
-            coords[:, 1] *= sy
-            x_rank = int(np.argsort(coords[:, 0]).tolist().index(anchor_idx))
-            y_rank = int(np.argsort(coords[:, 1]).tolist().index(anchor_idx))
-            row_groups = split_sorted_into_groups(coords[:, 1], rows)
-            if row_groups is None:
-                continue
-            counts = [len(group) for group in row_groups]
-            count_penalty = sum(
-                abs(count - expected_count)
-                for count, expected_count in zip(counts, expected_row_counts)
-            )
-            row_with_anchor = next(
-                (row for row, group in enumerate(row_groups) if anchor_idx in group),
-                rows,
-            )
-            anchor_row_penalty = abs(row_with_anchor - anchor_dot.row)
-            anchor_col_penalty = abs(x_rank - anchor_dot.col)
-            score = (
-                100 * count_penalty
-                + 25 * anchor_row_penalty
-                + 10 * anchor_col_penalty
-                + 0.01 * (x_rank + y_rank)
-            )
-            if score < best_score:
-                best_score = score
-                best_groups = row_groups
-                best_coords = coords
+    best: Optional[Tuple[bool, float, List[int], np.ndarray]] = None
+    # Pinhole projection preserves orientation, but corner cycles may differ in
+    # start corner and handedness: try rotations and reversals for each plausible
+    # hull quadrilateral.
+    for obj_cycle in obj_cycles:
+        for img_cycle in img_cycles:
+            for img_order in (img_cycle, img_cycle[::-1]):
+                for k in range(4):
+                    obj_order = obj_cycle[k:] + obj_cycle[:k]
+                    result = fit_grid_homography(obj_points, blob_points, obj_order, img_order)
+                    if result is None:
+                        continue
+                    assignment, homography, rms = result
+                    spacing = median_neighbor_spacing(_apply_homography(obj_points, homography))
+                    if spacing <= 0.0 or rms > 0.55 * spacing:
+                        continue
+                    anchor_ok = assignment[anchor_dot_idx] == anchor_blob_idx
+                    candidate = (not anchor_ok, rms, assignment, homography)
+                    if best is None or candidate[:2] < best[:2]:
+                        best = candidate
 
-    if best_groups is None or best_coords is None:
-        return [], "could not split blobs into grid rows"
+    if best is None:
+        return [], "could not fit grid homography"
 
-    dots_by_key = {(dot.row, dot.col): dot for dot in dots}
+    _, _, assignment, homography = best
+    projected = _apply_homography(obj_points, homography)
     matches: List[Match] = []
-
-    for row, group in enumerate(best_groups):
-        group_sorted = sorted(group.tolist(), key=lambda idx: float(best_coords[idx, 0]))
-        expected_cols = expected_cols_by_row[row]
-        if len(group_sorted) != len(expected_cols):
-            return [], (
-                f"row {row} has {len(group_sorted)} blobs, "
-                f"expected {len(expected_cols)}"
-            )
-        for blob_idx, col in zip(group_sorted, expected_cols):
-            dot = dots_by_key[(row, col)]
-            blob = selected[blob_idx]
-            matches.append(Match(dot=dot, blob=blob, reproj_error_px=0.0))
+    for dot_idx, blob_idx in enumerate(assignment):
+        error = float(np.linalg.norm(projected[dot_idx] - blob_points[blob_idx]))
+        matches.append(Match(dot=dots[dot_idx], blob=blobs[blob_idx], reproj_error_px=error))
 
     if len(matches) != expected:
         return [], f"matched {len(matches)}/{expected}"
-
-    src = np.array([[m.dot.object_x_mm, m.dot.object_y_mm] for m in matches], dtype=np.float64)
-    dst = np.array([[m.blob.x, m.blob.y] for m in matches], dtype=np.float64)
-    homography, _ = cv.findHomography(src, dst, method=0)
-    if homography is not None:
-        src_h = np.column_stack([src, np.ones(len(src))])
-        projected = (homography @ src_h.T).T
-        projected = projected[:, :2] / projected[:, 2:3]
-        for match, point in zip(matches, projected):
-            match.reproj_error_px = float(np.linalg.norm(point - np.array([match.blob.x, match.blob.y])))
-
     return matches, "ok"
 
 
@@ -2746,6 +2895,12 @@ class ControlWindow(QtWidgets.QWidget):
             return SQUARE_EXPECTED_DOTS
         return self.mire.expected_dot_count()
 
+    def effective_min_matched(self, expected: int) -> int:
+        configured = int(getattr(self.args, "min_matched", 0))
+        if configured <= 0:
+            return expected
+        return min(configured, expected)
+
     def update_live_preview(self) -> None:
         now = time.time()
         if now - self.last_preview_update < 0.04:
@@ -2900,6 +3055,7 @@ class ControlWindow(QtWidgets.QWidget):
             return
 
         expected = SQUARE_EXPECTED_DOTS if square_phase == "validation" else self.mire.expected_dot_count()
+        min_matched = self.effective_min_matched(expected)
         self.last_blobs = detect_blobs(self.activity, expected)
         if square_phase == "validation":
             self.finish_square_validation(elapsed_ms)
@@ -2921,16 +3077,16 @@ class ControlWindow(QtWidgets.QWidget):
         )
         if self.test_mode:
             self.test_mode = False
-            if len(self.last_matches) >= self.args.min_matched:
+            if len(self.last_matches) >= min_matched:
                 self.run_calibration_test(overlay, elapsed_ms)
             else:
                 self.append_status(
                     f"Test ignore: associations insuffisantes "
-                    f"({len(self.last_matches)}/{self.args.min_matched})."
+                    f"({len(self.last_matches)}/{min_matched})."
                 )
             return
         if square_phase == "pose":
-            if len(self.last_matches) >= self.args.min_matched:
+            if len(self.last_matches) >= min_matched:
                 self.finish_square_pose(overlay, elapsed_ms)
             else:
                 self.square_phase = None
@@ -2938,15 +3094,15 @@ class ControlWindow(QtWidgets.QWidget):
                 self.set_capture_buttons_enabled(True)
                 self.append_status(
                     f"Test carre ignore: associations phase 1 insuffisantes "
-                    f"({len(self.last_matches)}/{self.args.min_matched})."
+                    f"({len(self.last_matches)}/{min_matched})."
                 )
             return
-        if len(self.last_matches) >= self.args.min_matched:
+        if len(self.last_matches) >= min_matched:
             self.export_observation(overlay, elapsed_ms)
         else:
             self.append_status(
                 f"Export ignore: associations insuffisantes "
-                f"({len(self.last_matches)}/{self.args.min_matched})."
+                f"({len(self.last_matches)}/{min_matched})."
             )
 
     def finish_square_pose(self, overlay: np.ndarray, elapsed_ms: float) -> None:
@@ -3234,6 +3390,7 @@ class ControlWindow(QtWidgets.QWidget):
         json_path = output_dir / f"mire_observation_{stamp}.json"
         png_path = output_dir / f"mire_overlay_{stamp}.png"
         pattern = self.mire.current_dot_grid_pattern()
+        min_matched = self.effective_min_matched(pattern.expected_dots)
 
         payload = {
             "created_at": datetime.now().isoformat(timespec="milliseconds"),
@@ -3274,7 +3431,8 @@ class ControlWindow(QtWidgets.QWidget):
             },
             "detection": {
                 "expected_dots": pattern.expected_dots,
-                "min_matched": self.args.min_matched,
+                "min_matched": min_matched,
+                "configured_min_matched": int(getattr(self.args, "min_matched", 0)),
                 "blob_count": len(self.last_blobs),
                 "matched_count": len(self.last_matches),
                 "blobs": [blob.to_json() for blob in self.last_blobs],
@@ -3581,6 +3739,7 @@ class ControlWindow(QtWidgets.QWidget):
             return
 
         expected = len(self.external_dots)
+        min_matched = self.effective_min_matched(expected)
         self.last_blobs = detect_blobs(self.activity, expected)
         self.last_matches, reason = associate_blobs_to_layout(self.last_blobs, self.external_dots)
         overlay = make_overlay(
@@ -3604,7 +3763,7 @@ class ControlWindow(QtWidgets.QWidget):
             return
 
         pnp: Dict[str, object] = {"valid": False, "reason": "associations insuffisantes"}
-        if len(self.last_matches) >= self.args.min_matched:
+        if len(self.last_matches) >= min_matched:
             pnp = solve_mire_pose_with_ambiguity(self.last_matches, camera_matrix, dist_coeffs)
         if not pnp.get("valid"):
             self.append_status(f"Echantillon rejete: {pnp.get('reason')}.")
@@ -3614,7 +3773,7 @@ class ControlWindow(QtWidgets.QWidget):
         rejection = handeye_rejection_reason(
             stationarity,
             len(self.last_matches),
-            self.args.min_matched,
+            min_matched,
             pnp.get("ambiguity_ratio"),
             float(pnp["tilt_deg"]),
             self.args.stationarity_trans_mm,
@@ -3878,6 +4037,79 @@ def run_self_test() -> int:
             print(f"association failed for {pattern.pattern_id}")
             return 1
 
+    pca_collapse_dots, _ = build_mire_layout(2560, 1440, 1.0, 1.0, "mire")
+    pca_collapse_points = np.array(
+        [
+            [
+                160.0 + 45.0 * dot.col - 2.0 * dot.row - 1.0 * dot.row * dot.col,
+                150.0 + 60.0 * dot.row - 6.0 * dot.col - 3.0 * dot.row * dot.col,
+            ]
+            for dot in pca_collapse_dots
+        ],
+        dtype=np.float64,
+    )
+    pca_collapse_cycle = grid_corner_cycle(pca_collapse_points)
+    pca_collapse_blobs = [
+        Blob(
+            index=idx,
+            x=float(point[0]),
+            y=float(point[1]),
+            area_px=24,
+            weight=5000.0 if dot.anchor else 1000.0 - idx,
+            peak=1.0,
+            bbox=(int(round(point[0])) - 5, int(round(point[1])) - 5, 10, 10),
+        )
+        for idx, (dot, point) in enumerate(zip(pca_collapse_dots, pca_collapse_points))
+    ]
+    pca_collapse_matches, pca_collapse_reason = associate_blobs_to_layout(
+        pca_collapse_blobs, pca_collapse_dots
+    )
+    print(
+        "pca-collapse mire: "
+        f"pca corners {len(set(pca_collapse_cycle))}/4, "
+        f"{len(pca_collapse_matches)} matches ({pca_collapse_reason})"
+    )
+    if len(set(pca_collapse_cycle)) >= 4 or len(pca_collapse_matches) != len(pca_collapse_dots):
+        print("pca-collapse association failed")
+        return 1
+
+    # Tilted / rolled poses: the whole point of the homography association is to
+    # accept oblique calibration views, so lock that in with strong off-axis
+    # rotations that the old row/column split could not handle.
+    tilt_camera = np.array(
+        [[520.0, 0.0, 320.0], [0.0, 520.0, 240.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    tilt_dist = np.zeros(5, dtype=np.float64)
+    tilt_tvec = np.array([[10.0], [8.0], [820.0]], dtype=np.float64)
+    challenge_rvecs = [
+        np.array([[0.35], [0.32], [0.45]], dtype=np.float64),   # tilt + ~26 deg roll
+        np.array([[-0.30], [0.40], [-0.55]], dtype=np.float64),  # opposite tilt + roll
+        np.array([[0.18], [-0.48], [0.60]], dtype=np.float64),   # strong y tilt + ~34 deg roll
+    ]
+    for pattern_id in ("mire", "grid_5x4", "grid_7x5"):
+        tilt_dots, _ = build_mire_layout(640, 480, 1.0, 1.0, pattern_id)
+        for pose_idx, tilt_rvec in enumerate(challenge_rvecs):
+            tilt_activity = render_synthetic_activity(
+                640, 480, tilt_dots, tilt_camera, tilt_dist, tilt_rvec, tilt_tvec
+            )
+            tilt_blobs = detect_blobs(tilt_activity, len(tilt_dots))
+            tilt_matches, tilt_reason = associate_blobs_to_layout(tilt_blobs, tilt_dots)
+            print(
+                f"tilt {pattern_id} pose {pose_idx + 1}: "
+                f"{len(tilt_blobs)} blobs, {len(tilt_matches)} matches ({tilt_reason})"
+            )
+            if len(tilt_matches) != len(tilt_dots):
+                print(f"tilted association failed for {pattern_id} pose {pose_idx + 1}")
+                return 1
+            tilt_pose = evaluate_calibration_on_matches(tilt_matches, tilt_camera, tilt_dist)
+            if not tilt_pose.get("valid") or float(tilt_pose.get("rms_px", 1e9)) > 2.0:
+                print(
+                    f"tilted pose check failed for {pattern_id} pose {pose_idx + 1}: "
+                    f"{tilt_pose.get('reason')} rms={tilt_pose.get('rms_px')}"
+                )
+                return 1
+
     for index, variant in enumerate(SQUARE_SEQUENCE):
         square_dots, _ = build_square_layout(
             640,
@@ -4031,8 +4263,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--min-matched",
         type=int,
-        default=EXPECTED_DOTS,
-        help="Minimum associated centers required before export.",
+        default=0,
+        help="Minimum associated centers required before export (0 = all dots in the active target).",
     )
     parser.add_argument("--self-test", action="store_true", help="Run synthetic blob/layout tests and exit.")
     parser.add_argument(

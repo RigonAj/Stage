@@ -22,9 +22,6 @@ using DBSCANType = clustering::DBSCANClustering<CoordinateType, DBSCAN_DIMS>;
 }
 
 DvCamera::DvCamera(): filter_(resolution_, std::chrono::milliseconds(1)) {
-
-    loadOpenCvCalibrationFile();
-
     try {
         capture_ = std::make_unique<dv::io::camera::DVXplorer>();
 
@@ -42,16 +39,15 @@ DvCamera::DvCamera(): filter_(resolution_, std::chrono::milliseconds(1)) {
     }
 }
 
-void DvCamera::loadOpenCvCalibrationFile() {
-    const std::string path = kCalibrationFile;
-
+bool DvCamera::LoadOpenCvCalibrationFile(const std::string &path) {
     cv::FileStorage fs(path, cv::FileStorage::READ);
     if (!fs.isOpened()) {
         fmt::print(stderr, "Failed to open calibration file: {}\n", path);
-        return;
+        return false;
     }
 
-    calibration.sourcePath = path;
+    CalibrationData nextCalibration;
+    nextCalibration.sourcePath = path;
 
     cv::FileNode cameraNode;
 
@@ -60,62 +56,63 @@ void DvCamera::loadOpenCvCalibrationFile() {
 
         if (!node["camera_matrix"].empty()) {
             cameraNode = node;
-            calibration.cameraName = node.name();
             break;
         }
     }
 
     if (cameraNode.empty()) {
         fmt::print(stderr, "No valid camera node found in calibration file: {}\n", path);
-        return;
+        return false;
     }
 
-    cameraNode["camera_matrix"] >> calibration.cameraMatrix;
-    cameraNode["distortion_coefficients"] >> calibration.distortionCoefficients;
-    cameraNode["image_width"] >> calibration.imageSize.width;
-    cameraNode["image_height"] >> calibration.imageSize.height;
+    nextCalibration.cameraName = cameraNode.name();
+    cameraNode["camera_matrix"] >> nextCalibration.cameraMatrix;
+    cameraNode["distortion_coefficients"] >> nextCalibration.distortionCoefficients;
+    cameraNode["image_width"] >> nextCalibration.imageSize.width;
+    cameraNode["image_height"] >> nextCalibration.imageSize.height;
 
     if (!cameraNode["use_fisheye_model"].empty()) {
-        cameraNode["use_fisheye_model"] >> calibration.useFisheyeModel;
+        cameraNode["use_fisheye_model"] >> nextCalibration.useFisheyeModel;
     }
     else if (!fs["use_fisheye_model"].empty()) {
-        fs["use_fisheye_model"] >> calibration.useFisheyeModel;
+        fs["use_fisheye_model"] >> nextCalibration.useFisheyeModel;
     }
 
     if (!cameraNode["calibration_error"].empty()) {
-        cameraNode["calibration_error"] >> calibration.reprojectionError;
+        cameraNode["calibration_error"] >> nextCalibration.reprojectionError;
     }
     else if (!fs["calibration_error"].empty()) {
-        fs["calibration_error"] >> calibration.reprojectionError;
+        fs["calibration_error"] >> nextCalibration.reprojectionError;
     }
 
-    if (calibration.cameraMatrix.empty()
-        || calibration.cameraMatrix.rows != 3
-        || calibration.cameraMatrix.cols != 3) {
+    if (nextCalibration.cameraMatrix.empty()
+        || nextCalibration.cameraMatrix.rows != 3
+        || nextCalibration.cameraMatrix.cols != 3) {
         fmt::print(stderr, "Invalid camera matrix in calibration file: {}\n", path);
-        return;
+        return false;
     }
 
-    if (calibration.distortionCoefficients.empty()) {
+    if (nextCalibration.distortionCoefficients.empty()) {
         fmt::print(stderr, "Invalid distortion coefficients in calibration file: {}\n", path);
-        return;
+        return false;
     }
 
-    if (calibration.imageSize.width <= 0 || calibration.imageSize.height <= 0) {
-        calibration.imageSize = resolution_;
+    if (nextCalibration.imageSize.width <= 0 || nextCalibration.imageSize.height <= 0) {
+        nextCalibration.imageSize = resolution_;
     }
 
-    calibration.cameraMatrix.convertTo(calibration.cameraMatrix, CV_64F);
+    nextCalibration.cameraMatrix.convertTo(nextCalibration.cameraMatrix, CV_64F);
 
-    calibration.distortionCoefficients =
-        calibration.distortionCoefficients.reshape(1, 1);
+    nextCalibration.distortionCoefficients =
+        nextCalibration.distortionCoefficients.reshape(1, 1);
 
-    calibration.distortionCoefficients.convertTo(
-        calibration.distortionCoefficients,
+    nextCalibration.distortionCoefficients.convertTo(
+        nextCalibration.distortionCoefficients,
         CV_64F
     );
 
-    calibration.ready = true;
+    nextCalibration.ready = true;
+    calibration = std::move(nextCalibration);
 
     fmt::print(
         "Calibration loaded from {} | camera={} | fx={:.1f} fy={:.1f} cx={:.1f} cy={:.1f} | RMS={:.3f} px\n",
@@ -127,6 +124,7 @@ void DvCamera::loadOpenCvCalibrationFile() {
         calibration.cy(),
         calibration.reprojectionError
     );
+    return true;
 }
 
 void DvCamera::NextBatch() {

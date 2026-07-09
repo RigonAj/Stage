@@ -284,3 +284,63 @@
   root) per racket hold side.
 - Updated: [Testing And Commands](operations/testing-and-commands.md)
 - Updated: [Isaac Training Environment](sim-to-real/isaac-training-environment.md)
+
+## [2026-07-09] ingest | Intrinsic calibration runbook
+
+- Added: [Intrinsic Calibration Runbook](calibration/intrinsic-calibration-runbook.md)
+- Updated: wiki/index.md
+
+## [2026-07-09] ingest | Robust rotation/perspective blob association
+
+- event_mire_calibration.py: associate_blobs_to_layout rewritten as a
+  corner-seeded homography + ICP match (replaces the image-axis row/column
+  split that failed on tilted/rolled views). --self-test now covers strongly
+  tilted synthetic poses for mire/grid_5x4/grid_7x5.
+- Updated: [Intrinsic Calibration Runbook](calibration/intrinsic-calibration-runbook.md)
+
+## [2026-07-09] ingest | Intrinsic association corner-candidate fix
+
+- event_mire_calibration.py: homography association now tries convex-hull
+  quadrilateral corner candidates when the PCA corner cycle collapses; default
+  `--min-matched 0` means the active pattern's full point count.
+- Updated: [Intrinsic Calibration Runbook](calibration/intrinsic-calibration-runbook.md)
+
+## [2026-07-09] ingest | Real Trace perception test procedure
+
+- Added: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Source: new operator procedure
+  `docs/Robot_Control/procedure_test_perception_trace.md` covering the current
+  calibrated files, tracker `pose_source:=trace`, TF publication, dry-run
+  live-catch integration and attention points before robot command mode.
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+
+## [2026-07-09] ingest | Real perception runbook uses left model
+
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Source: operator correction that inference for the real perception test uses
+  `data/models/latest-left/policy_deterministic.onnx`; procedure now requires
+  the left `hoop_center` TF and matching hold-side state.
+
+## [2026-07-09] ingest | Tracker ball radius launch option
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Source: code change adding `ball_radius_mm` as a `ball_tracking_cpp` ROS
+  parameter and `live_catch.launch.py` launch argument, while keeping the
+  Option-panel slider for live adjustment.
+
+## [2026-07-09] ingest | Tracker displays sampled events
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Source: code change making the GUI 2D texture draw `camera.Samples` after
+  `Echantillon(maxevent)`, while Trace accumulation continues to use the full
+  filtered/undistorted event streams.
+
+## [2026-07-09] ingest | Explicit tracker intrinsics parameter
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Source: code change adding `camera_calibration_file` to `ball_tracking_cpp`
+  and `live_catch.launch.py`, defaulting the live/replay path to
+  `recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml`.

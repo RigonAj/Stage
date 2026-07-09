@@ -1,7 +1,7 @@
 # Trace Ball Tracking
 
-> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08
-> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Trace analysis](../../src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Gui accumulation/panel](../../src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/Gui.h)
+> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09
+> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Trace analysis](../../src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Gui accumulation/panel](../../src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/Gui.h); [Live-catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml)
 
 ## Overview
 
@@ -53,20 +53,21 @@ The ROS node timer runs at ~1 kHz (`publisher_member_function.cpp`,
 2. **Denoise** — `Filter()` runs dv-processing's background-activity noise
    filter (1 ms activity window, set in the `DvCamera` constructor). This drops
    isolated sensor noise that would otherwise widen the ribbon.
-3. **Rolling display window** — `KeepRecentFiltered(timeslice)` keeps a rolling
-   window of filtered events for the 2D view (default `timeslice` ≈ 484 ms).
-   This is the *display* window, distinct from the shorter *trace accumulation*
-   window below.
+3. **Rolling filtered window** — `KeepRecentFiltered(timeslice)` keeps a
+   rolling window of filtered events (default `timeslice` ≈ 484 ms). This is
+   the full pre-subsampling window used by undistortion, Trace accumulation and
+   fallback logic.
 4. **Undistort** — `Undistort()` produces two parallel streams: the **raw**
    filtered points and the **undistorted** points (`cv::undistortPoints`, or
    `cv::fisheye` when the calibration is fisheye), each clamped to image bounds.
    The trace can consume either (`Trace use raw input`, default undistorted).
    Undistortion runs on the **full** filtered window on purpose — the trace
    needs full trail density, so it must run before subsampling.
-5. **Subsample + cluster (circle path only)** — `Echantillon(maxevent)`
-   decimates events and `Cluster(box, alpha, bandwidth, minNb)` runs DBSCAN.
-   These feed the legacy circle fitter and are **unused** when `pose_source =
-   trace` with circle fitting off.
+5. **Subsample for display + cluster** — `Echantillon(maxevent)` decimates the
+   filtered window into `Samples`. The GUI 2D texture draws only these sampled
+   events to avoid lag; `Cluster(box, alpha, bandwidth, minNb)` also consumes
+   them for the legacy circle fitter. Trace still accumulates from the full raw
+   or undistorted filtered streams before this display subsampling.
 
 ## Pipeline — Trace Accumulation (`Gui::AppendTraceEvents`)
 
@@ -144,11 +145,15 @@ middle / lower edges of the trail) plus its extent.
    `depth = fEff · (2·ballRadius) / widthPx`, where
    `fEff = √((fx·nx)² + (fy·ny)²)` is the focal length projected onto the
    width direction `(nx,ny)` (handles `fx ≠ fy`). The center pixel is then
-   back-projected to `(x,y)` at that depth. The ball radius (default 20 mm) is
-   set live from the **Option panel** "Ball radius (mm)" slider (`Ui::BallRadiusMm()`,
-   clamped 1–100 mm); the node pushes it into the pose calibration on every
-   input change and per-frame tracker settings, so depth rescales without a
-   rebuild. Requires a ready calibration.
+   back-projected to `(x,y)` at that depth. The ball radius defaults to 20 mm,
+   can be initialized from the ROS parameter / launch argument `ball_radius_mm`,
+   and remains adjustable live from the **Option panel** "Ball radius (mm)"
+   slider (`Ui::BallRadiusMm()`, clamped 1–100 mm). The node pushes it into the
+   pose calibration on every input change and per-frame tracker settings, so
+   depth rescales without a rebuild. Intrinsics come from the
+   `camera_calibration_file` parameter; the live-catch launch defaults this to
+   `recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml`
+   for the current real-test setup. Requires a ready calibration.
 4. **3D outlier filter** — `FilterTraceWorldOutliers` runs two robust passes:
    a temporal-jump test (drop points that jump > 7× the median step while their
    neighbours bridge ≤ 3.5×), then a fit-residual test (fit linear `x,y` and
@@ -234,7 +239,9 @@ re-publish.
 | `Lead ms` (`trace_lead_ms`) | 0 | Publish position predicted at latest + lead. |
 | `Hold ms` (`trace_hold_ms`) | 0 | Coast duration after the ball leaves the ROI. |
 | `ROI x/y/w/h` | full frame | Fixed work-ROI; crop out the robot region. |
-| `Ball radius (mm)` (`ball_radius_mm`, Option panel) | 20 | Physical ball radius used by the width→depth model; live, clamped 1–100 mm. |
+| `Max Events` | 1000 | Display/clustering event budget. Lower it if the UI lags; Trace accumulation still uses the full filtered stream. |
+| `Ball radius (mm)` (`ball_radius_mm`, ROS launch arg + Option panel) | 20 | Physical ball radius used by the width→depth model; initialized at launch, live-adjustable, clamped 1–100 mm. |
+| `camera_calibration_file` (ROS parameter / launch arg) | `recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml` in live-catch launch | OpenCV XML intrinsics used by undistortion and Trace depth. Verify the tracker log before real throws. |
 | `Bin width px` | 4 | `s`-binning granularity for edges. |
 | `Local window` (`trace_line_window_px`) | ~66 | LOESS bandwidth for the ribbon curves. |
 | `Width step px` | 8 | Spacing of width samples along time. |
@@ -281,6 +288,7 @@ re-publish.
 
 ## See Also
 
+- [Real Perception Trace Test Runbook](real-perception-trace-test.md)
 - [Live Catch Loop](../live-catch/live-catch-loop.md)
 - [Message Contracts And Topics](../live-catch/message-contracts-and-topics.md)
 - [Camera And Hand-Eye Calibration](../calibration/camera-and-handeye-calibration.md)

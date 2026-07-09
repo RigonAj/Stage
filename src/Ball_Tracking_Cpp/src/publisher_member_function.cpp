@@ -37,7 +37,7 @@ public:
           default_camera_calibration_(camera.calibration),
           gui(camera.Filtered, ui),
 	          tracker() {
-        gui.SetTracePoseCalibration(camera.calibration, ui.BallRadiusMm());
+        gui.SetDisplayView(&camera.Samples);
         gui.SetTraceRawSource(
             &camera.RawFilteredPoints(),
             &camera.RawFilteredTimestamps(),
@@ -53,6 +53,17 @@ public:
         const std::string legacy_pose_topic =
             this->declare_parameter<std::string>("legacy_pose_topic", "ball_position_3d_mm");
         publish_legacy_pose_ = this->declare_parameter<bool>("publish_legacy_pose", true);
+        const std::string camera_calibration_file =
+            this->declare_parameter<std::string>(
+                "camera_calibration_file",
+                "calibration_camera_DVXplorer_DXA00265-2026_04_23_13_33_50.xml");
+        if (!camera.LoadOpenCvCalibrationFile(camera_calibration_file)) {
+            throw std::runtime_error("failed to load camera_calibration_file: " + camera_calibration_file);
+        }
+        default_camera_calibration_ = camera.calibration;
+        ui.SetBallRadiusMm(
+            static_cast<float>(this->declare_parameter<double>("ball_radius_mm", 20.0)));
+        gui.SetTracePoseCalibration(camera.calibration, ui.BallRadiusMm());
         // Which 3D estimate feeds BallState: "circle" = per-detection circle-fit
         // pose (legacy algorithm, historical default); "trace" = outlier-filtered
         // mid-window pose from the Trace ribbon pipeline (the primary algorithm:
@@ -80,6 +91,10 @@ public:
             camera_frame_id_.c_str(),
             pose_source_.c_str(),
             publish_legacy_pose_ ? " and legacy ball_position_3d_mm" : "");
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Ball radius set to %.1f mm (ROS parameter ball_radius_mm, adjustable in Option panel)",
+            ui.BallRadiusMm());
 
         timer_ = this->create_wall_timer(1ms, std::bind(&Pub::timer_callback, this));
     }
@@ -282,7 +297,6 @@ void Pub::timer_callback() {
 
     gui.ClearCurrentBall3D();
     applyInputCalibration();
-    gui.nb_event = camera.FilteredCount();
 
     // Undistort must run on the full filtered window: the trace accumulation
     // feeds on the undistorted points, and running it after Echantillon would
@@ -293,6 +307,7 @@ void Pub::timer_callback() {
 
     camera.Undistort();
     camera.Echantillon(maxEvent);
+    gui.nb_event = camera.SampleCount();
 
     const auto t_pre_end = clock::now();
 

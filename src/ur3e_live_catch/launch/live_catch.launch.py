@@ -94,6 +94,8 @@ def generate_launch_description() -> LaunchDescription:
     publish_frame = LaunchConfiguration("publish_frame")
     trigger_mode = LaunchConfiguration("trigger_mode")
     use_ball_regression = LaunchConfiguration("use_ball_regression")
+    ball_radius_mm = LaunchConfiguration("ball_radius_mm")
+    camera_calibration_file = LaunchConfiguration("camera_calibration_file")
     # With the regression node enabled, every raw source is re-pointed to
     # ball_state_raw and the regression republishes the fitted BallState on
     # ball_state (live_catch_node.ball_topic stays untouched). With the arg
@@ -130,6 +132,11 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("use_ball_regression", default_value="false",
                               description="insert the ballistic-regression ball publisher: raw sources "
                                           "publish ball_state_raw, the fitted BallState lands on ball_state"),
+        DeclareLaunchArgument("ball_radius_mm", default_value="20.0",
+                              description="physical ball radius in millimetres for ball_tracking_cpp Trace depth"),
+        DeclareLaunchArgument("camera_calibration_file",
+                              default_value="recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml",
+                              description="OpenCV XML intrinsics consumed by ball_tracking_cpp"),
         DeclareLaunchArgument("policy_python", default_value=policy_python_default,
                               description="python interpreter for live_catch_node; empty => ROS Python"),
         LogInfo(msg=interpreter_note),
@@ -145,7 +152,12 @@ def generate_launch_description() -> LaunchDescription:
             package="ball_tracking_cpp",
             executable="talker",
             name="ball_tracking_cpp",
-            parameters=[config, {"ball_state_topic": raw_ball_topic}],
+            parameters=[
+                config,
+                {"ball_state_topic": raw_ball_topic},
+                {"ball_radius_mm": ParameterValue(ball_radius_mm, value_type=float)},
+                {"camera_calibration_file": ParameterValue(camera_calibration_file, value_type=str)},
+            ],
             output="screen",
             condition=IfCondition(use_tracker),
         ),

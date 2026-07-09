@@ -59,6 +59,7 @@ private:
     int screenWidth;
     int screenHeight;
     const dv::EventStore &View;
+    const dv::EventStore *displayView = nullptr;
     std::vector<std::vector<cv::Point2f>> clusters;
     std::array<Color, 9> Colors = {RED, GREEN, BLUE, YELLOW, MAGENTA, ORANGE, PINK, VIOLET, BROWN};
     Vector2 offset = {0.0f, 360.0f};
@@ -167,6 +168,7 @@ public:
     void Update();
     void DrawTopView();
     void DrawView();
+    void SetDisplayView(const dv::EventStore *events) { displayView = events; }
     void DrawClusters();
     void DrawPerformance();
     void AddClusterView(std::vector<cv::Point2f> cluster);
@@ -381,7 +383,7 @@ public:
             sliderAt(3, 0, "Local window", trace_line_window_px, 8.0f, 240.0f);
             sliderAt(0, 1, "Width step px", trace_width_step_px, 8.0f, 90.0f);
             sliderAt(1, 1, "PCA ms", trace_pca_period_ms, 2.0f, 80.0f);
-            sliderAt(2, 1, "Follow window px", trace_follow_window_px, 20.0f, 260.0f);
+            sliderAt(2, 1, "Max Events", maxevent, 100.0f, 20000.0f);
             sliderAt(3, 1, "Support div", trace_support_divisor, 8.0f, 60.0f);
             sliderAt(0, 2, "Support min", trace_support_min, 1.0f, 20.0f);
             sliderAt(1, 2, "Support max", trace_support_max, 2.0f, 30.0f);
@@ -799,6 +801,7 @@ public:
     // Physical ball radius (mm), tunable from the Option panel: it scales the
     // width->depth conversion, so it must match the real ball.
     float BallRadiusMm() const { return std::clamp(ball_radius_mm, 1.0f, 100.0f); }
+    void SetBallRadiusMm(float radiusMm) { ball_radius_mm = std::clamp(radiusMm, 1.0f, 100.0f); }
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
     bool TraceEdgeRefineEnabled() const { return trace_edge_refine_enabled; }

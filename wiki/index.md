@@ -15,7 +15,8 @@ Event-camera ball tracking and 3D pose estimation.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, pose_source trace/circle contract, ROI-gated accumulation (no circle), node-side lead/coast trajectory prediction, Option-panel ball-radius slider and depth-estimation risks. | 2026-07-09 |
+| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, pose_source trace/circle contract, ROI-gated accumulation (no circle), sampled display path, node-side lead/coast trajectory prediction, `camera_calibration_file` and `ball_radius_mm` controls, and depth-estimation risks. | 2026-07-09 |
+| [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure to run real DVXplorer Trace perception after calibration, force the robust 2026-07-09 intrinsics, set ball radius, publish `ball_state`, replay/throw a ball, and feed left-model live-catch dry-run inference without robot command emission. | 2026-07-09 |
 
 ## calibration
 
@@ -25,6 +26,7 @@ Camera intrinsics, hand-eye calibration and TF contracts.
 |---------|---------|---------|
 | [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire hand-eye workflow, aligned result path, base_link parity validation gates and current blockers. | 2026-07-06 |
 | [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md) | Operator checklist for the physical eye-to-hand session: prerequisites, self-tests, capture, solve acceptance gates, TF publication and validation. | 2026-07-06 |
+| [Intrinsic Calibration Runbook](calibration/intrinsic-calibration-runbook.md) | Operator checklist to redo DVXplorer intrinsics: working/output dirs, env.sh `calib` alias, event-mire capture, robust solve and acceptance gates. | 2026-07-09 |
 | [Frames And Transforms](calibration/frames-and-transforms.md) | `base_link` policy frame, TF, UI robot orientation, hold_side-driven hoop_center TF (right/left racket mount), hoop radius distinction and unit contracts used by perception, live catch and UI. | 2026-07-06 |
 
 ## robot-control

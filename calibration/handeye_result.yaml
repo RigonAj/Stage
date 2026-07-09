@@ -1,0 +1,84 @@
+# Hand-eye calibration result (eye-to-hand, UR3e + DVXplorer)
+created_at: "2026-07-09T12:13:05.987"
+units: "meters"
+solver: "cv2.calibrateRobotWorldHandEye(CALIB_ROBOT_WORLD_HAND_EYE_SHAH)"
+cross_check_solver: "cv2.calibrateHandEye(CALIB_HAND_EYE_PARK), swapped roles"
+samples_file: "recordings/mire_calibration/handeye/handeye_samples_20260709_120756.json"
+sample_count: 6
+T_base_camera:
+  parent: "base"
+  child: "camera_optical"
+  xyz: [0.14797769787329557, -0.6023327191552271, 0.43678246722849295]
+  quat_xyzw: [0.4928169724051215, 0.5428517164083596, -0.5040694974350665, -0.45646181379991385]
+  rpy_rad: [-1.6459803048763424, 0.0012458493454175345, 1.668499862841369]
+  rpy_deg: [-94.30772463107094, 0.071381909401561, 95.59800025896718]
+T_tool0_mire:
+  parent: "tool0"
+  child: "screen_center"
+  xyz: [-0.008622848102283684, -0.0018042494065198325, 0.15958401020352356]
+  quat_xyzw: [-0.0018527798439801726, 0.7100323760620141, 0.0017211068131292773, 0.7041644906851794]
+  rpy_rad: [-3.12168395764153, 1.562495770864316, -3.116629669751367]
+  rpy_deg: [-178.85931574655532, 89.52441317756545, -178.5697263820049]
+validation:
+  solver_agreement:
+    trans_mm: 0.425122931858544
+    rot_deg: 0.0018966654093181328
+  pose_residuals:
+    trans_mean_mm: 1.1334687066473572
+    trans_max_mm: 1.742794839091477
+    rot_mean_deg: 0.3441599236048445
+    rot_max_deg: 0.6541122190655977
+    per_pose:
+      -
+        index: 0
+        trans_mm: 0.8106490740423963
+        rot_deg: 0.13737760992439713
+      -
+        index: 1
+        trans_mm: 0.7756151414249272
+        rot_deg: 0.4934602701154889
+      -
+        index: 2
+        trans_mm: 1.742794839091477
+        rot_deg: 0.6541122190655977
+      -
+        index: 3
+        trans_mm: 1.6278546527960507
+        rot_deg: 0.1740340638018626
+      -
+        index: 4
+        trans_mm: 0.9435568752605258
+        rot_deg: 0.20882216349627622
+      -
+        index: 5
+        trans_mm: 0.9003416572687671
+        rot_deg: 0.3971532152254446
+  leave_one_out:
+    worst_trans_mm: 7.73276996926415
+    worst_rot_deg: 0.4943553121782248
+  rotation_axis_diversity_deg: 89.98796925366081
+  mire_normal_into_screen_ok: true
+  pixel_residuals:
+    point_count: 114
+    rms_px: 1.4435210684216344
+    max_px: 2.363434153785192
+    per_sample:
+      -
+        index: 0
+        rms_px: 1.5748006634470066
+      -
+        index: 1
+        rms_px: 0.9978208061583572
+      -
+        index: 2
+        rms_px: 2.0701031123203943
+      -
+        index: 3
+        rms_px: 1.662646302895397
+      -
+        index: 4
+        rms_px: 1.0095887039662557
+      -
+        index: 5
+        rms_px: 0.9787164981344689
+intrinsics_xml: "recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml"
