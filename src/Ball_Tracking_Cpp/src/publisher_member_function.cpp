@@ -1,7 +1,10 @@
 #include "BallTracker.hpp"
 #include "Gui.h"
+#include "TraceAnalysis.hpp"
 #include "util.hpp"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -34,7 +37,7 @@ public:
           default_camera_calibration_(camera.calibration),
           gui(camera.Filtered, ui),
 	          tracker() {
-        gui.SetTracePoseCalibration(camera.calibration, BALL_RADIUS_MM);
+        gui.SetTracePoseCalibration(camera.calibration, ui.BallRadiusMm());
         gui.SetTraceRawSource(
             &camera.RawFilteredPoints(),
             &camera.RawFilteredTimestamps(),
@@ -86,13 +89,25 @@ public:
     void timer_callback();
 
 private:
-    static constexpr float BALL_RADIUS_MM = 20.0f;
+    // Per-axis quadratic fit of the trace trajectory in the ToMeters world
+    // frame: world(t) = c0 + c1*t + c2*t^2, t in seconds relative to originUs.
+    struct TraceTrajectoryFit {
+        std::array<double, 3> x{{0.0, 0.0, 0.0}};
+        std::array<double, 3> y{{0.0, 0.0, 0.0}};
+        std::array<double, 3> z{{0.0, 0.0, 0.0}};
+        int degree = 1;
+        int64_t originUs = 0;
+        double tMaxRelSeconds = 0.0;
+        rclcpp::Time wallTime;
+    };
 
     void resetTracks();
     void applyInputCalibration();
     void publishBallPose(const BallPose3D &pose);
-    void publishBallSample(const cv::Point3f &positionMm, int64_t timestampUs);
+    void publishBallSample(const cv::Point3f &positionMm, int64_t timestampUs, float confidence);
     void publishTracePose();
+    static bool fitTraceTrajectory(const Gui::TraceTrajectory &trajectory, TraceTrajectoryFit &fit);
+    static Vector3 evalTraceTrajectoryFit(const TraceTrajectoryFit &fit, double timeSeconds);
     static cv::Point3f traceWorldToCameraMm(const Vector3 &worldMeters);
     builtin_interfaces::msg::Time eventStampToRosTime(int64_t eventTimestampUs);
     void draw2DOverlay(const BallPose3D &pose);
@@ -115,7 +130,10 @@ private:
     std::string camera_frame_id_;
     bool publish_legacy_pose_ = true;
     std::string pose_source_ = "circle";
-    int64_t last_published_trace_stamp_us_ = std::numeric_limits<int64_t>::min();
+    // Dedup: latest-sample stamp of the last trace window already consumed.
+    int64_t last_trace_source_tmax_us_ = std::numeric_limits<int64_t>::min();
+    // Last live trajectory fit, kept for lead prediction and coasting.
+    std::optional<TraceTrajectoryFit> trace_traj_fit_;
     std::optional<int64_t> timestamp_anchor_event_us_;
     std::optional<rclcpp::Time> timestamp_anchor_ros_time_;
     std::optional<rclcpp::Time> last_stamp_conversion_ros_time_;
@@ -161,7 +179,7 @@ void Pub::applyInputCalibration() {
         || active_reader_calibration_override_ != useReaderCalibration;
 
     camera.calibration = nextCalibration;
-    gui.SetTracePoseCalibration(camera.calibration, BALL_RADIUS_MM);
+    gui.SetTracePoseCalibration(camera.calibration, ui.BallRadiusMm());
 
     if (!changed) {
         return;
@@ -213,7 +231,12 @@ void Pub::timer_callback() {
         // Live getNextEventBatch() can be empty between real event batches. Do
         // not redraw an empty texture in that case; keep the last camera view
         // on screen until a new batch arrives.
-        if (!camera.EventsAvailable()) {return; }
+        if (!camera.EventsAvailable()) {
+            if (pose_source_ == "trace") {
+                publishTracePose();  // keep coasting during event gaps
+            }
+            return;
+        }
 
         camera.Filter();
 
@@ -232,6 +255,9 @@ void Pub::timer_callback() {
             camera.Filtered = dv::EventStore();
             gui.ClearCurrentBall3D();
             gui.Update();
+            if (pose_source_ == "trace") {
+                publishTracePose();  // keep coasting at end of playback
+            }
             return;
         }
         camera.Events = std::move(readerEvents);
@@ -240,11 +266,17 @@ void Pub::timer_callback() {
 
     if (!camera.FilteredAvailable()) {
         if (!ui.UseReader()) {
+            if (pose_source_ == "trace") {
+                publishTracePose();  // keep coasting while filtered window is empty
+            }
             return;
         }
         gui.nb_event = 0;
         gui.ClearCurrentBall3D();
         gui.Update();
+        if (pose_source_ == "trace") {
+            publishTracePose();
+        }
         return;
     }
 
@@ -421,7 +453,7 @@ std::vector<BallTrackerClusterInput> Pub::buildTrackerClusters() const {
 
 BallTrackerSettings Pub::trackerSettings() const {
     BallTrackerSettings settings;
-    settings.ballRadiusMm = BALL_RADIUS_MM;
+    settings.ballRadiusMm = ui.BallRadiusMm();
     settings.positiveOnly = ui.positive_only;
     settings.coef = ui.Coef();
     settings.filterSize = ui.FilterSize();
@@ -494,7 +526,7 @@ void Pub::drawTrackerResult(const BallTrackerResult &result) {
 
         gui.SetBall3D(
             result.worldPosition,
-            BALL_RADIUS_MM * 1.0e-3f,
+            ui.BallRadiusMm() * 1.0e-3f,
             label.str());
 
         gui.SetTrajectory3D(
@@ -532,7 +564,8 @@ void Pub::resetTracks() {
     timestamp_anchor_event_us_.reset();
     timestamp_anchor_ros_time_.reset();
     last_stamp_conversion_ros_time_.reset();
-    last_published_trace_stamp_us_ = std::numeric_limits<int64_t>::min();
+    last_trace_source_tmax_us_ = std::numeric_limits<int64_t>::min();
+    trace_traj_fit_.reset();
 }
 
 builtin_interfaces::msg::Time Pub::eventStampToRosTime(const int64_t eventTimestampUs) {
@@ -568,7 +601,7 @@ void Pub::publishBallPose(const BallPose3D &pose) {
     if (!pose.valid) {
         return;
     }
-    publishBallSample(pose.positionMm, pose.timestampUs);
+    publishBallSample(pose.positionMm, pose.timestampUs, 1.0f);
 }
 
 cv::Point3f Pub::traceWorldToCameraMm(const Vector3 &worldMeters) {
@@ -582,18 +615,116 @@ cv::Point3f Pub::traceWorldToCameraMm(const Vector3 &worldMeters) {
     };
 }
 
-void Pub::publishTracePose() {
-    const Gui::TracePoseSample sample = gui.CurrentTracePoseSample();
-    // The mid-window sample only advances when new trace events arrive;
-    // requiring a strictly newer stamp deduplicates repeated render frames.
-    if (!sample.valid || sample.timestampUs <= last_published_trace_stamp_us_) {
-        return;
+bool Pub::fitTraceTrajectory(const Gui::TraceTrajectory &trajectory, TraceTrajectoryFit &fit) {
+    const std::size_t n = trajectory.worldPoints.size();
+    if (n < 3 || trajectory.times.size() != n) {
+        return false;
     }
-    last_published_trace_stamp_us_ = sample.timestampUs;
-    publishBallSample(traceWorldToCameraMm(sample.worldMeters), sample.timestampUs);
+
+    std::vector<double> t(n), xs(n), ys(n), zs(n), weights(n, 1.0);
+    double tMin = trajectory.times.front();
+    double tMax = trajectory.times.front();
+    for (std::size_t i = 0; i < n; ++i) {
+        t[i] = static_cast<double>(trajectory.times[i]);
+        xs[i] = static_cast<double>(trajectory.worldPoints[i].x);
+        ys[i] = static_cast<double>(trajectory.worldPoints[i].y);
+        zs[i] = static_cast<double>(trajectory.worldPoints[i].z);
+        tMin = std::min(tMin, t[i]);
+        tMax = std::max(tMax, t[i]);
+    }
+
+    // Need a real time baseline to fit and extrapolate a trajectory.
+    if (!(tMax - tMin > 1.0e-4)) {
+        return false;
+    }
+
+    // Quadratic (ballistic) once there is enough support; linear otherwise.
+    const int degree = n >= 5 ? 2 : 1;
+    if (!SolveWeightedPolynomialFit(t, xs, weights, degree, fit.x)
+        || !SolveWeightedPolynomialFit(t, ys, weights, degree, fit.y)
+        || !SolveWeightedPolynomialFit(t, zs, weights, degree, fit.z)) {
+        return false;
+    }
+
+    fit.degree = degree;
+    fit.tMaxRelSeconds = tMax;
+    return true;
 }
 
-void Pub::publishBallSample(const cv::Point3f &position, const int64_t timestampUs) {
+Vector3 Pub::evalTraceTrajectoryFit(const TraceTrajectoryFit &fit, const double timeSeconds) {
+    const auto axis = [&](const std::array<double, 3> &c) {
+        return c[0] + c[1] * timeSeconds + c[2] * timeSeconds * timeSeconds;
+    };
+    return Vector3{
+        static_cast<float>(axis(fit.x)),
+        static_cast<float>(axis(fit.y)),
+        static_cast<float>(axis(fit.z)),
+    };
+}
+
+void Pub::publishTracePose() {
+    const double leadSeconds = ui.TraceLeadSeconds();
+    const double holdSeconds = ui.TraceHoldSeconds();
+    const rclcpp::Time now = this->get_clock()->now();
+
+    const Gui::TraceTrajectory trajectory = gui.CurrentTraceTrajectory();
+
+    // A fresh window is one that is valid, has enough support and whose latest
+    // sample is strictly newer than the last one we already fitted (dedup of
+    // repeated render frames on the same accumulated events).
+    bool freshWindow = false;
+    int64_t tMaxUs = std::numeric_limits<int64_t>::min();
+    if (trajectory.valid
+        && trajectory.worldPoints.size() >= 3
+        && trajectory.worldPoints.size() == trajectory.times.size()) {
+        const double tMaxRel = static_cast<double>(
+            *std::max_element(trajectory.times.begin(), trajectory.times.end()));
+        tMaxUs = trajectory.originUs + static_cast<int64_t>(std::llround(tMaxRel * 1.0e6));
+        freshWindow = tMaxUs > last_trace_source_tmax_us_;
+    }
+
+    if (freshWindow) {
+        TraceTrajectoryFit fit;
+        if (fitTraceTrajectory(trajectory, fit)) {
+            fit.originUs = trajectory.originUs;
+            fit.wallTime = now;
+            trace_traj_fit_ = fit;
+            last_trace_source_tmax_us_ = tMaxUs;
+
+            // Publish the position predicted at (latest sample + lead).
+            const double tEval = fit.tMaxRelSeconds + leadSeconds;
+            const Vector3 world = evalTraceTrajectoryFit(fit, tEval);
+            const int64_t stampUs =
+                fit.originUs + static_cast<int64_t>(std::llround(tEval * 1.0e6));
+            publishBallSample(traceWorldToCameraMm(world), stampUs, 1.0f);
+        }
+        return;
+    }
+
+    // No fresh window this frame: coast by extrapolating the last fit forward
+    // for up to holdSeconds after the ball left the ROI / the trace stopped.
+    if (holdSeconds <= 0.0 || !trace_traj_fit_.has_value()) {
+        return;
+    }
+    const double elapsed = (now - trace_traj_fit_->wallTime).seconds();
+    if (elapsed < 0.0) {
+        return;
+    }
+    if (elapsed > holdSeconds) {
+        trace_traj_fit_.reset();
+        return;
+    }
+
+    const double tEval = trace_traj_fit_->tMaxRelSeconds + leadSeconds + elapsed;
+    const Vector3 world = evalTraceTrajectoryFit(*trace_traj_fit_, tEval);
+    const int64_t stampUs =
+        trace_traj_fit_->originUs + static_cast<int64_t>(std::llround(tEval * 1.0e6));
+    const float confidence =
+        static_cast<float>(std::clamp(1.0 - elapsed / holdSeconds, 0.0, 1.0));
+    publishBallSample(traceWorldToCameraMm(world), stampUs, confidence);
+}
+
+void Pub::publishBallSample(const cv::Point3f &position, const int64_t timestampUs, const float confidence) {
     if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
         return;
     }
@@ -605,11 +736,13 @@ void Pub::publishBallSample(const cv::Point3f &position, const int64_t timestamp
         msg.position.x = static_cast<double>(position.x) * 1.0e-3;
         msg.position.y = static_cast<double>(position.y) * 1.0e-3;
         msg.position.z = static_cast<double>(position.z) * 1.0e-3;
+        // Velocity left at (0,0,0) = "not provided": the downstream consumer
+        // recomputes it (EMA / regression). See BallState.msg contract.
         msg.velocity.x = 0.0;
         msg.velocity.y = 0.0;
         msg.velocity.z = 0.0;
         msg.valid = true;
-        msg.confidence = 1.0f;
+        msg.confidence = confidence;
         ball_state_publisher_->publish(msg);
     }
 

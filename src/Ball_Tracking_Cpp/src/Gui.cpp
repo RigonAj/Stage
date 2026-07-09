@@ -700,6 +700,7 @@ void Gui::Draw2DScene() {
     DrawTextureEx(cpuTexture, {offset.x, offset.y}, 0.0f, scale, WHITE);
     DrawRectangleLinesEx({offset.x, offset.y, 1280 * scale, 480 * scale}, 2, RED);
     DrawOverlays();
+    DrawWorkRoi();
     DrawImageTrajectory2D();
 }
 
@@ -745,13 +746,14 @@ void Gui::UpdateTraceAnalysis() {
         return;
     }
 
+    traceTimeOriginUs_ = TraceTimeOriginUs(traceSourcePoints_);
     traceAnalysis_ = AnalyzeTrace3D(
         traceFit_,
         traceCalibration,
         traceBallRadiusMm,
         ui.TraceWidthStepPx(),
         ui.TraceWidthSmoothingEnabled(),
-        TraceTimeOriginUs(traceSourcePoints_),
+        traceTimeOriginUs_,
         [this](float timeSeconds, Vector3 &worldPoint) {
             return this->LookupGroundTruthWorld(timeSeconds, worldPoint);
         }
@@ -1759,6 +1761,31 @@ void Gui::DrawOverlays() {
     overlay_texts.clear();
 }
 
+void Gui::DrawWorkRoi() {
+    // Fixed crop box in image pixels (top-origin, matching the camera texture),
+    // drawn on both the left (undistorted) and right (raw) camera views.
+    const float rx = ui.WorkRoiX();
+    const float ry = ui.WorkRoiY();
+    const float rw = ui.WorkRoiW();
+    const float rh = ui.WorkRoiH();
+
+    const Rectangle leftView = {
+        offset.x + rx * scale,
+        offset.y + ry * scale,
+        rw * scale,
+        rh * scale
+    };
+    DrawRectangleLinesEx(leftView, 2.0f, ORANGE);
+
+    const Rectangle rightView = {
+        offset.x + (rx + 640.0f) * scale,
+        offset.y + ry * scale,
+        rw * scale,
+        rh * scale
+    };
+    DrawRectangleLinesEx(rightView, 2.0f, ORANGE);
+}
+
 void Gui::DrawImageTrajectory2D() {
     if (!imageTrajectory2DValid || imageTMax2D <= imageTMin2D) {
         return;
@@ -1975,7 +2002,9 @@ void Gui::AppendTraceEvents(
             continue;
         }
 
-        if (!TraceMotionWindowContains(point)) {
+        // Trace accumulation is gated by the fixed work-ROI only (no circle /
+        // motion-window dependency): every event inside the ROI feeds the trace.
+        if (!ui.WorkRoiContains(point.x, point.y)) {
             continue;
         }
 

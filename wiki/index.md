@@ -15,7 +15,7 @@ Event-camera ball tracking and 3D pose estimation.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, pose_source trace/circle output contract and depth-estimation risks. | 2026-07-03 |
+| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, pose_source trace/circle contract, ROI-gated accumulation (no circle), node-side lead/coast trajectory prediction, Option-panel ball-radius slider and depth-estimation risks. | 2026-07-09 |
 
 ## calibration
 

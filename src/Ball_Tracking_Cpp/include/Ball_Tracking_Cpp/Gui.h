@@ -124,6 +124,9 @@ private:
     bool trace3DValid = false;
     Vector3 traceCurrentWorld3D{0.0f, 0.0f, 0.0f};
     int64_t traceCurrentWorldTimestampUs_ = 0;
+    // Absolute event time (us) of the current trace window origin: traceTimes3D
+    // are relative to it, so the node can rebuild absolute stamps for lead/coast.
+    int64_t traceTimeOriginUs_ = 0;
     std::vector<Vector3> traceWorld3D;
     std::vector<float> traceTimes3D;
     std::vector<Vector3> traceGroundTruthWorld3D;
@@ -184,6 +187,9 @@ public:
     void DrawImageTrajectory2D();
     Vector2 CamToScreen(float x, float y);
     void DrawOverlays();
+    // Fixed work-ROI (crop box) drawn in image pixels on the 2D camera views,
+    // sourced from the ui sliders. Only events inside it feed the trace.
+    void DrawWorkRoi();
 
 
     void SetBall3D(const Vector3 &worldPosition, float radiusMeters, const std::string &label);
@@ -234,6 +240,19 @@ public:
     };
     TracePoseSample CurrentTracePoseSample() const {
         return {trace3DValid, traceCurrentWorld3D, traceCurrentWorldTimestampUs_};
+    }
+    // Full outlier-filtered 3D trace trajectory of the current window, for the
+    // node to fit x/y/z(t) and evaluate at now+lead (prediction) or coast.
+    // worldPoints use the ToMeters convention (meters); times are seconds
+    // relative to originUs (absolute event time of the window origin).
+    struct TraceTrajectory {
+        bool valid = false;
+        std::vector<Vector3> worldPoints;
+        std::vector<float> times;
+        int64_t originUs = 0;
+    };
+    TraceTrajectory CurrentTraceTrajectory() const {
+        return {trace3DValid, traceWorld3D, traceTimes3D, traceTimeOriginUs_};
     }
     const CalibrationData *ReaderCalibrationOverride() const;
     const std::string &ReaderEventPath() const { return path_reader_; }
@@ -301,6 +320,13 @@ public:
         trace_polarity_mode = 2;
         temporal_slices = 5.0f;
         events_per_slice = 100.0f;
+        trace_lead_ms = 0.0f;
+        trace_hold_ms = 0.0f;
+        work_roi_x = 0.0f;
+        work_roi_y = 0.0f;
+        work_roi_w = 640.0f;
+        work_roi_h = 480.0f;
+        ball_radius_mm = 20.0f;
         slice_mode = 0;
         circle_fitting_enabled = false;
         reader_source_sequences = true;
@@ -514,6 +540,34 @@ public:
             GuiToggle({px, py, 90.0f, h}, "Positif only", &positive_only);
         }
 
+        // Robot-output + work-ROI controls (trace path). Compact strip at the
+        // top-left, clear of the main panel (x>=295) and the camera view (y>=360).
+        {
+            const float ox = 12.0f;
+            float oy = 136.0f;
+            const float sw = 150.0f;
+            const float sh = 20.0f;
+            const float rowStep = 36.0f;
+            DrawRectangle(
+                static_cast<int>(ox) - 6,
+                static_cast<int>(oy) - 24,
+                static_cast<int>(sw) + 78,
+                static_cast<int>(rowStep * 6.0f) + 18,
+                Fade(DARKGRAY, 0.35f));
+            auto stripSlider = [&](const char *label, float &val, float lo, float hi) {
+                DrawText(label, static_cast<int>(ox), static_cast<int>(oy) - 15, 13, BLACK);
+                GuiSliderBar({ox, oy, sw, sh}, nullptr, nullptr, &val, lo, hi);
+                DrawText(TextFormat("%.0f", val), static_cast<int>(ox + sw + 6.0f), static_cast<int>(oy), 13, BLACK);
+                oy += rowStep;
+            };
+            stripSlider("Lead ms (predict)", trace_lead_ms, 0.0f, 500.0f);
+            stripSlider("Hold ms (coast)", trace_hold_ms, 0.0f, 3000.0f);
+            stripSlider("ROI x", work_roi_x, 0.0f, 639.0f);
+            stripSlider("ROI y", work_roi_y, 0.0f, 479.0f);
+            stripSlider("ROI w", work_roi_w, 1.0f, 640.0f);
+            stripSlider("ROI h", work_roi_h, 1.0f, 480.0f);
+        }
+
         if (option) {
             const float x = 900.0f;
             const float y = 500.0f;
@@ -522,7 +576,7 @@ public:
             const float inner_gap_x = 50.0f;
             const float inner_gap_y = 30.0f;
             const float option_width = textbox_width + 2.0f * inner_gap_x;
-            const float row_count = 8.0f;
+            const float row_count = 9.0f;
             const float dy = button_h + 20.0f;
             const float option_height = dy * row_count + 2.0f * inner_gap_y;
 
@@ -589,6 +643,17 @@ public:
 
             DrawText("Read file:", static_cast<int>(x), static_cast<int>(y + 6.0f * dy), 14, BLACK);
             read = GuiTextBox(read_rec, read_file, sizeof(read_file), read_f);
+
+            DrawText("Ball radius (mm):", static_cast<int>(x), static_cast<int>(y + 8.0f * dy), 14, BLACK);
+            GuiSliderBar(
+                {x, y + 8.0f * dy + 18.0f, textbox_width - 60.0f, button_h - 6.0f},
+                nullptr, nullptr, &ball_radius_mm, 1.0f, 100.0f);
+            DrawText(
+                TextFormat("%.1f", ball_radius_mm),
+                static_cast<int>(x + textbox_width - 52.0f),
+                static_cast<int>(y + 8.0f * dy + 22.0f),
+                16,
+                BLACK);
         }
     }
 
@@ -711,6 +776,29 @@ public:
     double TraceMemorySeconds() const {
         return static_cast<double>(std::clamp(trace_memory_ms, 40.0f, 3000.0f)) * 1.0e-3;
     }
+    // Prediction lead: publish the trajectory position at (latest sample + lead).
+    double TraceLeadSeconds() const {
+        return static_cast<double>(std::clamp(trace_lead_ms, 0.0f, 500.0f)) * 1.0e-3;
+    }
+    // Coast: keep publishing the extrapolated position for this long after the
+    // ball leaves the ROI / the trace stops advancing (0 => no coast).
+    double TraceHoldSeconds() const {
+        return static_cast<double>(std::clamp(trace_hold_ms, 0.0f, 3000.0f)) * 1.0e-3;
+    }
+    // Fixed work-ROI (image pixels): only events inside it feed the trace. Lets
+    // the operator crop out the robot's own event-generating region.
+    float WorkRoiX() const { return std::clamp(work_roi_x, 0.0f, 639.0f); }
+    float WorkRoiY() const { return std::clamp(work_roi_y, 0.0f, 479.0f); }
+    float WorkRoiW() const { return std::clamp(work_roi_w, 1.0f, 640.0f - WorkRoiX()); }
+    float WorkRoiH() const { return std::clamp(work_roi_h, 1.0f, 480.0f - WorkRoiY()); }
+    bool WorkRoiContains(float x, float y) const {
+        const float rx = WorkRoiX();
+        const float ry = WorkRoiY();
+        return x >= rx && x < rx + WorkRoiW() && y >= ry && y < ry + WorkRoiH();
+    }
+    // Physical ball radius (mm), tunable from the Option panel: it scales the
+    // width->depth conversion, so it must match the real ball.
+    float BallRadiusMm() const { return std::clamp(ball_radius_mm, 1.0f, 100.0f); }
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
     bool TraceEdgeRefineEnabled() const { return trace_edge_refine_enabled; }
@@ -783,6 +871,13 @@ private:
     int trace_polarity_mode = 2;
     float temporal_slices = 5.0f;
     float events_per_slice = 100.0f;
+    float trace_lead_ms = 0.0f;
+    float trace_hold_ms = 0.0f;
+    float work_roi_x = 0.0f;
+    float work_roi_y = 0.0f;
+    float work_roi_w = 640.0f;
+    float work_roi_h = 480.0f;
+    float ball_radius_mm = 20.0f;
 
     bool color_switch = false;
     bool circle_fitting_enabled = false;

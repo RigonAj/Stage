@@ -1,5 +1,20 @@
 # Wiki Log
 
+## [2026-07-09] ingest | Trace: Option-panel ball-radius slider drives width→depth live
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Ball radius is no longer the fixed `BALL_RADIUS_MM = 20` node constant; it is a
+  live Option-panel slider (`Ui::BallRadiusMm()`, clamped 1–100 mm) pushed into
+  pose calibration and per-frame tracker settings. Updated depth-from-width step
+  and tuning table.
+
+## [2026-07-08] ingest | Trace: full detailed perception pipeline + ROI accumulation, lead/coast prediction
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Full stage-by-stage pipeline (front-end, accumulation, ribbon fit, width→3D,
+  prediction), design-choice rationale, tuning table; ROI-gated accumulation
+  (no circle) and node-side lead/coast trajectory prediction.
+
 ## [2026-06-29] ingest | Initial repository documentation compile
 
 - Updated: [Project Overview](overview/project-overview.md)
