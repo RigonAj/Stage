@@ -395,3 +395,55 @@
   make it live-tunable via `ros2 param set /ball_regression_node lead_time_s`
   (bounded [0, 1] s). Side effects documented: perception_age ≈ -lead and
   ground-termination lead seconds before real impact.
+
+## [2026-07-10] ingest | Independent perception robustness and flight-lifecycle review
+
+- Added: [Perception Robustness And Flight Lifecycle](perception/perception-robustness-flight-lifecycle.md)
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Live Catch Loop](live-catch/live-catch-loop.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+- Updated: [Isaac Training Environment](sim-to-real/isaac-training-environment.md)
+- Updated: [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md)
+- Secondary navigation: `docs/Agent_Wiki/Perception_Trace.md` now routes to the
+  review and compiled lifecycle page.
+- Source: docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md,
+  code/config audit and current `latest-left` metadata. Records the duplicate
+  stack as the diagnosed first-test cause, but keeps real perception unvalidated;
+  identifies provisional 0.2 s lead, tracker/regression timestamp semantics,
+  binary Trace confidence, periodic-only command-authority checks and missing
+  explicit flight start/end phases as the next blockers.
+
+## [2026-07-10] ingest | Ball-regression extra lead defaults to zero
+
+- Updated: [Perception Robustness And Flight Lifecycle](perception/perception-robustness-flight-lifecycle.md)
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Observation Latency And Models](sim-to-real/observation-latency-and-models.md)
+- Updated: [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md)
+- Source: operator decision and `src/ur3e_live_catch/config/live_catch.yaml`.
+  The former provisional `lead_time_s: 0.2` bring-up override is now 0.0,
+  matching `RegressionConfig` and the synchronous current ball/current robot
+  policy observation. Nonzero future prediction remains runtime-tunable but is
+  not a deployment default without timing, replay and training validation.
+
+## [2026-07-10] ingest | Hand-eye phone layout survives server restarts
+
+- Updated: [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md)
+- Source: operator request and changes to `scripts/serve_phone_mire.py` and
+  `scripts/event_mire_calibration.py`. The server now persists the last valid
+  fullscreen phone layout and provides a documented Poco X7 Pro fallback, so
+  hand-eye capture no longer requires a phone reload after every PC-side
+  restart. Live non-fullscreen layouts remain rejected.
+
+## [2026-07-10] ingest | Dated physical hand-eye transform example
+
+- Updated: [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md)
+- Source: `calibration/handeye_result.yaml` generated 2026-07-10 at 14:30:52
+  Europe/Paris from 18 cleaned physical samples. Records the example
+  `base -> camera_optical` and `tool0 -> screen_center` transforms, static TF
+  command, solver/residual validation and remaining physical parity checks.

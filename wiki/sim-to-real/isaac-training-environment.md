@@ -1,7 +1,7 @@
 # Isaac Training Environment
 
-> Sources: Isaac FirstTraining env/cfg working tree, 2026-07-03; Isaac README snapshot, 2026-07-03; Isaac environment-and-frames snapshot, 2026-07-03; policy metadata `latest`, 2026-06-30; agent review, 2026-07-02; left-hand (hold_side) variant implementation, 2026-07-06
-> Raw: [Isaac README snapshot](../../raw/isaac/2026-07-03-firsttraining-readme.md); [Environment and frames snapshot](../../raw/isaac/2026-07-03-environment-and-frames.md); [Policy metadata](../../data/models/latest/policy_metadata.json); [Agent review](../../raw/reviews/2026-07-02-stage-wiki-and-training-review.md)
+> Sources: Isaac FirstTraining env/cfg working tree, 2026-07-03; Isaac README snapshot, 2026-07-03; Isaac environment-and-frames snapshot, 2026-07-03; policy metadata `latest`, 2026-06-30; agent review, 2026-07-02; left-hand variant and `latest-left` metadata, 2026-07-06; deployment review, 2026-07-10
+> Raw: [Isaac README snapshot](../../raw/isaac/2026-07-03-firsttraining-readme.md); [Environment and frames snapshot](../../raw/isaac/2026-07-03-environment-and-frames.md); [Right policy metadata](../../data/models/latest/policy_metadata.json); [Left policy metadata](../../data/models/latest-left/policy_metadata.json); [Agent review](../../raw/reviews/2026-07-02-stage-wiki-and-training-review.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md)
 
 ## Overview
 
@@ -91,7 +91,7 @@ configuration on first init and with probability 0.05 on ball reset.
 
 ## Ball Distribution And Noise
 
-Ball spawns uniformly in x `(-0.6, -0.2)`, y `(1.2, 2.1)`, z `(0.5, 1.2)` m
+The historical right task spawns uniformly in x `(-0.6, -0.2)`, y `(1.2, 2.1)`, z `(0.5, 1.2)` m
 with velocity x `(-0.7, 0.6)`, y `(-5.0, -3.5)`, z `(-0.1, 1.5)` m/s, toward
 the robot. Gaussian spawn-position noise is enabled with
 `ball_position_noise_std = 0.01` in the current cfg. Discrepancy: the Isaac
@@ -107,10 +107,12 @@ changes** that halve the training limits and shrink position bounds:
 `joint_velocity_safe_rad_s = (π/2, π/2, π/2, π, π, π)`,
 `joint_acceleration_safe_rad_s2 = (2π, 2π, 2π, 4π, 4π, 4π)`, all joints
 `±π`. The last commit still has the full limits (π base / 2π wrists, ±2π
-bounds, elbow ±π), and the deployed `data/models/` metadata was exported from
-the full-limit training. The halved limits only take effect after the change is
-committed, retrained and re-exported; until then the Stage-side `v_safe_scale`
-parameter is the operative slow-down (see
+bounds, elbow ±π), and the right `latest`/`best` metadata was exported from the
+full-limit training. The newer `latest-left` metadata also retains the full
+velocity/acceleration values but records ±π position bounds. The halved limits
+only take effect after a matching change is committed, retrained and
+re-exported; until then the Stage-side `v_safe_scale` parameter is the
+operative slow-down (see
 [Safety And Commanding](../live-catch/safety-and-commanding.md)).
 
 ## Left-Hand Variant (hold_side)
@@ -133,6 +135,21 @@ the historical right-hand setup, seen from in front of the robot:
   disk offset/normal/radius and ball ranges, and
   `sim2real_validate_export.py` cross-checks `hold_side` against the sign of
   `disk_offset_wrist_3_link_m[0]` when present.
+
+The deployed `data/models/latest-left/policy_metadata.json` was re-checked on
+2026-07-10 and is the source of truth for the current real-perception runbook:
+
+- spawn `x=[0.2,0.6]`, `y=[1.2,2.1]`, `z=[0.5,1.2]` m;
+- velocity `vx=[-0.6,0.7]`, `vy=[-5.0,-4.0]`, `vz=[0.2,1.5]` m/s;
+- `ball_position_noise_std_m=0.05` and `disk_radius_m=0.1`;
+- disk offset about `(+0.5,0,0)` and normal `(0,0,-1)` in `wrist_3_link`;
+- full velocity limits (π base joints, 2π wrists), corresponding full
+  accelerations, and ±π position bounds.
+
+These left-export values supersede generic/right-model values whenever
+`latest-left` is loaded. They define the initial bring-up throw envelope; note
+that a spawn-position-noise field does not by itself prove robustness to
+temporally correlated perception jitter, latency or dropouts.
 
 Observation, reward and termination math is side-agnostic (it derives from
 the disk pose read from the USD), so no env-code change was needed. A policy
@@ -207,3 +224,4 @@ python3 /home/rigon/Documents/IsaacTrain/Cartpole/Cartpole/FirstTraining/scripts
 - [Safety And Commanding](../live-catch/safety-and-commanding.md)
 - [Testing And Commands](../operations/testing-and-commands.md)
 - [Real Robot Bring-Up Runbook](../operations/real-robot-bringup-runbook.md)
+- [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)

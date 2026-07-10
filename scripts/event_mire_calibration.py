@@ -3606,9 +3606,15 @@ class ControlWindow(QtWidgets.QWidget):
                 self.args.external_mire
             )
             spacing = float(self.external_layout["layout"]["spacing_x_mm"])
+            source = str(self.external_layout.get("layout_source", "phone-live"))
+            source_label = {
+                "cache": "cache plein ecran",
+                "poco-default": "profil Poco par defaut",
+                "phone-live": "telephone connecte",
+            }.get(source, source)
             self.append_status(
                 f"Mire externe chargee: {len(self.external_dots)} points, "
-                f"espacement {spacing:.2f} mm."
+                f"espacement {spacing:.2f} mm ({source_label})."
             )
         except RuntimeError as exc:
             self.external_dots = []

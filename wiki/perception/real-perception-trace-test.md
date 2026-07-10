@@ -1,7 +1,7 @@
 # Real Perception Trace Test Runbook
 
-> Sources: Trace pipeline and launch verification, 2026-07-09; local calibration files, 2026-07-09; left policy model selection, 2026-07-09; explicit tracker intrinsics parameter, 2026-07-09; first real command test analysis, 2026-07-09
-> Raw: [operator procedure](../../docs/Robot_Control/procedure_test_perception_trace.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Procédure session réelle commandée](../../docs/Robot_Control/procedure_lancement_reel_trace_commande.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [live_catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [live_catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [TF publisher](../../scripts/publish_camera_tf.py); [model README](../../data/models/README.md)
+> Sources: Trace pipeline and launch verification, 2026-07-09; local calibration files, 2026-07-09; left policy model selection, 2026-07-09; explicit tracker intrinsics parameter, 2026-07-09; first real command test analysis, 2026-07-09; independent lead/timestamp review, 2026-07-10
+> Raw: [operator procedure](../../docs/Robot_Control/procedure_test_perception_trace.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Procédure session réelle commandée](../../docs/Robot_Control/procedure_lancement_reel_trace_commande.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [live_catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [live_catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [TF publisher](../../scripts/publish_camera_tf.py); [model README](../../data/models/README.md)
 
 ## Overview
 
@@ -129,6 +129,13 @@ ur3e_catch_stack --real --tracker --hold-side left --ball-radius 45.0 \
   --model-path data/models/latest-left/policy_deterministic.onnx
 ```
 
+The unmeasured 0.2 s regression lead was removed from the bring-up default on
+2026-07-10. Keep command off and verify zero before blank throws or arming:
+
+```bash
+ros2 param get /ball_regression_node lead_time_s  # expected: 0.0
+```
+
 `--hold-side left` drives the hoop TF side since 2026-07-09 (the script no
 longer hardcodes the right-side `hoop_xyz`); it must match the physical mount
 and the model's `hold_side` metadata. Then verify one publisher each on
@@ -159,6 +166,10 @@ camera TF, ROI, blank-run checks, staged v_safe_scale ramp, incident table) is
 - With `use_ball_regression:=true`, inspect `ball_state_raw` for tracker bugs and
   `ball_state` for the filtered policy input. `ball_state` may stay
   `valid=false` until the regression start gate has enough samples.
+- Do not infer real latency from the current `perception_age_s`: the tracker
+  re-anchors the first event after a gap to ROS `now`, and the regression
+  evaluates at `now+lead` but stamps at `now`. Keep lead zero until separate
+  measurement/state/publish timestamps are instrumented.
 
 ## See Also
 
@@ -168,3 +179,4 @@ camera TF, ROI, blank-run checks, staged v_safe_scale ramp, incident table) is
 - [Live Catch Loop](../live-catch/live-catch-loop.md)
 - [Message Contracts And Topics](../live-catch/message-contracts-and-topics.md)
 - [Single Producer Contract](../live-catch/single-producer-contract.md)
+- [Perception Robustness And Flight Lifecycle](perception-robustness-flight-lifecycle.md)

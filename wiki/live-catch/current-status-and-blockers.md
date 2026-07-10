@@ -1,7 +1,7 @@
 # Current Status And Blockers
 
-> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; agent review corrections, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis
-> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
+> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis; independent perception/control review, 2026-07-10
+> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
 
 ## Overview
 
@@ -22,8 +22,9 @@ calibration, TF, watchdog and latency validation work.
   canonical model is `latest`.
 - `ActionMapper` resolves the action contract from `policy_metadata.json` for
   current incremental exports while preserving legacy absolute compatibility.
-- `ObservationBuilder` mirrors Isaac pass-through logic for the current export
-  (`disk_radius_m=0.05`), and command mode fails closed without the hoop TF.
+- `ObservationBuilder` mirrors Isaac pass-through logic using loaded metadata
+  (`disk_radius_m=0.05` for the historical right export, 0.10 for the current
+  `latest-left` export), and command mode fails closed without the hoop TF.
 - `CatchTelemetry` publishes idle heartbeats with `ball_valid=false`, so the UI
   keeps command state live between trigger-mode throws.
 - `test_ball_node` terminates virtual flights at `ground_z_m=0.05` by default,
@@ -71,6 +72,29 @@ publication from the GUI render remains open. Note: the test used
 `ball_radius_mm:=45.0`; verify it is the measured radius (Ø 90 mm ball), not
 the diameter, since Trace depth scales directly with it.
 
+## 2026-07-10 Independent Review (Not Yet Hardware-Validated)
+
+The post-incident changes build and their unit tests pass (127 live-catch tests,
+1 skipped; 51 Web UI tests), but no real rosbag or 3D ground truth yet validates
+the new pipeline. The review found four P0 items before performance tuning:
+
+- keep the now-applied `lead_time_s=0.0` default for baseline tests; the fit
+  already evaluates old measurements at `now`, while extra lead would present
+  a future ball with current robot joints and ground-terminate early;
+- fix/extend timestamp semantics: the tracker re-anchors first events to ROS
+  `now`, and the regression evaluates `now+lead` but stamps `now`, so current
+  `perception_age_s` cannot measure source latency;
+- add real Trace quality/covariance and an explicit flight lifecycle; fresh
+  Trace windows all carry confidence 1.0 and live control ignores regression
+  confidence;
+- record H5 + rosbag perception-only sessions and validate false positives,
+  time-to-pop, depth, velocity and hoop-plane intersection before raising robot
+  speed.
+
+See
+[Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)
+for the phase model, left-policy envelope and ordered validation gates.
+
 ## Blockers Before Real Perception
 
 1. Validate `T_base_camera` physically.
@@ -78,6 +102,10 @@ the diameter, since Trace depth scales directly with it.
 3. Publish and verify `wrist_3_link -> hoop_center`; without it, command mode
    holds instead of using a fallback disk pose.
 4. Compare `publish_frame=base_link` against `publish_frame=camera_optical`.
+5. Correct or instrument measurement/state/publish timestamps before using
+   latency percentiles to tune prediction lead.
+6. Capture real Trace H5 + rosbag data and validate the flight estimator at
+   30/60 Hz with dropouts; synthetic 120 Hz tests are not deployment evidence.
 
 ## 2026-07-02 Pendant Incident (Diagnosed)
 
@@ -150,3 +178,4 @@ basic command-path failure.
 - [Camera And Hand-Eye Calibration](../calibration/camera-and-handeye-calibration.md)
 - [Frames And Transforms](../calibration/frames-and-transforms.md)
 - [Testing And Commands](../operations/testing-and-commands.md)
+- [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)

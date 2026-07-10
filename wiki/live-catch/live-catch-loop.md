@@ -69,3 +69,4 @@ topics, to reduce latency.
 - [Frames And Transforms](../calibration/frames-and-transforms.md)
 - [Policy Transfer And Action Semantics](../sim-to-real/policy-transfer-and-action-semantics.md)
 - [UR3e Control Stack](../robot-control/ur3e-control-stack.md)
+- [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)

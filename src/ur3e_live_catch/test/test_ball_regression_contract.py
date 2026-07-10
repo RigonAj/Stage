@@ -78,6 +78,10 @@ def test_regression_robustness_gates_configured():
     assert "min_pop_distance_m: 0.6" in config
     assert "ballistic_check_span_s: 0.15" in config
     assert "min_sample_interval_s: 0.003" in config
+    # Current-state baseline: the fit already evaluates measurements at now.
+    # A future horizon must never return as an unmeasured bring-up default.
+    assert "lead_time_s: 0.0" in config
+    assert "lead_time_s: 0.2" not in config
 
 
 def test_tracker_reanchors_event_clock_after_gaps():

@@ -15,8 +15,9 @@ Event-camera ball tracking and 3D pose estimation.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, pose_source trace/circle contract, ROI-gated accumulation (no circle), sampled display path, node-side lead/coast trajectory prediction, `camera_calibration_file` and `ball_radius_mm` controls, GUI-framerate-capped publish cadence and depth-estimation risks. | 2026-07-09 |
-| [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure to run real DVXplorer Trace perception after calibration, force the robust 2026-07-09 intrinsics, set ball radius, publish `ball_state`, replay/throw a ball, feed left-model live-catch dry-run inference, and run command-mode sessions through the single `--tracker` stack. | 2026-07-09 |
+| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, ROI/ribbon/width-depth pipeline, output contract, GUI-capped cadence, event-clock re-anchoring, binary live confidence and non-persisted robustness controls. | 2026-07-10 |
+| [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure for calibrated real Trace and the single `--tracker` stack, now with the 2026-07-10 lead=0 baseline and timestamp-measurement warning before command mode. | 2026-07-10 |
+| [Perception Robustness And Flight Lifecycle](perception/perception-robustness-flight-lifecycle.md) | Independent review of the 2026-07-09 incident: lead=0 default decision, timestamp/quality gaps, explicit throw lifecycle, left-policy envelope and validation gates. | 2026-07-10 |
 
 ## calibration
 
@@ -24,8 +25,8 @@ Camera intrinsics, hand-eye calibration and TF contracts.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire hand-eye workflow, aligned result path, base_link parity validation gates and current blockers. | 2026-07-06 |
-| [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md) | Operator checklist for the physical eye-to-hand session: prerequisites, self-tests, capture, solve acceptance gates, TF publication and validation. | 2026-07-06 |
+| [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire workflow, dated 2026-07-10 physical transform example with validation metrics, base_link parity gates and remaining physical checks. | 2026-07-10 |
+| [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md) | Operator checklist for the physical eye-to-hand session: persistent optional-phone layout startup, prerequisites, capture, solve acceptance gates, TF publication and validation. | 2026-07-10 |
 | [Intrinsic Calibration Runbook](calibration/intrinsic-calibration-runbook.md) | Operator checklist to redo DVXplorer intrinsics: working/output dirs, env.sh `calib` alias, event-mire capture, robust solve and acceptance gates. | 2026-07-09 |
 | [Frames And Transforms](calibration/frames-and-transforms.md) | `base_link` policy frame, TF, UI robot orientation, hold_side-driven hoop_center TF (right/left racket mount), hoop radius distinction and unit contracts used by perception, live catch and UI. | 2026-07-06 |
 
@@ -43,11 +44,11 @@ Closed-loop perception-to-policy-to-robot path.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Live Catch Loop](live-catch/live-catch-loop.md) | Single-process 60 Hz live-catch pipeline, modules, optional ballistic-regression ball publisher (measurement-purity gate + anisotropic depth weighting), metadata-driven action mapping, safety and tests. | 2026-07-09 |
-| [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState` (velocity convention, regression stamps), `ball_state_raw`, `CatchTelemetry`, topics, producers, idle heartbeat/`ball_valid` contract, single-producer rule and timestamp rules. | 2026-07-09 |
-| [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model/v_safe_scale runtime gates, metadata/model limits, safety limiter, watchdog, producer-conflict fail-closed gate, controller switching, 500 Hz interpolated streaming, start-pose ±2π gate, hardware gates and slow bring-up tuning. | 2026-07-09 |
+| [Live Catch Loop](live-catch/live-catch-loop.md) | Single-process 60 Hz live-catch pipeline, optional ballistic regression, measurement-purity/anisotropic-depth handling, action mapping, safety and link to the explicit flight-lifecycle review. | 2026-07-10 |
+| [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState`, raw/fitted topics, velocity/confidence/heartbeat contracts, single-producer rule, lead=0 default and the measurement-vs-state timestamp mismatch. | 2026-07-10 |
+| [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model/v_safe_scale runtime gates, safety/watchdog, 500 Hz streaming, ±2π gate, producer-conflict protection and the open synchronous command-authority exclusivity gap. | 2026-07-10 |
 | [Single Producer Contract](live-catch/single-producer-contract.md) | 2026-07-09 duplicate live_catch_node / dual ball_state producer incident, failure signatures (twitching robot, flapping UI command state), diagnostics watchdog, UI flap detection, `--tracker` stack rule and pre-command checks. | 2026-07-09 |
-| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, real-UR3e virtual-ball validation, ballistic-regression ball publisher (sim-validated), Test-tab v_safe_scale tuning, remaining speed/perception blockers, 2026-07-02 pendant incident diagnosis, 2026-07-09 first real Trace command test diagnosis, uncommitted Isaac cfg limit change and current model/action status. | 2026-07-09 |
+| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, diagnosed duplicate-stack incident, passing post-fix checks, applied lead=0 baseline, and remaining real-data, timestamp, quality, calibration and speed blockers. | 2026-07-10 |
 
 ## sim-to-real
 
@@ -55,9 +56,9 @@ PPO transfer, policy semantics, action space and latency.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Isaac Training Environment](sim-to-real/isaac-training-environment.md) | FirstTraining 33-D observation layout, action integrator, reward, terminations, ball distribution, left-hand (hold_side) mirrored task variant, cfg-limit state, train/play/evaluate/export commands and cross-repo export sync. | 2026-07-06 |
+| [Isaac Training Environment](sim-to-real/isaac-training-environment.md) | FirstTraining observation/action/reward contracts, right and current `latest-left` throw envelopes/metadata, hold-side geometry, limits, commands and export sync. | 2026-07-10 |
 | [Policy Transfer And Action Semantics](sim-to-real/policy-transfer-and-action-semantics.md) | Legacy absolute vs current incremental target-integrator semantics, metadata-driven mapper selection and full-speed metadata limits vs bring-up slow-down (Isaac limit halving still uncommitted). | 2026-07-03 |
-| [Observation Latency And Models](sim-to-real/observation-latency-and-models.md) | Observation construction, ball velocity source (fit vs EMA), latency instrumentation, regression stamp semantics, p50/p95/p99 measurement plan with acceptance anchors, current model exports and metadata validation. | 2026-07-03 |
+| [Observation Latency And Models](sim-to-real/observation-latency-and-models.md) | Observation construction, velocity source, lead=0 default, tracker/regression timestamp mismatch, required timing split, conditional latency plan and model management. | 2026-07-10 |
 
 ## system-id
 
@@ -90,6 +91,6 @@ Agent workflow, commands and wiki maintenance.
 | Article | Summary | Updated |
 |---------|---------|---------|
 | [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, hold_side:=left bring-up, `--tracker` real-perception stack option, package tests, Isaac sim2real export/check commands (current Isaac repo path, FT_TASK left variant) and wiki maintenance commands. | 2026-07-09 |
-| [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md) | Operator checklist before enable_command, ±2π start-pose gate procedure, staged v_safe_scale ramp-up and monitoring points. | 2026-07-03 |
+| [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md) | Operator checklist before enable_command, ±2π gate, staged v_safe_scale ramp-up, monitoring and the current lead=0/timestamp-latency warning. | 2026-07-10 |
 | [Wiki Maintenance](operations/wiki-maintenance.md) | Ingest/query/lint rules adapted from the Karpathy LLM wiki pattern. | 2026-06-29 |
 | [Source Document Map](operations/source-document-map.md) | How the raw Markdown docs are combined or split into compiled wiki concepts. | 2026-06-29 |

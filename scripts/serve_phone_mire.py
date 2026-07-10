@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -44,7 +45,15 @@ from event_mire_calibration import (  # noqa: E402
 # Poco X7 Pro active display, portrait reference (docs §2).
 DEFAULT_SCREEN_WIDTH_MM = 69.55
 DEFAULT_SCREEN_HEIGHT_MM = 154.50
+DEFAULT_VIEWPORT_WIDTH_PX = 2712
+DEFAULT_VIEWPORT_HEIGHT_PX = 1220
 PAGE_PATH = Path(__file__).resolve().parent / "phone_mire.html"
+DEFAULT_LAYOUT_CACHE = (
+    Path(__file__).resolve().parents[1]
+    / "recordings"
+    / "mire_calibration"
+    / "phone_mire_layout.json"
+)
 
 
 def oriented_screen_mm(
@@ -114,19 +123,83 @@ def compute_layout_payload(
 
 
 class MireState:
-    """Last layout actually served to the phone, shared with the collector."""
+    """Current phone layout, restored across server restarts when possible."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        cache_path: Path,
+        fallback: Dict[str, object],
+        expected_screen_mm: Tuple[float, float],
+    ) -> None:
         self._lock = threading.Lock()
-        self._current: Optional[Dict[str, object]] = None
+        self._cache_path = cache_path
+        self._expected_screen_mm = tuple(sorted(expected_screen_mm))
+        self._current: Dict[str, object] = fallback
+        self._source = "poco-default"
+        self._load_cache()
+
+    def _cache_payload_is_valid(self, payload: object) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        screen = payload.get("screen")
+        dots = payload.get("dots")
+        if not isinstance(screen, dict) or screen.get("fullscreen_ok") is not True:
+            return False
+        if not isinstance(dots, list) or len(dots) != EXPECTED_DOTS:
+            return False
+        size = screen.get("size_mm")
+        if not isinstance(size, dict):
+            return False
+        try:
+            cached_mm = tuple(sorted((float(size["width"]), float(size["height"]))))
+        except (KeyError, TypeError, ValueError):
+            return False
+        return all(abs(a - b) <= 1e-6 for a, b in zip(cached_mm, self._expected_screen_mm))
+
+    def _load_cache(self) -> None:
+        try:
+            payload = json.loads(self._cache_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, json.JSONDecodeError) as exc:
+            sys.stderr.write(f"WARNING: cannot restore mire layout cache {self._cache_path}: {exc}\n")
+            return
+        if self._cache_payload_is_valid(payload):
+            self._current = payload
+            self._source = "cache"
+        else:
+            sys.stderr.write(
+                f"WARNING: ignoring invalid or incompatible mire layout cache {self._cache_path}\n"
+            )
+
+    def _save_cache(self, payload: Dict[str, object]) -> None:
+        # Only a verified fullscreen layout is safe to restore. A browser page
+        # opened with bars may still query /api/layout for its information panel.
+        if not self._cache_payload_is_valid(payload):
+            return
+        try:
+            self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._cache_path.with_name(self._cache_path.name + ".tmp")
+            tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            tmp_path.replace(self._cache_path)
+        except OSError as exc:
+            sys.stderr.write(f"WARNING: cannot save mire layout cache {self._cache_path}: {exc}\n")
 
     def set(self, payload: Dict[str, object]) -> None:
         with self._lock:
             self._current = payload
+            self._source = "phone-live"
+            self._save_cache(payload)
 
-    def get(self) -> Optional[Dict[str, object]]:
+    def get(self) -> Dict[str, object]:
         with self._lock:
-            return self._current
+            payload = dict(self._current)
+            payload["layout_source"] = self._source
+            return payload
+
+    def source(self) -> str:
+        with self._lock:
+            return self._source
 
 
 def make_handler(args: argparse.Namespace, state: MireState):
@@ -193,9 +266,6 @@ def make_handler(args: argparse.Namespace, state: MireState):
                 return
             if parsed.path == "/api/current_layout":
                 payload = state.get()
-                if payload is None:
-                    self._send_json({"error": "no layout served yet"}, 404)
-                    return
                 self._send_json(payload)
                 return
             self._send_json({"error": "not found"}, 404)
@@ -262,6 +332,34 @@ def run_self_test() -> int:
         abs(cropped["screen"]["mm_per_px"]["y"] - 69.55 / 1220) < 1e-12,
     )
 
+    # A valid fullscreen layout survives a server restart, while an invalid
+    # browser viewport can be reported live without replacing the safe cache.
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        cache_path = Path(tmp_dir) / "phone_mire_layout.json"
+        state = MireState(
+            cache_path,
+            portrait,
+            (DEFAULT_SCREEN_WIDTH_MM, DEFAULT_SCREEN_HEIGHT_MM),
+        )
+        check("startup layout available without phone", state.source() == "poco-default")
+        state.set(payload)
+        restored = MireState(
+            cache_path,
+            portrait,
+            (DEFAULT_SCREEN_WIDTH_MM, DEFAULT_SCREEN_HEIGHT_MM),
+        )
+        check("fullscreen phone layout restored", restored.source() == "cache")
+        state.set(cropped)
+        restored_after_cropped = MireState(
+            cache_path,
+            portrait,
+            (DEFAULT_SCREEN_WIDTH_MM, DEFAULT_SCREEN_HEIGHT_MM),
+        )
+        check(
+            "non-fullscreen layout does not replace cache",
+            restored_after_cropped.get()["screen"]["fullscreen_ok"] is True,
+        )
+
     check("page file exists", PAGE_PATH.is_file())
     print("self-test " + ("ok" if failures == 0 else f"failed ({failures})"))
     return 0 if failures == 0 else 1
@@ -290,6 +388,24 @@ def parse_args(argv=None) -> argparse.Namespace:
         default=55,
         help="Dot radial gradient softness, 0 hard edge to 100 soft fade.",
     )
+    parser.add_argument(
+        "--layout-cache",
+        type=Path,
+        default=DEFAULT_LAYOUT_CACHE,
+        help="Persist the last valid fullscreen phone layout across server restarts.",
+    )
+    parser.add_argument(
+        "--fallback-width-px",
+        type=int,
+        default=DEFAULT_VIEWPORT_WIDTH_PX,
+        help="Fallback fullscreen viewport width when no cached phone layout exists.",
+    )
+    parser.add_argument(
+        "--fallback-height-px",
+        type=int,
+        default=DEFAULT_VIEWPORT_HEIGHT_PX,
+        help="Fallback fullscreen viewport height when no cached phone layout exists.",
+    )
     parser.add_argument("--self-test", action="store_true", help="Run layout tests and exit.")
     return parser.parse_args(argv)
 
@@ -298,14 +414,32 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     if args.self_test:
         return run_self_test()
-    state = MireState()
+    if args.fallback_width_px <= 0 or args.fallback_height_px <= 0:
+        print("error: fallback viewport dimensions must be positive", file=sys.stderr)
+        return 2
+    fallback = compute_layout_payload(
+        args.fallback_width_px,
+        args.fallback_height_px,
+        args.fallback_width_px,
+        args.fallback_height_px,
+        args.screen_width_mm,
+        args.screen_height_mm,
+        args.blink_hz,
+        args.gradient_softness,
+    )
+    state = MireState(
+        args.layout_cache,
+        fallback,
+        (args.screen_width_mm, args.screen_height_mm),
+    )
     server = ThreadingHTTPServer((args.host, args.port), make_handler(args, state))
     print(
         f"Mire server on http://{args.host}:{args.port}/ "
         f"(screen {args.screen_width_mm} x {args.screen_height_mm} mm, "
         f"blink {args.blink_hz} Hz)"
     )
-    print("Open this URL on the phone, then press 'Demarrer' for real fullscreen.")
+    print(f"Collector layout ready ({state.source()}); phone connection is optional.")
+    print("Open this URL only to display or refresh the phone mire, then press 'Demarrer'.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

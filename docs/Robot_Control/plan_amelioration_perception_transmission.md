@@ -55,15 +55,25 @@ Légende : `[x]` fait · `[ ]` à faire · `(op)` nécessite une session robot.
 - [ ] **2.3 (op) Enregistrer des rosbags au prochain test réel.**
   `ros2 bag record /ball_state_raw /ball_state /tf /tf_static /catch_telemetry`
   pendant les lancers ; matière première de 2.2.
-- [ ] **2.4 (op) Mesurer la latence bout-en-bout puis régler `lead_time_s`.**
-  `latency_report` en conditions réelles ; fixer `lead_time_s` ≈ p95
-  (événement → commande) mesuré, pas deviné.
-  *Provisoire 2026-07-09 (demande opérateur) : `lead_time_s: 0.2` dans
-  `live_catch.yaml`, désormais modifiable À CHAUD sans relancer :
+- [ ] **2.4 (op) Mesurer séparément la latence source/état/commande, puis
+  décider si un horizon futur est nécessaire.** `latency_report` en conditions
+  réelles ne suffit pas tant que les stamps mesure/état/publication sont
+  confondus. Le fit à lead nul propage déjà les mesures jusqu'à `now`; ne pas
+  recopier automatiquement le p95 événement → commande dans `lead_time_s`.
+  *Historique 2026-07-09 (demande opérateur) : `lead_time_s: 0.2` avait été
+  placé dans `live_catch.yaml`, avec réglage À CHAUD sans relancer :
   `ros2 param set /ball_regression_node lead_time_s 0.05` (borné [0, 1] s).
   Attention : 0.2 s ≈ la moitié d'un vol — la balle publiée court 200 ms en
-  avance, le vol se termine (sol prédit) 200 ms plus tôt, et l'UI affiche un
-  `perception age` ≈ −200 ms. À redescendre vers la latence mesurée.*
+  avance et le vol se termine (sol prédit) 200 ms plus tôt. **Audit
+  2026-07-10 :** le nœud évalue bien à `now + lead`, mais remplit actuellement
+  `header.stamp` avec `now`; l'UI affiche donc un `perception age` proche de
+  0 ms, pas −200 ms. Le tracker ré-ancre aussi le premier événement après un
+  silence à `now`, ce qui masque la latence fixe. Remettre le lead à 0 pour la
+  validation de référence et corriger/séparer `measurement_stamp`,
+  `state_stamp` et `publish_stamp` avant de régler un éventuel horizon futur.
+  **Décision 2026-07-10 :** le défaut de `live_catch.yaml` est revenu à
+  `lead_time_s: 0.0`; la valeur reste réglable à chaud pour les futurs essais
+  contrôlés.*
 
 ## Priorité 3 — Chantiers structurels (passes dédiées)
 

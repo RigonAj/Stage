@@ -145,13 +145,13 @@ ball_regression_node:
     coast_conf_tau_s: 0.15        # confidence decay time constant while coasting
     max_flight_s: 1.0
     refractory_s: 0.3             # ignore samples after flight end (floor bounces)
-    # Evaluate the fit at now + lead (latency compensation). PROVISIONAL 0.2 s
-    # (operator request 2026-07-09) until latency_report measures the real
-    # event->command latency (plan 2.4) — 0.2 s is large vs a 0.3-0.5 s flight:
-    # the published ball runs ~0.2 s ahead and the flight ground-terminates
-    # that much earlier. Live-tunable without restart:
+    # Extra future prediction horizon. The fit already propagates timestamped
+    # measurements to `now`, so zero is the safe/current-state baseline and
+    # matches the policy's synchronous ball/robot observation contract. Tune a
+    # nonzero value only after separate measurement/state/publish timing is
+    # instrumented and the horizon is validated against training. Live-tunable:
     #   ros2 param set /ball_regression_node lead_time_s 0.05
-    lead_time_s: 0.2
+    lead_time_s: 0.0
 
 ball_float32_adapter:
   ros__parameters:

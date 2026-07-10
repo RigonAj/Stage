@@ -1,84 +1,168 @@
 # Hand-eye calibration result (eye-to-hand, UR3e + DVXplorer)
-created_at: "2026-07-09T12:13:05.987"
+created_at: "2026-07-10T14:30:52.796"
 units: "meters"
 solver: "cv2.calibrateRobotWorldHandEye(CALIB_ROBOT_WORLD_HAND_EYE_SHAH)"
 cross_check_solver: "cv2.calibrateHandEye(CALIB_HAND_EYE_PARK), swapped roles"
-samples_file: "recordings/mire_calibration/handeye/handeye_samples_20260709_120756.json"
-sample_count: 6
+samples_file: "recordings/mire_calibration/handeye/handeye_samples_20260710_140949.json"
+sample_count: 18
 T_base_camera:
   parent: "base"
   child: "camera_optical"
-  xyz: [0.14797769787329557, -0.6023327191552271, 0.43678246722849295]
-  quat_xyzw: [0.4928169724051215, 0.5428517164083596, -0.5040694974350665, -0.45646181379991385]
-  rpy_rad: [-1.6459803048763424, 0.0012458493454175345, 1.668499862841369]
-  rpy_deg: [-94.30772463107094, 0.071381909401561, 95.59800025896718]
+  xyz: [0.4294113402538269, -0.5945960870161301, 0.4344958629817884]
+  quat_xyzw: [0.4319456061602619, 0.5814835261425562, -0.5497853236814902, -0.4159759608536315]
+  rpy_rad: [-1.6202185574307033, -0.008811741257633477, 1.8554081248222614]
+  rpy_deg: [-92.83168522955388, -0.5048755842236984, 106.3070548265978]
 T_tool0_mire:
   parent: "tool0"
   child: "screen_center"
-  xyz: [-0.008622848102283684, -0.0018042494065198325, 0.15958401020352356]
-  quat_xyzw: [-0.0018527798439801726, 0.7100323760620141, 0.0017211068131292773, 0.7041644906851794]
-  rpy_rad: [-3.12168395764153, 1.562495770864316, -3.116629669751367]
-  rpy_deg: [-178.85931574655532, 89.52441317756545, -178.5697263820049]
+  xyz: [-0.005313865496167497, -0.0005829202060208538, 0.15876248867864023]
+  quat_xyzw: [-0.00017649474327073505, 0.7118134159954232, -0.000738228314257103, 0.7023681973705018]
+  rpy_rad: [-3.0446514246449508, 1.55737617592813, -3.0454458537849227]
+  rpy_deg: [-174.4456767206491, 89.23108199490544, -174.4911941574917]
 validation:
   solver_agreement:
-    trans_mm: 0.425122931858544
-    rot_deg: 0.0018966654093181328
+    trans_mm: 0.2749392944790074
+    rot_deg: 0.005414700315678763
   pose_residuals:
-    trans_mean_mm: 1.1334687066473572
-    trans_max_mm: 1.742794839091477
-    rot_mean_deg: 0.3441599236048445
-    rot_max_deg: 0.6541122190655977
+    trans_mean_mm: 0.9403877346098217
+    trans_max_mm: 2.2445615599691906
+    rot_mean_deg: 0.2466804666687588
+    rot_max_deg: 0.4360103412301904
     per_pose:
       -
         index: 0
-        trans_mm: 0.8106490740423963
-        rot_deg: 0.13737760992439713
+        trans_mm: 0.578753998845186
+        rot_deg: 0.4360103412301904
       -
         index: 1
-        trans_mm: 0.7756151414249272
-        rot_deg: 0.4934602701154889
+        trans_mm: 0.44384319515551024
+        rot_deg: 0.21140599259801862
       -
         index: 2
-        trans_mm: 1.742794839091477
-        rot_deg: 0.6541122190655977
+        trans_mm: 0.9001832068080781
+        rot_deg: 0.21172108260747657
       -
         index: 3
-        trans_mm: 1.6278546527960507
-        rot_deg: 0.1740340638018626
+        trans_mm: 1.2367787467283147
+        rot_deg: 0.2966559712658174
       -
         index: 4
-        trans_mm: 0.9435568752605258
-        rot_deg: 0.20882216349627622
+        trans_mm: 1.2398014102665855
+        rot_deg: 0.20317930267253453
       -
         index: 5
-        trans_mm: 0.9003416572687671
-        rot_deg: 0.3971532152254446
+        trans_mm: 0.7594078302422801
+        rot_deg: 0.0953830066661618
+      -
+        index: 6
+        trans_mm: 0.7680739550746072
+        rot_deg: 0.15677251302283812
+      -
+        index: 7
+        trans_mm: 0.5393236237489794
+        rot_deg: 0.2266366267274508
+      -
+        index: 8
+        trans_mm: 0.4904261039903624
+        rot_deg: 0.22565341592986027
+      -
+        index: 9
+        trans_mm: 0.6833344309991929
+        rot_deg: 0.1939311860017514
+      -
+        index: 10
+        trans_mm: 1.231988381446466
+        rot_deg: 0.25006292775900707
+      -
+        index: 11
+        trans_mm: 1.412106371515184
+        rot_deg: 0.3324764767445103
+      -
+        index: 12
+        trans_mm: 1.0579701899817051
+        rot_deg: 0.29564290099793855
+      -
+        index: 13
+        trans_mm: 0.8429082539268006
+        rot_deg: 0.2987840643405525
+      -
+        index: 14
+        trans_mm: 1.0724939436113186
+        rot_deg: 0.24943630664163968
+      -
+        index: 15
+        trans_mm: 1.3250665056461228
+        rot_deg: 0.22973476184457556
+      -
+        index: 16
+        trans_mm: 2.2445615599691906
+        rot_deg: 0.32815054723878123
+      -
+        index: 17
+        trans_mm: 0.09995751502090681
+        rot_deg: 0.1986109757485532
   leave_one_out:
-    worst_trans_mm: 7.73276996926415
-    worst_rot_deg: 0.4943553121782248
-  rotation_axis_diversity_deg: 89.98796925366081
+    worst_trans_mm: 0.3625630103919783
+    worst_rot_deg: 0.05038246995055327
+  rotation_axis_diversity_deg: 89.99403334894726
   mire_normal_into_screen_ok: true
   pixel_residuals:
-    point_count: 114
-    rms_px: 1.4435210684216344
-    max_px: 2.363434153785192
+    point_count: 342
+    rms_px: 1.2172937249761004
+    max_px: 3.462075095794319
     per_sample:
       -
         index: 0
-        rms_px: 1.5748006634470066
+        rms_px: 0.988012776201894
       -
         index: 1
-        rms_px: 0.9978208061583572
+        rms_px: 0.8591160093055619
       -
         index: 2
-        rms_px: 2.0701031123203943
+        rms_px: 1.9543084160192292
       -
         index: 3
-        rms_px: 1.662646302895397
+        rms_px: 2.5983779576444994
       -
         index: 4
-        rms_px: 1.0095887039662557
+        rms_px: 2.0278222597677242
       -
         index: 5
-        rms_px: 0.9787164981344689
+        rms_px: 0.5633078689420421
+      -
+        index: 6
+        rms_px: 0.5140501270202391
+      -
+        index: 7
+        rms_px: 1.184043922644527
+      -
+        index: 8
+        rms_px: 1.054650833973477
+      -
+        index: 9
+        rms_px: 0.9862733835099297
+      -
+        index: 10
+        rms_px: 0.5803891265778747
+      -
+        index: 11
+        rms_px: 1.0900657099151225
+      -
+        index: 12
+        rms_px: 1.037961737689179
+      -
+        index: 13
+        rms_px: 0.5359059958906188
+      -
+        index: 14
+        rms_px: 0.5684768160881916
+      -
+        index: 15
+        rms_px: 1.5772704567302132
+      -
+        index: 16
+        rms_px: 0.6927003351801931
+      -
+        index: 17
+        rms_px: 0.16213251877677945
 intrinsics_xml: "recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml"

@@ -1,7 +1,7 @@
 # Message Contracts And Topics
 
-> Sources: live-catch architecture, 2026-06-29; implementation status, 2026-06-29; package README, 2026-06-29; inconsistency review, 2026-06-29; heartbeat telemetry change, 2026-07-02; ball regression publisher, 2026-07-03; single-producer enforcement, 2026-07-09; measurement-purity and anisotropic depth model, 2026-07-09
-> Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [ur3e_live_catch README](../../src/ur3e_live_catch/README.md); [Incoherences](../../docs/incoherences_code_logique.md); [BallState.msg](../../src/ur3e_catch_msgs/msg/BallState.msg); [Ball regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py)
+> Sources: live-catch architecture, 2026-06-29; implementation status, 2026-06-30; heartbeat telemetry change, 2026-07-02; ball regression publisher, 2026-07-03; single-producer enforcement, 2026-07-09; measurement-purity and anisotropic depth model, 2026-07-09; independent timestamp/lifecycle review, 2026-07-10
+> Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [ur3e_live_catch README](../../src/ur3e_live_catch/README.md); [Incoherences](../../docs/incoherences_code_logique.md); [BallState.msg](../../src/ur3e_catch_msgs/msg/BallState.msg); [Ball regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md)
 
 ## Overview
 
@@ -13,16 +13,16 @@ consumer/producer assumptions.
 
 `ur3e_catch_msgs/BallState` is the contract between perception and live catch:
 
-- `header.stamp`: event/perception time when available. Exception: the
-  regression node stamps at EVALUATION time (now + lead), which is deliberate
-  latency compensation — see
-  [Observation Latency And Models](../sim-to-real/observation-latency-and-models.md).
-  Since 2026-07-09 `lead_time_s` is 0.2 s in the bring-up config (PROVISIONAL
-  operator value until the real latency is measured) and is runtime-tunable
-  without restart: `ros2 param set /ball_regression_node lead_time_s 0.05`
-  (bounded [0, 1] s). Consequences of a large lead: downstream
-  `perception_age_s` reads ≈ −lead, the published ball runs ahead of the real
-  one, and the flight ground-terminates lead seconds before the real impact.
+- `header.stamp`: intended event/state time, but the 2026-07-10 audit found an
+  implementation mismatch. The tracker re-anchors the first event after a gap
+  to current ROS time (within-flight deltas survive, fixed processing age does
+  not), while the regression evaluates at `now + lead_time_s` but stamps its
+  output at `now`. Thus a nonzero lead publishes a future position with a
+  present-time stamp and `perception_age_s` stays near zero, not `-lead`.
+  The unmeasured 0.2 s bring-up override was reverted to the code/config default
+  `lead_time_s=0.0` on 2026-07-10. A robust successor contract still needs
+  separate measurement, state-evaluation and publish timestamps — see
+  [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md).
 - `header.frame_id`: declared frame of `position`; must be nonempty.
 - `position`: meters.
 - `velocity`: optional. Convention: exactly `(0,0,0)` means "not provided"
@@ -38,6 +38,9 @@ consumer/producer assumptions.
   extrapolated points (tracker hold, confidence < 1) never feed the fit as
   measurements — and `live_catch.launch.py` pins the tracker's
   `trace_lead_ms`/`trace_hold_ms` to 0 under `use_ball_regression`.
+  Limitation: every fresh valid Trace window still publishes exactly 1.0, so
+  this input gate removes coast but cannot distinguish a marginal live fit;
+  the live consumer also does not currently gate regression output confidence.
 
 `ur3e_catch_msgs/CatchTelemetry` is debug/visualization, not hot-path control:
 
@@ -90,3 +93,4 @@ termination — an underground ball is out-of-distribution for the policy.
 - [Frames And Transforms](../calibration/frames-and-transforms.md)
 - [Safety And Commanding](safety-and-commanding.md)
 - [Single Producer Contract](single-producer-contract.md)
+- [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)

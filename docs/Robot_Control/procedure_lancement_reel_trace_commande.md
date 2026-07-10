@@ -11,6 +11,14 @@ précédente a réussi. Établie le 2026-07-09 après le diagnostic
 tourne (doublon de `live_catch_node` et de producteur `ball_state` = robot qui
 frétille + état commande qui clignote). Tout passe par `ur3e_catch_stack`.
 
+> **Correctif de revue 2026-07-10 :** l'ancienne avance
+> `lead_time_s=0.2` n'était ni mesurée ni synchronisée avec l'entraînement. Le
+> défaut du fichier de config est désormais `0.0`; le vérifier avant les
+> lancers et ne pas l'augmenter pendant la validation de référence. Le code
+> calcule une position à `now + lead` mais la stamp actuellement à `now`; l'UI montre donc
+> un âge proche de 0 ms, pas −200 ms. Voir
+> [revue_perception_robuste_controle_fluide_2026-07-10.md](revue_perception_robuste_controle_fluide_2026-07-10.md).
+
 ---
 
 ## 0. Prérequis physiques (avant tout terminal)
@@ -132,6 +140,11 @@ mobile dans la ROI). Si l'affichage lague, baisser `Max Events`.
 Lancer quelques balles réelles **sans commande armée** et vérifier :
 
 ```bash
+# Le défaut doit déjà être 0.0 : vérifier, sans le modifier pendant la session.
+ros2 param get /ball_regression_node lead_time_s
+```
+
+```bash
 ros2 topic hz /ball_state_raw   # pendant le vol : détections trace (irrégulier, OK)
 ros2 topic hz /ball_state       # pendant le vol : ~60 Hz régulier (régression)
 ```
@@ -142,12 +155,11 @@ Dans le web UI (onglet Test, `http://127.0.0.1:8080`) :
   avec la réalité — sinon revoir rayon/intrinsèques) ;
 - le ghost vert (cible policy) réagit pendant le vol ;
 - badge `catch: ready`, état `command: off`, **pas** de `catch: CONFLICT` ;
-- `perception age` ≈ **−200 ms** pendant le vol : c'est NORMAL avec le
-  `lead_time_s: 0.2` provisoire (la régression publie la position prédite
-  200 ms dans le futur, stamp à l'instant d'évaluation). La balle affichée
-  court en avance sur la vraie balle et le vol se termine ~200 ms avant
-  l'impact réel. Réglage à chaud entre deux lancers :
-  `ros2 param set /ball_regression_node lead_time_s 0.05` (borné [0, 1] s).
+- `perception age` sera généralement proche de 0 ms, mais **ne constitue pas
+  encore une mesure de latence caméra fiable** : le tracker ré-ancre son
+  horloge événement et la régression stamp à `now`. Mesurer la latence réelle
+  seulement après séparation des temps mesure/état/publication. Laisser
+  `lead_time_s=0.0` pour cette session de référence.
 
 Ne passer à l'étape 9 que si tout est vrai.
 
@@ -211,5 +223,6 @@ python3 scripts/publish_camera_tf.py calibration/handeye_result.yaml
 ros2 topic info /ball_state --verbose && ros2 topic info /catch_telemetry --verbose
 ros2 run tf2_ros tf2_echo base_link camera_optical
 ros2 run tf2_ros tf2_echo base_link hoop_center
+ros2 param get /ball_regression_node lead_time_s  # attendu : 0.0
 ros2 topic hz /ball_state
 ```

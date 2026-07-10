@@ -1,7 +1,7 @@
 # Trace Ball Tracking
 
-> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09; GUI-framerate publish cadence analysis, 2026-07-09
-> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Trace analysis](../../src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Gui accumulation/panel](../../src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/Gui.h); [Live-catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md)
+> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09; GUI-framerate publish cadence analysis, 2026-07-09; independent robustness/timestamp review, 2026-07-10
+> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Trace analysis](../../src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Gui accumulation/panel](../../src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/Gui.h); [Live-catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md)
 
 ## Overview
 
@@ -198,9 +198,16 @@ re-publish.
   re-points it to `ball_state_raw` when the regression publisher is enabled).
 - **Message**: `ur3e_catch_msgs/BallState`, `position` in metres,
   `header.frame_id = camera_frame_id` (`camera_optical`, enforced non-empty).
+- **Timestamp limitation (audit 2026-07-10)**: `eventStampToRosTime` anchors
+  the first published event after a >0.5 s gap to current ROS time. Relative
+  event timing inside the throw is preserved, but fixed acquisition/processing
+  age is hidden; raw `now - stamp` is therefore not a true end-to-end latency
+  measurement yet.
 - **`velocity`** is left `(0,0,0)` = "not provided"; the downstream consumer
   recomputes it. Filling it from the fit derivative is a possible follow-up.
-- **`confidence`** = 1.0 on a live fit, decaying during coast.
+- **`confidence`** = 1.0 on every live valid fit, decaying during coast. The
+  live value is binary validity, not yet a score derived from width dispersion,
+  support or fit conditioning.
 - **`pose_source`**: `"trace"` (bring-up config, `live_catch.yaml`) uses the
   pipeline above; `"circle"` (code default for a bare `ros2 run`) is the legacy
   per-detection circle-fit pose. Legacy `ball_position_3d_mm` is a fallback path.
@@ -258,6 +265,11 @@ re-publish.
 | `Trace use raw input` | OFF (Undist) | Feed raw vs undistorted points. |
 | `Circle fit` | OFF | Legacy circle path; not needed for Trace. |
 
+Only lead, hold, radius and calibration are currently launch-initialized. ROI,
+polarity, memory, edge refinement and width smoothing remain GUI-local and
+reset to defaults on restart (full-frame ROI, negative polarity, 40 ms, edge
+refine OFF, width smoothing OFF). This is a reproducibility gap for real bags.
+
 ## Risks
 
 - **Depth ∝ 1/width**: highly sensitive to pixel-width error. Width smoothing
@@ -281,6 +293,14 @@ re-publish.
   therefore NOT a guaranteed 60 Hz — the downstream `ball_regression_node`
   resamples it to a clean 60 Hz `ball_state` and is the recommended feed for
   the policy ([Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md)).
+- **Quality is not propagated**: a marginal but valid fresh ribbon gets the
+  same confidence 1.0 as a well-conditioned one. Regression measurement-purity
+  gating removes coast points only; it cannot reject live depth fits without a
+  covariance/quality contract.
+- **Fixed polarity/manual ROI**: the negative-polarity, full-frame defaults are
+  lighting- and scene-dependent. Robust deployment should persist a profile,
+  compare polarity candidates, then follow an acquired ball with a dynamic ROI
+  while masking robot events.
 
 ## Main Code
 
@@ -304,3 +324,4 @@ re-publish.
 - [Message Contracts And Topics](../live-catch/message-contracts-and-topics.md)
 - [Camera And Hand-Eye Calibration](../calibration/camera-and-handeye-calibration.md)
 - [Frames And Transforms](../calibration/frames-and-transforms.md)
+- [Perception Robustness And Flight Lifecycle](perception-robustness-flight-lifecycle.md)

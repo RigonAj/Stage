@@ -1,7 +1,7 @@
 # Safety And Commanding
 
-> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; live-catch README, 2026-07-01; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; producer-conflict fail-closed gate, 2026-07-09
-> Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py)
+> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; live-catch README, 2026-07-01; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; producer-conflict fail-closed gate, 2026-07-09; independent command-authority review, 2026-07-10
+> Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md)
 
 ## Overview
 
@@ -76,6 +76,12 @@ which reads as a twitching robot while looking "armed" to the operator
 CONFLICT` errors without blocking, since the other node may be the commanding
 one. See [Single Producer Contract](single-producer-contract.md).
 
+Open hardening point from the 2026-07-10 review: the graph check is periodic,
+not synchronous with `enable_command=true`, and telemetry/duplicate-node
+conflicts warn without blocking. A robust arm gate should query immediately at
+startup and arm time and reject every duplicate command authority/contract
+producer, ideally behind an exclusive command lease or arbiter.
+
 ## Start-Pose Gate (±2π Branch Protection)
 
 Before the first command of a command session, the node refuses to stream when
@@ -127,3 +133,4 @@ the 2026-07-02 heartbeat/grounding fixes. Still open:
 - [Current Status And Blockers](current-status-and-blockers.md)
 - [Single Producer Contract](single-producer-contract.md)
 - [UR3e Control Stack](../robot-control/ur3e-control-stack.md)
+- [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)

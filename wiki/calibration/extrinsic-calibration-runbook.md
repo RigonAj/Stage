@@ -49,8 +49,14 @@ scripts/run_handeye_session.sh
 ```
 
 This starts the phone mire server on `:8081` and the collector in
-`--external-mire` mode. Open the printed `http://<ip>:8081/` on the phone,
-go real fullscreen, press "Démarrer".
+`--external-mire` mode. The server restores the last valid fullscreen layout
+from `recordings/mire_calibration/phone_mire_layout.json`; if no cache exists,
+it uses the documented Poco X7 Pro 2712×1220 landscape profile. Therefore a
+phone that is already displaying the mire does not need to reconnect or reload
+after the PC-side server restarts. The printed `http://<ip>:8081/` remains
+available when the operator wants to start or refresh the phone display. A
+phone-reported non-fullscreen layout is still rejected because its metric
+geometry is unsafe for calibration.
 
 Per pose (target 15–20 accepted samples):
 

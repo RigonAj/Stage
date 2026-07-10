@@ -1,7 +1,7 @@
 # Real Robot Bring-Up Runbook
 
-> Sources: 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale Test-tab implementation, 2026-07-03; agent review, 2026-07-02
-> Raw: [Live catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Agent review](../../raw/reviews/2026-07-02-stage-wiki-and-training-review.md)
+> Sources: 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale Test-tab implementation, 2026-07-03; agent review, 2026-07-02; perception timestamp/lead review, 2026-07-10
+> Raw: [Live catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Agent review](../../raw/reviews/2026-07-02-stage-wiki-and-training-review.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md)
 
 ## Overview
 
@@ -88,7 +88,10 @@ hard limits and the policy saturates actions, so `1.0` means full-speed joints.
   `perception_age_s` / `loop_compute_s` percentiles; see the measurement plan
   in [Observation Latency And Models](../sim-to-real/observation-latency-and-models.md).
   `perception_age_s` beyond `stale_after_s=0.1` triggers the stale-perception
-  watchdog.
+  watchdog. For current real Trace, however, tracker re-anchoring and regression
+  stamping hide true source age: verify the `lead_time_s=0` default and do not
+  tune lead from these percentiles until measurement/state/publish times are
+  separated.
 - **Controller state**: the controller must stay active across throws; a
   controller that appears inactive with no throws reaching `test_ball_node`
   was the 2026-07-02 heartbeat regression signature, fixed since.
@@ -107,3 +110,4 @@ hard limits and the policy saturates actions, so `1.0` means full-speed joints.
 - [Testing And Commands](testing-and-commands.md)
 - [UR3e Control Stack](../robot-control/ur3e-control-stack.md)
 - [Observation Latency And Models](../sim-to-real/observation-latency-and-models.md)
+- [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)

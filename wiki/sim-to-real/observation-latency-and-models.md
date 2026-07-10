@@ -1,7 +1,7 @@
 # Observation Latency And Models
 
-> Sources: sim-to-real plan, 2026-07-01; live-catch implementation status, 2026-06-30; sim-to-real proposals, 2026-06-30; model README, 2026-07-01; latency measurement plan from agent review, 2026-07-02
-> Raw: [Sim-to-real plan](../../docs/Robot_Control/ur3e_ball_catch_sim_to_real.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Proposals](../../docs/Robot_Control/ur3e_sim2real_propositions.md); [Model README](../../data/models/README.md); [Latency report node](../../src/ur3e_live_catch/ur3e_live_catch/latency_report.py)
+> Sources: sim-to-real plan, 2026-07-01; live-catch implementation status, 2026-06-30; sim-to-real proposals, 2026-06-30; model README, 2026-07-01; latency measurement plan from agent review, 2026-07-02; independent timestamp/lifecycle review, 2026-07-10
+> Raw: [Sim-to-real plan](../../docs/Robot_Control/ur3e_ball_catch_sim_to_real.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Proposals](../../docs/Robot_Control/ur3e_sim2real_propositions.md); [Model README](../../data/models/README.md); [Latency report node](../../src/ur3e_live_catch/ur3e_live_catch/latency_report.py); [Regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py); [Trace publisher](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md)
 
 ## Overview
 
@@ -21,8 +21,10 @@ The live node reconstructs the 33-D PPO observation from:
 - pass-through state;
 - previous policy action according to the model contract: raw action for legacy
   absolute exports, clipped action for current incremental Isaac exports.
-- disk trigger radius. The current metadata carries `disk_radius_m=0.05`, hoop
-  offset `(-0.5, 0, 0)` in `wrist_3_link`, and hoop normal `(0, 0, -1)`.
+- disk trigger radius and hoop geometry come from the loaded model metadata.
+  The historical right model carries a 0.05 m radius and `(-0.5, 0, 0)` hoop
+  offset; the currently used `latest-left` metadata carries a 0.10 m radius and
+  approximately `(+0.5, 0, 0)`, with the same `(0, 0, -1)` normal.
 - pass-through ordering. Isaac updates `prev_disk_signed_dist` and
   `pass_through_count` in `_get_dones()` before the next observation, so the live
   builder emits the current signed flag and updated pass count for the current
@@ -43,43 +45,60 @@ tests against recorded rollout or exported policy expectations.
 The docs treat perception-to-command latency as a top transfer risk. Important
 rules:
 
-- Native `BallState` event timestamps are preferred.
+- Native event timestamps are required in principle, but are not yet sufficient
+  in the current implementation: the tracker re-anchors the first event after a
+  gap to ROS `now`, hiding fixed processing latency.
 - Legacy float-array adapter timestamps at reception and is less reliable for
   latency analysis.
-- `latency_report` and `CatchTelemetry.perception_age_s` are the main runtime
-  instruments.
+- `latency_report` and `CatchTelemetry.perception_age_s` report the implemented
+  `now - BallState.stamp`; they remain useful for loop/regression liveness but
+  cannot currently recover true camera age.
 - Real-perception p50/p95/p99 must be measured before real ball interception.
-- With `use_ball_regression:=true`, published `BallState.stamp` is the fit
-  EVALUATION time, so `perception_age_s` ≈ 0 by design (the regression predicts
-  the ball at "now", compensating measurement latency inside the fit). The
-  staleness watchdog then monitors regression liveness, not the camera; a dead
-  camera mid-flight ends the flight through the regression coast timeout
-  (`max_coast_s`) instead. Measure true camera latency on `ball_state_raw`.
+- With `use_ball_regression:=true`, the fit is evaluated at
+  `now + lead_time_s`, but the node currently stamps at `now`. A nonzero lead
+  therefore produces a future state while still reporting
+  `perception_age_s ≈ 0`. The former 0.2 s bring-up override was reverted to
+  the 0.0 default on 2026-07-10. The staleness watchdog monitors
+  regression publication, not last-measurement freshness; a dead camera ends
+  through the coast timeout instead.
+- `lead_time_s=0` (current default) already evaluates delayed measurements at
+  the current time. Extra lead is a future prediction horizon, not
+  camera-latency compensation; use zero for baseline tests until it is
+  explicitly trained and validated.
 
 ## Latency Measurement Plan
 
-Instrumentation already in the tree:
+Instrumentation already in the tree, with its current limitation:
 
 - `CatchTelemetry.perception_age_s` = live-node time minus `BallState.stamp`
-  at each 60 Hz tick (end-to-end perception staleness as seen by the policy);
+  at each 60 Hz tick (state-publisher age, not yet true source age);
 - `CatchTelemetry.loop_compute_s` = hot-path compute time
   (observation -> policy -> safety) for that tick;
 - the `latency_report` node (`ros2 run ur3e_live_catch latency_report`)
   subscribes to `catch_telemetry` and prints rolling and final summaries with
   count / mean / p50 / p95 / p99 / max in ms (`report_period_s`, default 5 s).
 
-Collection procedure (real perception):
+The 2026-07-10 audit makes the previous p50/p95/p99 collection plan conditional
+on a timestamp-contract fix. Add or log at least:
+
+- `measurement_stamp`: newest real event used by the fit;
+- `state_stamp`: time at which position/velocity are evaluated;
+- `publish_stamp`: ROS emission time;
+- `source_age`, `fit_compute_age` and `prediction_horizon` as separate metrics.
+
+Then collect real perception as follows:
 
 1. Bring up the real-perception stack (`ball_tracking_cpp` publishing native
    `BallState`, not the legacy float-array adapter — the adapter timestamps at
    reception and undercounts latency).
-2. Run `latency_report` alongside `live_catch_node` in dry-run.
+2. Set `lead_time_s=0`, run `latency_report` alongside `live_catch_node` in
+   dry-run, and record both raw and fitted topics plus the new timing fields.
 3. Throw or move the real ball through the tracked volume for enough ticks to
    make p99 meaningful (several hundred valid-ball ticks; heartbeat ticks with
    `ball_valid=false` carry `perception_age_s=0` and must be excluded by
    collecting during active tracking).
-4. Record the final summary (printed on shutdown) for `perception_age` and
-   `loop_compute`.
+4. Record final summaries for source age, state/publish age and `loop_compute`.
+   Until the new fields exist, do not tune lead from `perception_age_s`.
 
 Acceptance anchors (proposed until training-latency modeling is done):
 
@@ -99,6 +118,9 @@ Acceptance anchors (proposed until training-latency modeling is done):
 - `data/models/` is the canonical live model location.
 - `data/models/latest` contains the 2026-06-30 export from `agent_118000.pt`;
   `data/models/best` contains the matching latest `best_agent.pt` export.
+- `data/models/latest-left` is the current left-hold export used by the real
+  Trace procedure; its envelope and disk radius differ from the older right
+  metadata, so diagnostics must always report the exact loaded bundle.
 - The root `data/models/policy_deterministic.ts` is a copy of `latest` and is
   loaded by default.
 - The Web UI Test tab can switch between `latest` and `best`; the backend only
@@ -128,3 +150,4 @@ Acceptance anchors (proposed until training-latency modeling is done):
 - [Real Robot Bring-Up Runbook](../operations/real-robot-bringup-runbook.md)
 - [Message Contracts And Topics](../live-catch/message-contracts-and-topics.md)
 - [Current Status And Blockers](../live-catch/current-status-and-blockers.md)
+- [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)
