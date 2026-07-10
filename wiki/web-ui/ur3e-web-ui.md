@@ -1,7 +1,7 @@
 # UR3e Web UI
 
-> Sources: web UI docs, 2026-07-01; robot control architecture, 2026-06-29; live-catch package README, 2026-07-01; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; racket hold-side toggle, 2026-07-06
-> Raw: [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
+> Sources: web UI docs, 2026-07-01; robot control architecture, 2026-06-29; live-catch package README, 2026-07-01; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; racket hold-side toggle, 2026-07-06; command flap detection, 2026-07-09
+> Raw: [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Flap detector](../../src/ur3e_web_ui/ur3e_web_ui/flapping.py); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
 
 ## Overview
 
@@ -24,6 +24,14 @@ ghost, select the active `latest` or `best` model from `data/models/`, tune
 `live_catch_node.v_safe_scale`, and toggle `live_catch_node` command mode
 through services. It is not on the hot path; it is telemetry and operator
 control.
+
+Since 2026-07-09 the bridge watches `CatchTelemetry.command_enabled` with a
+flap detector (`flapping.FlapDetector`, ≥3 transitions in a 2 s window): a
+flapping value means two `live_catch_node` instances publish interleaved
+telemetry (virtual-ball stack + manual live_catch launch). The Test tab then
+shows `command: CONFLICT` in red and the header badge switches to
+`catch: CONFLICT` instead of rendering a flickering ON/off state
+([Single Producer Contract](../live-catch/single-producer-contract.md)).
 
 The `v_safe_scale` control reads/writes `/live_catch_node` parameters through
 `/api/catch/v_safe_scale`. It exposes the staged values `0.5`, `0.7`, `0.85`,
@@ -94,4 +102,5 @@ radius, not the physical hoop size.
 
 - [UR3e Control Stack](../robot-control/ur3e-control-stack.md)
 - [Live Catch Loop](../live-catch/live-catch-loop.md)
+- [Single Producer Contract](../live-catch/single-producer-contract.md)
 - [Rollout Replay And Driver Setup](../replay/rollout-replay-and-driver-setup.md)

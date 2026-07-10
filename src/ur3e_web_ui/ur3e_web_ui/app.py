@@ -911,6 +911,9 @@ def _state_message(bridge: RosBridge) -> dict:
         "command_ready": snapshot.catch_command_ready,
         "model_ready": snapshot.catch_model_ready,
         "command_enabled": snapshot.catch_command_enabled,
+        # True while command_enabled flip-flops across telemetry samples: two
+        # live_catch_node instances are publishing (stack + manual launch).
+        "command_flapping": snapshot.catch_command_flapping,
     }
     return {
         "type": "state",

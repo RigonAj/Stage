@@ -21,6 +21,7 @@ instead of the staleness watchdog.
 from __future__ import annotations
 
 import rclpy
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
 
@@ -41,6 +42,8 @@ class BallRegressionNode(Node):
         # use_sim_time mismatch): samples this far from the node clock are dropped.
         self.declare_parameter("max_stamp_age_s", 0.5)
         cfg = RegressionConfig()
+        self.declare_parameter("min_input_confidence", cfg.min_input_confidence)
+        self.declare_parameter("depth_sigma_scale", cfg.depth_sigma_scale)
         self.declare_parameter("gravity_m_s2", cfg.gravity_m_s2)
         self.declare_parameter("max_samples", cfg.max_samples)
         self.declare_parameter("irls_iterations", cfg.irls_iterations)
@@ -98,16 +101,35 @@ class BallRegressionNode(Node):
         self._pub = self.create_publisher(BallState, output_topic, 10)
         rate = float(self.get_parameter("rate_hz").value)
         self._timer = self.create_timer(1.0 / rate, self._tick)
+        # Runtime lead tuning: lead_time_s is the one knob operators adjust
+        # between throws (latency compensation), so it applies live via
+        # `ros2 param set` instead of requiring a relaunch like the other
+        # startup-read gates.
+        self.add_on_set_parameters_callback(self._on_set_parameters)
         self.get_logger().info(
             f"ball_regression_node: {input_topic!r} -> {output_topic!r}, "
-            f"base_frame={self._base_frame!r}, rate={rate} Hz"
+            f"base_frame={self._base_frame!r}, rate={rate} Hz, "
+            f"lead={self._logic.lead_time_s:g}s"
         )
+
+    def _on_set_parameters(self, parameters) -> SetParametersResult:
+        for parameter in parameters:
+            if parameter.name != "lead_time_s":
+                continue
+            try:
+                self._logic.set_lead_time(float(parameter.value))
+            except (TypeError, ValueError) as exc:
+                return SetParametersResult(successful=False, reason=str(exc))
+            self.get_logger().info(f"lead_time_s updated: {self._logic.lead_time_s:g}s")
+        return SetParametersResult(successful=True)
 
     def _build_config(self) -> RegressionConfig:
         def p(name: str):
             return self.get_parameter(name).value
 
         return RegressionConfig(
+            min_input_confidence=float(p("min_input_confidence")),
+            depth_sigma_scale=float(p("depth_sigma_scale")),
             gravity_m_s2=float(p("gravity_m_s2")),
             max_samples=int(p("max_samples")),
             irls_iterations=int(p("irls_iterations")),
@@ -165,7 +187,16 @@ class BallRegressionNode(Node):
         except FrameError as exc:
             self.get_logger().warn(f"raw ball rejected: {exc}", throttle_duration_sec=2.0)
             return
-        self._logic.add_sample(stamp_s, pos_base)
+        # Camera origin in base_link (depth-axis anchor for the anisotropic
+        # model): the transform used for the sample IS camera->base_link, so
+        # its translation is the camera position. Base-frame producers
+        # (test_ball) have no camera: their samples stay isotropic.
+        camera_pos = transform.translation if transform is not None else None
+        self._logic.add_sample(
+            stamp_s, pos_base,
+            confidence=float(msg.confidence),
+            camera_pos_base=camera_pos,
+        )
         self._log_state_change()
 
     def _lookup_transform(self, frame_id: str):

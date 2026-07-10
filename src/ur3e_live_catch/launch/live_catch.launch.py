@@ -104,6 +104,19 @@ def generate_launch_description() -> LaunchDescription:
         ["'ball_state_raw' if '", use_ball_regression,
          "'.lower() in ('true', '1') else 'ball_state'"]
     )
+    # Measurement purity: when the regression consumes the tracker output, the
+    # tracker must publish measurements only — its lead/coast prediction is
+    # pinned to 0 regardless of the requested values (prediction belongs to the
+    # estimator; a lead > 0 publishes extrapolated points at confidence 1.0
+    # that the regression cannot distinguish from measurements).
+    tracker_lead_ms = PythonExpression(
+        ["0.0 if '", use_ball_regression, "'.lower() in ('true', '1') else ",
+         LaunchConfiguration("trace_lead_ms")]
+    )
+    tracker_hold_ms = PythonExpression(
+        ["0.0 if '", use_ball_regression, "'.lower() in ('true', '1') else ",
+         LaunchConfiguration("trace_hold_ms")]
+    )
 
     overrides = {
         "enable_command": ParameterValue(enable_command, value_type=bool),
@@ -134,6 +147,12 @@ def generate_launch_description() -> LaunchDescription:
                                           "publish ball_state_raw, the fitted BallState lands on ball_state"),
         DeclareLaunchArgument("ball_radius_mm", default_value="20.0",
                               description="physical ball radius in millimetres for ball_tracking_cpp Trace depth"),
+        DeclareLaunchArgument("trace_lead_ms", default_value="0.0",
+                              description="tracker lead prediction (ms); forced to 0 when "
+                                          "use_ball_regression is true (measurements only)"),
+        DeclareLaunchArgument("trace_hold_ms", default_value="0.0",
+                              description="tracker coast duration (ms); forced to 0 when "
+                                          "use_ball_regression is true (measurements only)"),
         DeclareLaunchArgument("camera_calibration_file",
                               default_value="recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml",
                               description="OpenCV XML intrinsics consumed by ball_tracking_cpp"),
@@ -157,6 +176,8 @@ def generate_launch_description() -> LaunchDescription:
                 {"ball_state_topic": raw_ball_topic},
                 {"ball_radius_mm": ParameterValue(ball_radius_mm, value_type=float)},
                 {"camera_calibration_file": ParameterValue(camera_calibration_file, value_type=str)},
+                {"trace_lead_ms": ParameterValue(tracker_lead_ms, value_type=float)},
+                {"trace_hold_ms": ParameterValue(tracker_hold_ms, value_type=float)},
             ],
             output="screen",
             condition=IfCondition(use_tracker),

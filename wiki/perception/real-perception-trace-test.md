@@ -1,7 +1,7 @@
 # Real Perception Trace Test Runbook
 
-> Sources: Trace pipeline and launch verification, 2026-07-09; local calibration files, 2026-07-09; left policy model selection, 2026-07-09; explicit tracker intrinsics parameter, 2026-07-09
-> Raw: [operator procedure](../../docs/Robot_Control/procedure_test_perception_trace.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [live_catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [live_catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [TF publisher](../../scripts/publish_camera_tf.py); [model README](../../data/models/README.md)
+> Sources: Trace pipeline and launch verification, 2026-07-09; local calibration files, 2026-07-09; left policy model selection, 2026-07-09; explicit tracker intrinsics parameter, 2026-07-09; first real command test analysis, 2026-07-09
+> Raw: [operator procedure](../../docs/Robot_Control/procedure_test_perception_trace.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Procédure session réelle commandée](../../docs/Robot_Control/procedure_lancement_reel_trace_commande.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [live_catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [live_catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [TF publisher](../../scripts/publish_camera_tf.py); [model README](../../data/models/README.md)
 
 ## Overview
 
@@ -113,11 +113,37 @@ fitted 60 Hz `base_link` estimate lands on `ball_state`.
   inference and mandatory before command mode. For the left model, this must be
   the left hoop transform.
 
+## Command-Mode Session (Robot Moving)
+
+The dry-run commands above start NEITHER the UR driver NOR the web UI. Do not
+"add" them by keeping the virtual-ball stack running next to a manual
+`live_catch.launch.py`: that duplicates `live_catch_node` and `ball_state`
+producers, which stalled the robot and made the UI command state flicker on
+the 2026-07-09 first real command test
+([Single Producer Contract](../live-catch/single-producer-contract.md)). For a
+command session use the single stack with the tracker swapped in:
+
+```bash
+ur3e_catch_stop
+ur3e_catch_stack --real --tracker --hold-side left --ball-radius 45.0 \
+  --model-path data/models/latest-left/policy_deterministic.onnx
+```
+
+`--hold-side left` drives the hoop TF side since 2026-07-09 (the script no
+longer hardcodes the right-side `hoop_xyz`); it must match the physical mount
+and the model's `hold_side` metadata. Then verify one publisher each on
+`/ball_state` and `/catch_telemetry` (`ros2 topic info ... --verbose`), no
+`PRODUCER CONFLICT` in the live node log, and arm command mode from the web UI
+Test tab only. The complete ordered operator checklist (terminals, pendant,
+camera TF, ROI, blank-run checks, staged v_safe_scale ramp, incident table) is
+[procedure_lancement_reel_trace_commande.md](../../docs/Robot_Control/procedure_lancement_reel_trace_commande.md).
+
 ## Operator Risks
 
 - Command mode stays off for this procedure (`enable_command=false`).
 - Only one ball producer may publish a given topic. Stop virtual-ball launches
-  before starting the real tracker on `ball_state`.
+  before starting the real tracker on `ball_state`; since 2026-07-09 the live
+  node blocks command emission while `ball_state` has multiple publishers.
 - Trace assumes the ball is the dominant mover in the work ROI. Crop out the
   robot, hand, support and reflective clutter.
 - The 2D display uses the sampled event stream; reduce `Max Events` if the UI
@@ -141,3 +167,4 @@ fitted 60 Hz `base_link` estimate lands on `ball_state`.
 - [Camera And Hand-Eye Calibration](../calibration/camera-and-handeye-calibration.md)
 - [Live Catch Loop](../live-catch/live-catch-loop.md)
 - [Message Contracts And Topics](../live-catch/message-contracts-and-topics.md)
+- [Single Producer Contract](../live-catch/single-producer-contract.md)

@@ -1,6 +1,6 @@
 # Safety And Commanding
 
-> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; live-catch README, 2026-07-01; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03
+> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; live-catch README, 2026-07-01; remaining work checklist, 2026-06-29; robot control architecture, 2026-06-29; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; producer-conflict fail-closed gate, 2026-07-09
 > Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Robot control architecture](../../docs/Robot_Control/ur3e_robot_control_architecture.md); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py)
 
 ## Overview
@@ -63,6 +63,19 @@ per-frame steps capped at `v_safe / command_rate_hz` (`streaming.step_toward`).
 `command_substeps` burst upsampling is legacy and only used when
 `command_rate_hz <= loop_hz`.
 
+## Producer-Conflict Gate (Exclusive Ball Source)
+
+Since 2026-07-09 the node checks every 2 s that it is the only
+`live_catch_node` and that its ball topic has a single publisher
+(`diagnostics.producer_conflict_warnings`). Multiple `ball_state` publishers
+fail command emission **closed**: interleaved `valid=false` heartbeats from a
+second producer (typically the stack's idle `test_ball_node` next to the real
+tracker) trigger a controlled stop plus a policy-state reset on every message,
+which reads as a twitching robot while looking "armed" to the operator
+(2026-07-09 incident). Telemetry/duplicate-name conflicts log `PRODUCER
+CONFLICT` errors without blocking, since the other node may be the commanding
+one. See [Single Producer Contract](single-producer-contract.md).
+
 ## Start-Pose Gate (±2π Branch Protection)
 
 Before the first command of a command session, the node refuses to stream when
@@ -112,4 +125,5 @@ the 2026-07-02 heartbeat/grounding fixes. Still open:
 - [Real Robot Bring-Up Runbook](../operations/real-robot-bringup-runbook.md)
 - [Live Catch Loop](live-catch-loop.md)
 - [Current Status And Blockers](current-status-and-blockers.md)
+- [Single Producer Contract](single-producer-contract.md)
 - [UR3e Control Stack](../robot-control/ur3e-control-stack.md)

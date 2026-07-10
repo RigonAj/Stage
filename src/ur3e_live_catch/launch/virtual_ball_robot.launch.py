@@ -8,6 +8,13 @@ It starts the UR3e driver, the live-catch dry-run chain with ``test_ball_node``
 in trigger mode, and the web UI. By default ``enable_command`` is false, so the
 policy/safety telemetry and ghost target are visible but no robot command is
 emitted until the UI explicitly enables command mode.
+
+For real-perception sessions swap the ball source INSIDE this stack instead of
+starting a second live_catch launch next to it (that creates two
+live_catch_node instances and two ball_state producers — 2026-07-09 incident):
+
+    ros2 launch ur3e_live_catch virtual_ball_robot.launch.py \
+        use_test_ball:=false use_tracker:=true use_ball_regression:=true
 """
 
 from __future__ import annotations
@@ -193,6 +200,42 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="true",
                 description="true => virtual ball flies only after /test_ball_node/throw.",
             ),
+            # Exactly ONE ball source may publish toward the live loop: keep
+            # use_test_ball and use_tracker mutually exclusive. Running the
+            # stack's test_ball next to a real tracker interleaves valid=false
+            # heartbeats with the flight and stalls the robot (2026-07-09).
+            DeclareLaunchArgument(
+                "use_test_ball",
+                default_value="true",
+                description=(
+                    "Start the simulated test_ball_node (virtual ball). Set to false "
+                    "when using the real tracker (use_tracker:=true)."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "use_tracker",
+                default_value="false",
+                description=(
+                    "Start ball_tracking_cpp (real DVXplorer Trace perception) as the "
+                    "ball source instead of the virtual ball. Combine with "
+                    "use_test_ball:=false and preferably use_ball_regression:=true."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "camera_calibration_file",
+                default_value=(
+                    "recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml"
+                ),
+                description="OpenCV XML intrinsics for ball_tracking_cpp (use_tracker).",
+            ),
+            DeclareLaunchArgument(
+                "ball_radius_mm",
+                default_value="20.0",
+                description=(
+                    "Physical ball radius in millimetres for ball_tracking_cpp Trace "
+                    "depth (use_tracker). Depth scales directly with this value."
+                ),
+            ),
             DeclareLaunchArgument(
                 "use_ball_regression",
                 default_value="false",
@@ -253,7 +296,10 @@ def generate_launch_description() -> LaunchDescription:
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(live_catch_launch),
                 launch_arguments={
-                    "use_test_ball": "true",
+                    "use_test_ball": LaunchConfiguration("use_test_ball"),
+                    "use_tracker": LaunchConfiguration("use_tracker"),
+                    "camera_calibration_file": LaunchConfiguration("camera_calibration_file"),
+                    "ball_radius_mm": LaunchConfiguration("ball_radius_mm"),
                     "use_adapter": "false",
                     "trigger_mode": LaunchConfiguration("trigger_mode"),
                     "publish_frame": LaunchConfiguration("publish_frame"),

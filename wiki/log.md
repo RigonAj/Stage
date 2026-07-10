@@ -344,3 +344,54 @@
 - Source: code change adding `camera_calibration_file` to `ball_tracking_cpp`
   and `live_catch.launch.py`, defaulting the live/replay path to
   `recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml`.
+
+## [2026-07-09] ingest | First real Trace command test diagnosis + single-producer enforcement
+
+- Created: [Single Producer Contract](live-catch/single-producer-contract.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
+- Updated: [Safety And Commanding](live-catch/safety-and-commanding.md)
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [UR3e Web UI](web-ui/ur3e-web-ui.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md and
+  the same-day code changes: live_catch diagnostics producer-conflict watchdog
+  (fail-closed ball-topic gate), Web UI command_enabled flap detection, stack
+  --tracker/--ball-radius/--camera-calib options with use_test_ball now
+  configurable, and wider --stop cleanup (tracker, regression, manual
+  live_catch launches).
+
+## [2026-07-09] ingest | Ordered real command-session procedure + stack --hold-side fix
+
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Updated: [Single Producer Contract](live-catch/single-producer-contract.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: docs/Robot_Control/procedure_lancement_reel_trace_commande.md (full
+  ordered operator checklist for a real Trace command session, left model,
+  45 mm radius) and a stack-script fix: launch_ur3e_virtual_ball_stack.sh no
+  longer hardcodes the right-side hoop_xyz/hoop_quat (which silently overrode
+  hold_side:=left); a new --hold-side option / UR3E_HOLD_SIDE env drives the
+  hoop TF side and hoop overrides are only passed when explicitly set.
+
+## [2026-07-09] ingest | Perception-transmission improvement plan, items 1.1/1.2/2.1/2.2
+
+- Updated: [Live Catch Loop](live-catch/live-catch-loop.md)
+- Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: docs/Robot_Control/plan_amelioration_perception_transmission.md and
+  same-day code changes: regression min_input_confidence measurement gate,
+  anisotropic depth_sigma_scale weighting (camera-ray residuals, bring-up 8.0),
+  tracker trace_lead_ms/trace_hold_ms ROS params pinned to 0 under
+  use_ball_regression, and scripts/replay_ball_regression.py offline tuner.
+
+## [2026-07-09] ingest | Provisional 0.2 s regression lead, runtime-tunable
+
+- Updated: [Message Contracts And Topics](live-catch/message-contracts-and-topics.md)
+- Source: operator request (2026-07-09) + code change: live_catch.yaml
+  ball_regression_node.lead_time_s set to 0.2 s pending the plan-2.4 latency
+  measurement; BallRegression.set_lead_time + a node set_parameters callback
+  make it live-tunable via `ros2 param set /ball_regression_node lead_time_s`
+  (bounded [0, 1] s). Side effects documented: perception_age ≈ -lead and
+  ground-termination lead seconds before real impact.

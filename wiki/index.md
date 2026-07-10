@@ -15,8 +15,8 @@ Event-camera ball tracking and 3D pose estimation.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, pose_source trace/circle contract, ROI-gated accumulation (no circle), sampled display path, node-side lead/coast trajectory prediction, `camera_calibration_file` and `ball_radius_mm` controls, and depth-estimation risks. | 2026-07-09 |
-| [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure to run real DVXplorer Trace perception after calibration, force the robust 2026-07-09 intrinsics, set ball radius, publish `ball_state`, replay/throw a ball, and feed left-model live-catch dry-run inference without robot command emission. | 2026-07-09 |
+| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, C++ entry points, pose_source trace/circle contract, ROI-gated accumulation (no circle), sampled display path, node-side lead/coast trajectory prediction, `camera_calibration_file` and `ball_radius_mm` controls, GUI-framerate-capped publish cadence and depth-estimation risks. | 2026-07-09 |
+| [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure to run real DVXplorer Trace perception after calibration, force the robust 2026-07-09 intrinsics, set ball radius, publish `ball_state`, replay/throw a ball, feed left-model live-catch dry-run inference, and run command-mode sessions through the single `--tracker` stack. | 2026-07-09 |
 
 ## calibration
 
@@ -43,10 +43,11 @@ Closed-loop perception-to-policy-to-robot path.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Live Catch Loop](live-catch/live-catch-loop.md) | Single-process 60 Hz live-catch pipeline, modules, optional ballistic-regression ball publisher, metadata-driven action mapping, safety and tests. | 2026-07-03 |
-| [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState` (velocity convention, regression stamps), `ball_state_raw`, `CatchTelemetry`, topics, producers, idle heartbeat/`ball_valid` contract and timestamp rules. | 2026-07-03 |
-| [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model/v_safe_scale runtime gates, metadata/model limits, safety limiter, watchdog, controller switching, 500 Hz interpolated streaming, start-pose ±2π gate, hardware gates and slow bring-up tuning. | 2026-07-03 |
-| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, real-UR3e virtual-ball validation, ballistic-regression ball publisher (sim-validated), Test-tab v_safe_scale tuning, remaining speed/perception blockers, 2026-07-02 pendant incident diagnosis, uncommitted Isaac cfg limit change and current model/action status. | 2026-07-03 |
+| [Live Catch Loop](live-catch/live-catch-loop.md) | Single-process 60 Hz live-catch pipeline, modules, optional ballistic-regression ball publisher (measurement-purity gate + anisotropic depth weighting), metadata-driven action mapping, safety and tests. | 2026-07-09 |
+| [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState` (velocity convention, regression stamps), `ball_state_raw`, `CatchTelemetry`, topics, producers, idle heartbeat/`ball_valid` contract, single-producer rule and timestamp rules. | 2026-07-09 |
+| [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model/v_safe_scale runtime gates, metadata/model limits, safety limiter, watchdog, producer-conflict fail-closed gate, controller switching, 500 Hz interpolated streaming, start-pose ±2π gate, hardware gates and slow bring-up tuning. | 2026-07-09 |
+| [Single Producer Contract](live-catch/single-producer-contract.md) | 2026-07-09 duplicate live_catch_node / dual ball_state producer incident, failure signatures (twitching robot, flapping UI command state), diagnostics watchdog, UI flap detection, `--tracker` stack rule and pre-command checks. | 2026-07-09 |
+| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, real-UR3e virtual-ball validation, ballistic-regression ball publisher (sim-validated), Test-tab v_safe_scale tuning, remaining speed/perception blockers, 2026-07-02 pendant incident diagnosis, 2026-07-09 first real Trace command test diagnosis, uncommitted Isaac cfg limit change and current model/action status. | 2026-07-09 |
 
 ## sim-to-real
 
@@ -80,7 +81,7 @@ Browser UI and visualization/control panels.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [UR3e Web UI](web-ui/ur3e-web-ui.md) | FastAPI/Three.js UI structure, base_link robot/viewer contract, Isaac hoop visual, Test tab, model selector with hold_side labels, racket hold-side toggle (mirrored ball + hoop visual), v_safe_scale control, calibration tab, rollout tab and API scope. | 2026-07-06 |
+| [UR3e Web UI](web-ui/ur3e-web-ui.md) | FastAPI/Three.js UI structure, base_link robot/viewer contract, Isaac hoop visual, Test tab, model selector with hold_side labels, racket hold-side toggle (mirrored ball + hoop visual), v_safe_scale control, command-flap conflict warning, calibration tab, rollout tab and API scope. | 2026-07-09 |
 
 ## operations
 
@@ -88,7 +89,7 @@ Agent workflow, commands and wiki maintenance.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, hold_side:=left bring-up, package tests, Isaac sim2real export/check commands (current Isaac repo path, FT_TASK left variant) and wiki maintenance commands. | 2026-07-06 |
+| [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, hold_side:=left bring-up, `--tracker` real-perception stack option, package tests, Isaac sim2real export/check commands (current Isaac repo path, FT_TASK left variant) and wiki maintenance commands. | 2026-07-09 |
 | [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md) | Operator checklist before enable_command, ±2π start-pose gate procedure, staged v_safe_scale ramp-up and monitoring points. | 2026-07-03 |
 | [Wiki Maintenance](operations/wiki-maintenance.md) | Ingest/query/lint rules adapted from the Karpathy LLM wiki pattern. | 2026-06-29 |
 | [Source Document Map](operations/source-document-map.md) | How the raw Markdown docs are combined or split into compiled wiki concepts. | 2026-06-29 |

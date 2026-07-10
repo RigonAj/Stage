@@ -40,6 +40,7 @@ from ur3e_catch_msgs.msg import CatchTelemetry
 from ur3e_rollout_replay.replay_core import DEFAULT_JOINT_NAMES
 from ur3e_rollout_replay.send import build_joint_trajectory
 
+from .flapping import FlapDetector
 from .urdf_provider import UrdfCache
 
 ACTION_NAME = "/scaled_joint_trajectory_controller/follow_joint_trajectory"
@@ -132,6 +133,10 @@ class StateSnapshot:
     catch_perception_age_s: float | None = None
     catch_loop_compute_s: float | None = None
     catch_command_enabled: bool = False  # live node mode (from telemetry)
+    # command_enabled toggling every few samples means TWO live_catch_node
+    # instances publish interleaved telemetry (stack + manual launch); the UI
+    # shows a conflict warning instead of a flickering command state.
+    catch_command_flapping: bool = False
     catch_ball_valid: bool = False       # false => heartbeat telemetry, ball fields not meaningful
     catch_throw_ready: bool = False      # test_ball ~/throw service reachable
     catch_config_ready: bool = False     # test_ball parameter services reachable
@@ -170,6 +175,7 @@ class RosBridge:
         self.urdf_cache = UrdfCache()
         self._lock = threading.Lock()
         self._snapshot = StateSnapshot()
+        self._command_flap = FlapDetector()
         self._goal: GoalRecord | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._goal_listeners: list[Callable[[dict], None]] = []
@@ -286,7 +292,11 @@ class RosBridge:
             self._snapshot.catch_loop_compute_s = float(msg.loop_compute_s)
             # command_enabled/ball_valid exist once ur3e_catch_msgs is rebuilt; guard
             # for older builds (ball_valid defaults True so flights still render).
-            self._snapshot.catch_command_enabled = bool(getattr(msg, "command_enabled", False))
+            command_enabled = bool(getattr(msg, "command_enabled", False))
+            self._snapshot.catch_command_enabled = command_enabled
+            self._snapshot.catch_command_flapping = self._command_flap.observe(
+                command_enabled, time.monotonic()
+            )
             self._snapshot.catch_ball_valid = bool(getattr(msg, "ball_valid", True))
 
     def _on_robot_description(self, msg: StringMsg) -> None:
@@ -343,6 +353,9 @@ class RosBridge:
             self._snapshot.catch_config_ready = config_ready
             self._snapshot.catch_command_ready = command_ready
             self._snapshot.catch_model_ready = model_ready
+            # Decay the flap verdict when telemetry stops (killed duplicate):
+            # the callback path only refreshes it on incoming messages.
+            self._snapshot.catch_command_flapping = self._command_flap.flapping(time.monotonic())
 
         self._controller_poll_tick += 1
         if self._controller_poll_tick >= CONTROLLER_POLL_TICKS:

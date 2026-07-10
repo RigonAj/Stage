@@ -68,6 +68,20 @@ ABORTED = "aborted"  # flight invalidated by the ballistic consistency monitor
 @dataclass
 class RegressionConfig:
     gravity_m_s2: float = 9.81
+    # Measurement purity (plan 1.1): drop producer samples below this
+    # confidence. The tracker publishes 1.0 on real fits and a decaying value
+    # while coasting (extrapolated, model-generated points) — those must never
+    # feed the fit as measurements.
+    min_input_confidence: float = 1.0
+    # Anisotropic noise model (plan 2.1): Trace depth (trail width -> 1/width)
+    # is far noisier than the lateral image position. When the producer's
+    # camera position is known, per-sample residuals and per-axis weights are
+    # scaled so a deviation ALONG the camera->ball ray counts depth_sigma_scale
+    # times less than a lateral one (sigma_depth = scale * sigma_lateral).
+    # 1.0 = isotropic (previous behavior); the fit rms and every rms-based gate
+    # (max_rms_m, gate_k) then read in lateral-equivalent metres, so realistic
+    # depth noise no longer blocks the start gate or triggers restarts.
+    depth_sigma_scale: float = 1.0
     # fit
     max_samples: int = 240            # full-flight buffer (0.3-0.5 s flights)
     irls_iterations: int = 2
@@ -215,7 +229,9 @@ class BallRegression:
     def __init__(self, config: Optional[RegressionConfig] = None) -> None:
         self._cfg = config or RegressionConfig()
         self._state = IDLE
-        self._samples: list[tuple[float, Vec3]] = []
+        # (stamp, position, camera->ball unit ray or None) — the ray carries the
+        # per-sample depth direction for the anisotropic noise model.
+        self._samples: list[tuple[float, Vec3, Optional[Vec3]]] = []
         self._fit: Optional[BallisticFit] = None
         self._track_started_t: Optional[float] = None
         self._last_sample_t: Optional[float] = None    # last stored sample stamp
@@ -223,7 +239,7 @@ class BallRegression:
         self._last_accepted_t: Optional[float] = None  # last fit-updating stamp
         self._freeze_t: Optional[float] = None         # step-clock coast start
         self._idle_after: Optional[float] = None       # step-clock refractory end
-        self._reject_streak: list[tuple[float, Vec3]] = []
+        self._reject_streak: list[tuple[float, Vec3, Optional[Vec3]]] = []
         # per-flight bookkeeping for the end-of-flight summary
         self._first_sample_t: Optional[float] = None
         self._pop_t: Optional[float] = None
@@ -253,6 +269,22 @@ class BallRegression:
     def flights_ended(self) -> int:
         return self._flights_ended
 
+    @property
+    def lead_time_s(self) -> float:
+        return self._cfg.lead_time_s
+
+    def set_lead_time(self, lead_s: float) -> None:
+        """Runtime lead tuning (latency compensation, operator-adjustable).
+
+        Safe mid-flight: the lead only shifts the evaluation time of ``step``,
+        it never touches samples, fit or state machine. Bounded to [0, 1] s —
+        beyond that the extrapolation exceeds any plausible flight remainder.
+        """
+        lead = float(lead_s)
+        if not math.isfinite(lead) or not (0.0 <= lead <= 1.0):
+            raise ValueError(f"lead_time_s must be in [0, 1] s, got {lead_s!r}")
+        self._cfg.lead_time_s = lead
+
     def reset(self) -> None:
         self._state = IDLE
         self._samples.clear()
@@ -270,11 +302,22 @@ class BallRegression:
         self._n_accepted = 0
         self._n_rejected = 0
 
-    def add_sample(self, t_s: float, pos_base: Sequence[float]) -> str:
-        """Feed one raw detection (base_link, meters, producer stamp seconds)."""
+    def add_sample(self, t_s: float, pos_base: Sequence[float],
+                   confidence: float = 1.0,
+                   camera_pos_base: Optional[Sequence[float]] = None) -> str:
+        """Feed one raw detection (base_link, meters, producer stamp seconds).
+
+        ``confidence`` is the producer's value; anything below
+        ``min_input_confidence`` is IGNORED (coasted/extrapolated points are
+        not measurements). ``camera_pos_base`` (camera origin in base_link)
+        enables the anisotropic depth model; None keeps the sample isotropic.
+        """
         pos = (float(pos_base[0]), float(pos_base[1]), float(pos_base[2]))
         if not all(math.isfinite(v) for v in (t_s, *pos)):
             return IGNORED
+        if confidence < self._cfg.min_input_confidence - 1e-6:
+            return IGNORED  # model-generated (coast) point, not a measurement
+        ray = self._camera_ray(pos, camera_pos_base)
         if self._state == ENDED:
             return IGNORED  # refractory: floor bounces / lingering clusters
         if self._last_seen_t is not None and \
@@ -286,11 +329,11 @@ class BallRegression:
         self._last_seen_t = t_s
 
         if self._state == IDLE:
-            self._start_collecting([(t_s, pos)])
+            self._start_collecting([(t_s, pos, ray)])
             return ACCEPTED
 
         if self._state == COLLECTING:
-            self._store(t_s, pos)
+            self._store(t_s, pos, ray)
             self._n_accepted += 1
             self._refit()
             if not self._ballistic_consistency_ok():
@@ -298,13 +341,14 @@ class BallRegression:
             self._try_start_tracking()
             return ACCEPTED
 
-        # TRACKING / COASTING: gate against the current (possibly frozen) fit.
+        # TRACKING / COASTING: gate against the current (possibly frozen) fit,
+        # in the scaled metric (a depth-direction deviation counts less).
         assert self._fit is not None
-        residual = _dist(pos, self._fit.position(t_s))
+        residual = self._scaled_dist(pos, self._fit.position(t_s), ray)
         threshold = max(self._cfg.gate_floor_m, self._cfg.gate_k * self._fit.rms)
         if residual <= threshold:
             self._reject_streak.clear()
-            self._store(t_s, pos)
+            self._store(t_s, pos, ray)
             self._n_accepted += 1
             self._refit()
             self._last_accepted_t = t_s
@@ -315,7 +359,7 @@ class BallRegression:
                 self._freeze_t = None
             return ACCEPTED
 
-        self._reject_streak.append((t_s, pos))
+        self._reject_streak.append((t_s, pos, ray))
         self._n_rejected += 1
         if len(self._reject_streak) >= self._cfg.reject_streak_n and \
                 self._streak_is_consistent():
@@ -369,7 +413,43 @@ class BallRegression:
 
     # --- internals -------------------------------------------------------------
 
-    def _start_collecting(self, seed: list[tuple[float, Vec3]]) -> None:
+    @staticmethod
+    def _camera_ray(pos: Vec3, camera_pos_base: Optional[Sequence[float]]) -> Optional[Vec3]:
+        """Unit camera->ball direction in base_link (the depth axis), or None."""
+        if camera_pos_base is None:
+            return None
+        d = (pos[0] - float(camera_pos_base[0]),
+             pos[1] - float(camera_pos_base[1]),
+             pos[2] - float(camera_pos_base[2]))
+        n = _norm(d)
+        if not math.isfinite(n) or n < 1e-6:
+            return None
+        return (d[0] / n, d[1] / n, d[2] / n)
+
+    def _axis_variance_factors(self, ray: Optional[Vec3]) -> Vec3:
+        """Diagonal of the per-sample noise covariance in sigma_lateral^2 units.
+
+        Full covariance is sigma_lat^2 * (I + (scale^2 - 1) * ray*ray^T); the
+        per-axis solver keeps only the diagonal (exact when the ray aligns with
+        a base axis, first-order otherwise).
+        """
+        s2 = self._cfg.depth_sigma_scale * self._cfg.depth_sigma_scale
+        if ray is None or s2 <= 1.0:
+            return (1.0, 1.0, 1.0)
+        e = s2 - 1.0
+        return (1.0 + e * ray[0] * ray[0],
+                1.0 + e * ray[1] * ray[1],
+                1.0 + e * ray[2] * ray[2])
+
+    def _scaled_dist(self, pos: Sequence[float], pred: Sequence[float],
+                     ray: Optional[Vec3]) -> float:
+        """Residual distance in lateral-equivalent metres (Mahalanobis, diagonal)."""
+        var = self._axis_variance_factors(ray)
+        return math.sqrt((pos[0] - pred[0]) ** 2 / var[0]
+                         + (pos[1] - pred[1]) ** 2 / var[1]
+                         + (pos[2] - pred[2]) ** 2 / var[2])
+
+    def _start_collecting(self, seed: list[tuple[float, Vec3, Optional[Vec3]]]) -> None:
         self._samples = list(seed[-self._cfg.max_samples:])
         self._fit = None
         self._state = COLLECTING
@@ -385,8 +465,8 @@ class BallRegression:
         self._n_accepted = len(self._samples)
         self._n_rejected = 0
 
-    def _store(self, t_s: float, pos: Vec3) -> None:
-        self._samples.append((t_s, pos))
+    def _store(self, t_s: float, pos: Vec3, ray: Optional[Vec3]) -> None:
+        self._samples.append((t_s, pos, ray))
         if len(self._samples) > self._cfg.max_samples:
             del self._samples[0]
         self._last_sample_t = t_s
@@ -403,42 +483,52 @@ class BallRegression:
         if len(samples) < 2:
             return None
         t0 = samples[0][0]
-        taus = [t - t0 for t, _ in samples]
+        taus = [t - t0 for t, _, _ in samples]
         span = taus[-1] - taus[0]
         g = self._cfg.gravity_m_s2
-        xs = [p[0] for _, p in samples]
-        ys = [p[1] for _, p in samples]
+        xs = [p[0] for _, p, _ in samples]
+        ys = [p[1] for _, p, _ in samples]
         # z' = z + 0.5*g*tau^2 linearizes the fixed-gravity axis.
-        zs = [p[2] + 0.5 * g * tau * tau for (_, p), tau in zip(samples, taus)]
+        zs = [p[2] + 0.5 * g * tau * tau for (_, p, _), tau in zip(samples, taus)]
+        var_factors = [self._axis_variance_factors(ray) for _, _, ray in samples]
 
         weights = self._recency_weights(taus, span)
-        fit = self._solve(taus, xs, ys, zs, weights, t0, g, span)
+        fit = self._solve(taus, xs, ys, zs, weights, var_factors, t0, g, span)
         if fit is None:
             return None
         for _ in range(max(0, self._cfg.irls_iterations)):
             weights = self._irls_weights(samples, taus, span, fit)
-            refit = self._solve(taus, xs, ys, zs, weights, t0, g, span)
+            refit = self._solve(taus, xs, ys, zs, weights, var_factors, t0, g, span)
             if refit is None:
                 break
             fit = refit
         return fit
 
-    def _solve(self, taus, xs, ys, zs, weights, t0: float, g: float,
+    def _solve(self, taus, xs, ys, zs, weights, var_factors, t0: float, g: float,
                span: float) -> Optional[BallisticFit]:
-        ax = _wls_line(taus, xs, weights)
-        ay = _wls_line(taus, ys, weights)
-        az = _wls_line(taus, zs, weights)
+        # Per-axis WLS weights = common (recency*Cauchy) weight / axis variance:
+        # depth-noisy directions pull each 1-D fit less (identical to the
+        # previous isotropic solve when depth_sigma_scale is 1).
+        wx = [w / v[0] for w, v in zip(weights, var_factors)]
+        wy = [w / v[1] for w, v in zip(weights, var_factors)]
+        wz = [w / v[2] for w, v in zip(weights, var_factors)]
+        ax = _wls_line(taus, xs, wx)
+        ay = _wls_line(taus, ys, wy)
+        az = _wls_line(taus, zs, wz)
         if ax is None or ay is None or az is None:
             return None
         p0 = (ax[0], ay[0], az[0])
         v0 = (ax[1], ay[1], az[1])
-        # Weighted RMS of the joint 3-D residual against the raw z samples.
+        # Weighted RMS of the joint residual in the SCALED metric
+        # (lateral-equivalent metres), so gate_k/max_rms_m compare consistently.
         sw = sr = 0.0
-        for tau, x, y, z, w in zip(taus, xs, ys, zs, weights):
+        for tau, x, y, z, w, v in zip(taus, xs, ys, zs, weights, var_factors):
             fx = p0[0] + v0[0] * tau
             fy = p0[1] + v0[1] * tau
             fz = p0[2] + v0[2] * tau  # both sides in z' space: gravity cancels
-            r2 = (x - fx) ** 2 + (y - fy) ** 2 + (z - fz) ** 2
+            r2 = ((x - fx) ** 2 / v[0]
+                  + (y - fy) ** 2 / v[1]
+                  + (z - fz) ** 2 / v[2])
             sw += w
             sr += w * r2
         rms = math.sqrt(sr / sw) if sw > 0.0 else float("inf")
@@ -453,7 +543,10 @@ class BallRegression:
         return [math.exp(-lam * (newest - tau) / span) for tau in taus]
 
     def _irls_weights(self, samples, taus, span, fit: BallisticFit) -> list[float]:
-        residuals = [_dist(p, fit.position(t)) for t, p in samples]
+        # Residuals in the scaled metric: a depth-direction wobble is expected
+        # noise, not an outlier, so it must not inflate the Cauchy scale nor be
+        # clipped as hard as a lateral miss.
+        residuals = [self._scaled_dist(p, fit.position(t), ray) for t, p, ray in samples]
         scale = max(1e-6, self._cfg.sigma_floor_m, 1.4826 * median(residuals))
         recency = self._recency_weights(taus, span)
         return [rw / (1.0 + (r / scale) ** 2) for r, rw in zip(residuals, recency)]
@@ -498,8 +591,8 @@ class BallRegression:
         if fit is None or fit.span < cfg.ballistic_check_span_s:
             return True
         t0 = self._samples[0][0]
-        taus = [t - t0 for t, _ in self._samples]
-        zs = [p[2] for _, p in self._samples]
+        taus = [t - t0 for t, _, _ in self._samples]
+        zs = [p[2] for _, p, _ in self._samples]
         g = cfg.gravity_m_s2
         fixed = _wls_line(taus, [z + 0.5 * g * tau * tau for z, tau in zip(zs, taus)],
                           [1.0] * len(taus))
@@ -543,7 +636,7 @@ class BallRegression:
         streak = self._reject_streak
         if len(streak) < 2:
             return False
-        for (t_a, p_a), (t_b, p_b) in zip(streak, streak[1:]):
+        for (t_a, p_a, _), (t_b, p_b, _) in zip(streak, streak[1:]):
             dt = t_b - t_a
             if dt <= 0.0:
                 return False

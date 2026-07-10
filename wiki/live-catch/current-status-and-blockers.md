@@ -1,7 +1,7 @@
 # Current Status And Blockers
 
-> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; agent review corrections, 2026-07-03; ball regression publisher, 2026-07-03
-> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
+> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; v_safe_scale overdrive range to 4.0, 2026-07-03; agent review corrections, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis
+> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
 
 ## Overview
 
@@ -50,6 +50,26 @@ calibration, TF, watchdog and latency validation work.
   slightly closer than the Isaac spawn envelope (y >= 1.2 m); the real event
   tracker's higher raw rate shortens this, and `min_samples`/`min_span_s` are
   tunable.
+
+## 2026-07-09 First Real Trace Command Test (Diagnosed)
+
+First camera+Trace+robot command attempt: the robot only twitched and the Web
+UI command state flickered ON/OFF. Root cause was NOT perception quality: the
+operator started `live_catch.launch.py use_tracker:=true enable_command:=true`
+while the virtual-ball stack was still running, so two `live_catch_node`
+instances published `/catch_telemetry` with opposite `command_enabled` (the UI
+flicker) and the stack's idle `test_ball_node` interleaved `valid=false`
+heartbeats with the regression output on `ball_state` — each one triggering a
+controlled stop plus policy-state reset (the twitching). Secondary finding:
+the tracker's publish cadence is capped by the raylib render loop
+(`SetTargetFPS(60)`), so `ball_state_raw` is not a guaranteed 60 Hz; the
+regression node's 60 Hz resampling covers the policy input. Fixes shipped the
+same day: producer-conflict watchdog with fail-closed commanding, Web UI flap
+detection, `--tracker` stack option and wider `--stop` cleanup — see
+[Single Producer Contract](single-producer-contract.md). Decoupling tracker
+publication from the GUI render remains open. Note: the test used
+`ball_radius_mm:=45.0`; verify it is the measured radius (Ø 90 mm ball), not
+the diameter, since Trace depth scales directly with it.
 
 ## Blockers Before Real Perception
 
@@ -106,6 +126,10 @@ basic command-path failure.
 - Tune safety parameters on the real robot (`v_safe_scale`, `a_safe`,
   `loop_budget_s`, `max_tracking_error`, `start_pose_limit_rad`).
 - Measure end-to-end latency with real perception.
+- Redo the real Trace command test through the single stack
+  (`ur3e_catch_stack --real --tracker`), measure `ros2 topic hz` on
+  `ball_state_raw`/`ball_state` during throws, and decouple tracker
+  publication from the GUI render if the raw rate is too low.
 
 ## Documentation/Reproducibility Gaps
 

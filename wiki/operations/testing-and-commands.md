@@ -1,7 +1,7 @@
 # Testing And Commands
 
-> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02; hold-side variant and Isaac repo path check, 2026-07-06
-> Raw: [README](../../README.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md)
+> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02; hold-side variant and Isaac repo path check, 2026-07-06; stack --tracker option, 2026-07-09
+> Raw: [README](../../README.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Stack script](../../scripts/launch_ur3e_virtual_ball_stack.sh)
 
 ## Environment
 
@@ -48,7 +48,20 @@ UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 ur3e_catch_stack --real
 # Explicit policy export.
 ur3e_catch_stack --fake --model-path data/models/latest/policy_deterministic.onnx
 
-# Stop the combined stack.
+# Real DVXplorer Trace perception INSIDE the single stack (since 2026-07-09):
+# swaps test_ball_node for ball_tracking_cpp + ballistic regression. Never
+# start a second live_catch.launch.py next to the stack instead — that
+# duplicates live_catch_node and the ball_state producer
+# (see wiki/live-catch/single-producer-contract.md).
+ur3e_catch_stack --real --tracker --hold-side left --ball-radius 45.0 \
+  --model-path data/models/latest-left/policy_deterministic.onnx
+# --hold-side (2026-07-09) drives the hoop TF side; the script previously
+# hardcoded the right-side hoop_xyz, silently overriding hold_side:=left.
+# Full ordered operator checklist:
+# docs/Robot_Control/procedure_lancement_reel_trace_commande.md
+
+# Stop the combined stack (also kills stray trackers / regression nodes /
+# manual live_catch launches since 2026-07-09).
 ur3e_catch_stop
 ```
 
@@ -76,6 +89,15 @@ ros2 launch ur3e_live_catch live_catch.launch.py \
 Note: `test_ball_node` reads `noise_std`/`dropout_prob` once at startup, so a
 noisy regression stress-test must set them at launch (or run the node with
 `-p noise_std:=0.02 -p dropout_prob:=0.2`), not via `ros2 param set`.
+
+Offline regression tuning on real captures (record during throws, then replay
+with parameter overrides — no robot session needed):
+
+```bash
+ros2 bag record /ball_state_raw /tf_static
+python3 scripts/replay_ball_regression.py <bag_dir> \
+  --set depth_sigma_scale=8.0 --set max_rms_m=0.05
+```
 
 ```bash
 ```

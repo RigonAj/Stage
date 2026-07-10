@@ -75,6 +75,7 @@ export class CatchPanel {
     this.commandReady = false;
     this.configReady = false;
     this.commandEnabled = false;
+    this.commandFlapping = false;
     this.configLoaded = false;
     this.mutingInputs = false;
     this.models = [];
@@ -337,6 +338,7 @@ export class CatchPanel {
     this.configReady = !!status.config_ready;
     this.modelReady = !!status.model_ready;
     this.commandEnabled = !!status.command_enabled;
+    this.commandFlapping = !!status.command_flapping;
 
     if (this.configReady && !this.configLoaded) this.loadBallConfig();
     if (this.modelReady && !this.vSafeScaleLoaded) this.loadVSafeScale();
@@ -347,14 +349,26 @@ export class CatchPanel {
     this.refreshButtons();
 
     const cmdStatus = document.getElementById("catch-command-status");
-    cmdStatus.textContent = this.commandEnabled
-      ? "command: ON — the policy is driving the real robot"
-      : `command: off${this.commandReady ? "" : " (live_catch node not found)"}`;
-    cmdStatus.className = "goal-status " + (this.commandEnabled ? "active" : "");
+    if (this.commandFlapping) {
+      // command_enabled alternating across telemetry samples: two live_catch
+      // nodes are publishing (stack + manual launch). Surface the conflict
+      // instead of rendering a flickering ON/off state.
+      cmdStatus.textContent =
+        "command: CONFLICT — telemetry command state is flapping; two live_catch_node running? Stop the duplicate (stack or manual launch).";
+      cmdStatus.className = "goal-status aborted";
+    } else {
+      cmdStatus.textContent = this.commandEnabled
+        ? "command: ON — the policy is driving the real robot"
+        : `command: off${this.commandReady ? "" : " (live_catch node not found)"}`;
+      cmdStatus.className = "goal-status " + (this.commandEnabled ? "active" : "");
+    }
 
     const badge = document.getElementById("badge-catch");
     if (badge) {
-      if (this.commandEnabled) {
+      if (this.commandFlapping) {
+        badge.textContent = "catch: CONFLICT";
+        badge.className = "badge bad";
+      } else if (this.commandEnabled) {
         badge.textContent = "catch: CMD ON";
         badge.className = "badge bad";
       } else if (this.commandReady) {

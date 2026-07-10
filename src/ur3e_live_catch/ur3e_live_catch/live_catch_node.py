@@ -47,6 +47,7 @@ from tf2_ros import Buffer, TransformListener
 
 from ur3e_catch_msgs.msg import BallState, CatchTelemetry
 from ur3e_live_catch.action import ActionMapper
+from ur3e_live_catch.diagnostics import ball_producer_conflict, producer_conflict_warnings
 from ur3e_live_catch.ball_frame import (
     BallFrameTransformer,
     FrameError,
@@ -77,6 +78,7 @@ FALLBACK_TORCH_MODEL = (
     "data/ur3e_rollouts/2026-05-26_17-13-29_ppo_torch/exports/policy_deterministic.ts"
 )
 CONTROLLER_POLL_PERIOD_S = 0.5
+PRODUCER_CHECK_PERIOD_S = 2.0
 EXPECTED_OBSERVATION_SPACE = 33
 EXPECTED_ACTION_SPACE = 6
 EXPECTED_OBSERVATION_FRAME = "base_link"
@@ -200,13 +202,19 @@ class LiveCatchNode(Node):
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
+        self._ball_topic = str(self.get_parameter("ball_topic").value)
+        self._telemetry_topic = str(self.get_parameter("telemetry_topic").value)
         self.create_subscription(JointState, str(self.get_parameter("joint_states_topic").value),
                                  self._on_joint_states, 10)
-        self.create_subscription(BallState, str(self.get_parameter("ball_topic").value),
-                                 self._on_ball, 10)
-        self._telemetry_pub = self.create_publisher(
-            CatchTelemetry, str(self.get_parameter("telemetry_topic").value), 10
-        )
+        self.create_subscription(BallState, self._ball_topic, self._on_ball, 10)
+        self._telemetry_pub = self.create_publisher(CatchTelemetry, self._telemetry_topic, 10)
+        # Exclusive-producer watchdog: a second ball producer (e.g. the stack's
+        # test_ball_node next to the real tracker) or a duplicate live_catch_node
+        # breaks the loop in ways that read as "the robot barely moves" / a
+        # flickering UI command state (2026-07-09 incident). Checked off the hot
+        # path; a ball-topic conflict fails command emission closed.
+        self._producer_conflicts: list[str] = []
+        self.create_timer(PRODUCER_CHECK_PERIOD_S, self._check_producer_conflicts)
 
         # Controller switching / command publisher only exist in command mode.
         self._command_pub = None
@@ -599,6 +607,34 @@ class LiveCatchNode(Node):
     def _on_ball(self, msg: BallState) -> None:
         self._ball_msg = msg
 
+    # --- exclusive-producer watchdog ------------------------------------------
+
+    def _check_producer_conflicts(self) -> None:
+        """Detect duplicate ball producers / duplicate live nodes (diagnostics.py)."""
+        try:
+            node_names = self.get_node_names()
+        except Exception:
+            node_names = None
+        warnings = producer_conflict_warnings(
+            ball_topic=self._ball_topic,
+            ball_publisher_count=self.count_publishers(self._ball_topic),
+            telemetry_topic=self._telemetry_topic,
+            telemetry_publisher_count=self.count_publishers(self._telemetry_topic),
+            own_node_name=self.get_name(),
+            node_names=node_names,
+        )
+        if warnings != self._producer_conflicts:
+            for warning in warnings:
+                self.get_logger().error("PRODUCER CONFLICT: " + warning)
+            if not warnings:
+                self.get_logger().info("producer conflicts resolved")
+        elif warnings:
+            self.get_logger().error(
+                "PRODUCER CONFLICT persists (" + str(len(warnings)) + " issue(s), see above)",
+                throttle_duration_sec=10.0,
+            )
+        self._producer_conflicts = warnings
+
     # --- controller switching (command mode) ---------------------------------
 
     def _poll_controllers(self) -> None:
@@ -678,6 +714,16 @@ class LiveCatchNode(Node):
 
     def _commanding_allowed(self, *, request_switch: bool = True) -> bool:
         if not self._enable_command or self._policy is None:
+            return False
+        # Fail closed on a ball-topic producer conflict: with two producers the
+        # safe target alternates with hold/reset states every message, so the
+        # robot would only twitch while looking "armed" to the operator.
+        if ball_producer_conflict(self._producer_conflicts, self._ball_topic):
+            self.get_logger().error(
+                "refusing to command: multiple publishers on ball topic "
+                f"'{self._ball_topic}' (stop the extra ball producer)",
+                throttle_duration_sec=2.0,
+            )
             return False
         if not self._command_controller_active:
             if self._auto_switch and request_switch:

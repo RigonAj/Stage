@@ -26,10 +26,22 @@ ACTION_MODE="${UR3E_ACTION_MODE:-faithful}"
 ENABLE_COMMAND="${UR3E_ENABLE_COMMAND:-false}"
 PUBLISH_FRAME="${UR3E_BALL_PUBLISH_FRAME:-base_link}"
 TRIGGER_MODE="${UR3E_BALL_TRIGGER_MODE:-true}"
+# Ball source: virtual test ball (default) OR the real DVXplorer tracker.
+# Exactly one source may publish toward the live loop (2026-07-09 incident).
+USE_TRACKER="${UR3E_USE_TRACKER:-false}"
+USE_BALL_REGRESSION="${UR3E_USE_BALL_REGRESSION:-}"
+BALL_RADIUS_MM="${UR3E_BALL_RADIUS_MM:-20.0}"
+CAMERA_CALIBRATION_FILE="${UR3E_CAMERA_CALIBRATION_FILE:-recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml}"
 LAUNCH_LATENCY_REPORT="${UR3E_LAUNCH_LATENCY_REPORT:-false}"
 PUBLISH_HOOP_TF="${UR3E_PUBLISH_HOOP_TF:-true}"
-HOOP_XYZ="${UR3E_HOOP_XYZ:--0.5 0.0 0.0}"
-HOOP_QUAT="${UR3E_HOOP_QUAT:-1.0 0.0 0.0 0.0}"
+# Racket hold side (right|left). Drives the hoop_center TF side in the launch;
+# must match the physical mount AND the loaded model's hold_side metadata.
+HOLD_SIDE="${UR3E_HOLD_SIDE:-right}"
+# Explicit hoop overrides. Empty (default) lets the launch derive the TF from
+# hold_side; a non-empty value overrides BOTH sides, so only set these for a
+# custom mount geometry.
+HOOP_XYZ="${UR3E_HOOP_XYZ:-}"
+HOOP_QUAT="${UR3E_HOOP_QUAT:-}"
 
 EXTRA_LAUNCH_ARGS=()
 
@@ -39,8 +51,13 @@ Usage: $(basename "$0") [options] [extra ros2 launch args...]
 
 Starts, in one command:
   - UR3e driver / robot control
-  - live-catch with test_ball_node in trigger mode
+  - live-catch with test_ball_node in trigger mode (or the real tracker, --tracker)
   - ur3e_web_ui for the Test tab
+
+NEVER start a second "ros2 launch ur3e_live_catch live_catch.launch.py" next to
+this stack: that runs two live_catch_node instances and two ball_state
+producers (flickering command state, robot stuck twitching). Use --tracker to
+swap the ball source inside this stack instead.
 
 Options:
   --stop                 Stop existing UR3e driver/UI/live-catch processes and exit.
@@ -54,10 +71,23 @@ Options:
   --port PORT            UI port, default: $UI_PORT
   --model-path PATH      Policy model path passed to live_catch_node.
   --enable-command       Start live_catch with enable_command:=true (robot may move).
+  --tracker              Use the real DVXplorer tracker as ball source instead of
+                         the virtual test ball (implies the ballistic-regression
+                         publisher unless --no-regression).
+  --no-regression        With --tracker: feed raw tracker output to live_catch
+                         (debug only; the regression 60 Hz fit is recommended).
+  --ball-radius MM       Physical ball radius for Trace depth, default: $BALL_RADIUS_MM
+  --camera-calib FILE    OpenCV XML intrinsics for the tracker,
+                         default: $CAMERA_CALIBRATION_FILE
   --latency              Start latency_report.
   --publish-hoop-tf      Publish wrist_3_link -> hoop_center static TF.
-  --hoop-xyz "X Y Z"     Hoop translation in wrist_3_link, metres.
-  --hoop-quat "X Y Z W"  Hoop quaternion in wrist_3_link.
+  --hold-side SIDE       Racket hold side: right (default) or left. Sets the
+                         hoop_center TF side; must match the mount and the
+                         model's hold_side metadata.
+  --hoop-xyz "X Y Z"     Hoop translation override in wrist_3_link, metres
+                         (empty default: derived from --hold-side).
+  --hoop-quat "X Y Z W"  Hoop quaternion override in wrist_3_link
+                         (empty default: derived from --hold-side).
   -h, --help             Show this help.
 
 Environment:
@@ -66,7 +96,10 @@ Environment:
   UR3E_LAUNCH_MOVEIT, UR3E_LAUNCH_UI, UR3E_UI_HOST, UR3E_UI_PORT
   UR3E_LIVE_MODEL_PATH, UR3E_ACTION_MODE, UR3E_ENABLE_COMMAND
   UR3E_BALL_PUBLISH_FRAME, UR3E_BALL_TRIGGER_MODE
-  UR3E_LAUNCH_LATENCY_REPORT, UR3E_PUBLISH_HOOP_TF, UR3E_HOOP_XYZ, UR3E_HOOP_QUAT
+  UR3E_USE_TRACKER, UR3E_USE_BALL_REGRESSION, UR3E_BALL_RADIUS_MM
+  UR3E_CAMERA_CALIBRATION_FILE
+  UR3E_LAUNCH_LATENCY_REPORT, UR3E_PUBLISH_HOOP_TF, UR3E_HOLD_SIDE
+  UR3E_HOOP_XYZ, UR3E_HOOP_QUAT
 EOF
 }
 
@@ -129,6 +162,24 @@ while [[ $# -gt 0 ]]; do
       ENABLE_COMMAND=true
       shift
       ;;
+    --tracker)
+      USE_TRACKER=true
+      shift
+      ;;
+    --no-regression)
+      USE_BALL_REGRESSION=false
+      shift
+      ;;
+    --ball-radius)
+      require_value "$1" "${2:-}"
+      BALL_RADIUS_MM="$2"
+      shift 2
+      ;;
+    --camera-calib)
+      require_value "$1" "${2:-}"
+      CAMERA_CALIBRATION_FILE="$2"
+      shift 2
+      ;;
     --latency)
       LAUNCH_LATENCY_REPORT=true
       shift
@@ -136,6 +187,11 @@ while [[ $# -gt 0 ]]; do
     --publish-hoop-tf)
       PUBLISH_HOOP_TF=true
       shift
+      ;;
+    --hold-side)
+      require_value "$1" "${2:-}"
+      HOLD_SIDE="$2"
+      shift 2
       ;;
     --hoop-xyz)
       require_value "$1" "${2:-}"
@@ -184,8 +240,12 @@ matching_pids() {
       /\/opt\/ros\/humble\/lib\/moveit_ros_move_group\/move_group/ ||
       /ros2 run ur3e_web_ui ur3e_web_ui/ ||
       /\/ur3e_web_ui\/lib\/ur3e_web_ui\/ur3e_web_ui/ ||
+      /ros2 launch ur3e_live_catch live_catch.launch.py/ ||
       /\/ur3e_live_catch\/lib\/ur3e_live_catch\/live_catch_node/ ||
       /\/ur3e_live_catch\/lib\/ur3e_live_catch\/test_ball_node/ ||
+      /\/ur3e_live_catch\/lib\/ur3e_live_catch\/ball_regression_node/ ||
+      /\/ball_tracking_cpp\/lib\/ball_tracking_cpp\/talker/ ||
+      /ros2 run ball_tracking_cpp talker/ ||
       /\/ur3e_live_catch\/lib\/ur3e_live_catch\/latency_report/ {
         if ($0 !~ /awk / && $0 !~ /launch_ur3e_virtual_ball_stack/) print $1
       }'
@@ -233,6 +293,17 @@ if [[ "$LAUNCH_UI" == "true" ]] && ss -ltn "sport = :$UI_PORT" | grep -q ":$UI_P
   exit 1
 fi
 
+# One ball source only: --tracker swaps test_ball for the real tracker, and
+# the regression publisher defaults ON with the tracker (clean 60 Hz fit) and
+# OFF with the virtual ball (which is already clean and 30 Hz).
+if [[ "$USE_TRACKER" == "true" ]]; then
+  USE_TEST_BALL=false
+  USE_BALL_REGRESSION="${USE_BALL_REGRESSION:-true}"
+else
+  USE_TEST_BALL=true
+  USE_BALL_REGRESSION="${USE_BALL_REGRESSION:-false}"
+fi
+
 launch_args=(
   "robot_ip:=$ROBOT_IP"
   "reverse_ip:=$REVERSE_IP"
@@ -246,11 +317,24 @@ launch_args=(
   "enable_command:=$ENABLE_COMMAND"
   "publish_frame:=$PUBLISH_FRAME"
   "trigger_mode:=$TRIGGER_MODE"
+  "use_test_ball:=$USE_TEST_BALL"
+  "use_tracker:=$USE_TRACKER"
+  "use_ball_regression:=$USE_BALL_REGRESSION"
+  "ball_radius_mm:=$BALL_RADIUS_MM"
+  "camera_calibration_file:=$CAMERA_CALIBRATION_FILE"
   "launch_latency_report:=$LAUNCH_LATENCY_REPORT"
   "publish_hoop_tf:=$PUBLISH_HOOP_TF"
-  "hoop_xyz:=$HOOP_XYZ"
-  "hoop_quat:=$HOOP_QUAT"
+  "hold_side:=$HOLD_SIDE"
 )
+
+# Only pass explicit hoop overrides: a non-empty hoop_xyz/hoop_quat overrides
+# the hold_side-derived TF for BOTH sides in the launch.
+if [[ -n "$HOOP_XYZ" ]]; then
+  launch_args+=("hoop_xyz:=$HOOP_XYZ")
+fi
+if [[ -n "$HOOP_QUAT" ]]; then
+  launch_args+=("hoop_quat:=$HOOP_QUAT")
+fi
 
 if [[ -n "$MODEL_PATH" ]]; then
   launch_args+=("model_path:=$MODEL_PATH")
@@ -266,8 +350,8 @@ cat <<EOF
 Launching UR3e virtual-ball test stack:
   robot_ip=$ROBOT_IP reverse_ip=$REVERSE_IP fake_hardware=$USE_FAKE_HARDWARE
   ui=http://$UI_HOST:$UI_PORT launch_ui=$LAUNCH_UI launch_moveit=$LAUNCH_MOVEIT
-  virtual_ball trigger_mode=$TRIGGER_MODE publish_frame=$PUBLISH_FRAME
-  enable_command=$ENABLE_COMMAND
+  ball_source=$([[ "$USE_TRACKER" == "true" ]] && echo "REAL TRACKER (radius ${BALL_RADIUS_MM}mm, regression=$USE_BALL_REGRESSION)" || echo "virtual test ball") trigger_mode=$TRIGGER_MODE publish_frame=$PUBLISH_FRAME
+  hold_side=$HOLD_SIDE enable_command=$ENABLE_COMMAND
 
 Stop with Ctrl+C in this terminal, or run:
   $(basename "$0") --stop

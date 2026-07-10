@@ -1,6 +1,6 @@
 # Live Catch Loop
 
-> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; package README, 2026-06-29; ball regression publisher, 2026-07-03
+> Sources: live-catch architecture, 2026-06-30; implementation status, 2026-06-30; package README, 2026-06-29; ball regression publisher, 2026-07-03; measurement-purity and anisotropic depth model, 2026-07-09
 > Raw: [Live-catch architecture](../../docs/Robot_Control/ur3e_live_catch_architecture.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Package README](../../src/ur3e_live_catch/README.md); [Ball regression](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression.py)
 
 ## Overview
@@ -32,7 +32,12 @@ topics, to reduce latency.
   regression publisher between the raw ball source and the live node
   (`use_ball_regression` launch arg): fits x/y linear + z fixed-gravity in
   `base_link`, publishes a smoothed/predicted `BallState` with fit-derived
-  velocity at 60 Hz once the start gate passes ("Isaac pop parity").
+  velocity at 60 Hz once the start gate passes ("Isaac pop parity"). Since
+  2026-07-09 it accepts measurements only (`min_input_confidence`, drops
+  coasted producer points) and weights camera-frame samples anisotropically
+  along the camera ray (`depth_sigma_scale`; Trace depth is ~10x noisier than
+  lateral), so realistic depth noise neither blocks the pop nor causes
+  in-flight rejections.
 - `observation.py`: 33-D policy observation.
 - `policy_runtime.py`: TorchScript/ONNX runtime.
 - `action.py`: policy action mapping.

@@ -98,6 +98,15 @@ ball_regression_node:
     units: "m"
     rate_hz: 60.0                 # output cadence, matches the policy loop
     max_stamp_age_s: 0.5          # drop raw samples with skewed stamps
+    # Measurement purity: producer samples below this confidence are ignored
+    # (the tracker's coast points are extrapolations, not measurements).
+    min_input_confidence: 1.0
+    # Anisotropic noise model: Trace depth (1/trail-width) is much noisier
+    # than the lateral image position. sigma_depth = scale * sigma_lateral
+    # along the camera->ball ray; rms/gates then read in lateral-equivalent
+    # metres. 1.0 = isotropic (legacy). 8.0 matches ~mm lateral vs ~cm depth;
+    # tune on real captures with scripts/replay_ball_regression.py.
+    depth_sigma_scale: 8.0
     gravity_m_s2: 9.81            # FIXED in the fit (z quadratic term)
     max_samples: 240              # full-flight buffer (flights last 0.3-0.5 s)
     irls_iterations: 2            # robust (Cauchy/MAD) reweighting passes
@@ -136,7 +145,13 @@ ball_regression_node:
     coast_conf_tau_s: 0.15        # confidence decay time constant while coasting
     max_flight_s: 1.0
     refractory_s: 0.3             # ignore samples after flight end (floor bounces)
-    lead_time_s: 0.0              # evaluate the fit at now + lead (prediction)
+    # Evaluate the fit at now + lead (latency compensation). PROVISIONAL 0.2 s
+    # (operator request 2026-07-09) until latency_report measures the real
+    # event->command latency (plan 2.4) — 0.2 s is large vs a 0.3-0.5 s flight:
+    # the published ball runs ~0.2 s ahead and the flight ground-terminates
+    # that much earlier. Live-tunable without restart:
+    #   ros2 param set /ball_regression_node lead_time_s 0.05
+    lead_time_s: 0.2
 
 ball_float32_adapter:
   ros__parameters:
@@ -158,3 +173,8 @@ ball_tracking_cpp:
     # width, stamped at the sample's own event time); "circle" = legacy
     # per-detection circle-fit pose (code default for bare ros2 run).
     pose_source: "trace"
+    # Lead/coast prediction sliders, ROS-initialized. Keep 0 (measurements
+    # only) when the regression node consumes the output; the launch pins them
+    # to 0 under use_ball_regression regardless of these values.
+    trace_lead_ms: 0.0
+    trace_hold_ms: 0.0

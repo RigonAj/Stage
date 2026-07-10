@@ -63,6 +63,14 @@ public:
         default_camera_calibration_ = camera.calibration;
         ui.SetBallRadiusMm(
             static_cast<float>(this->declare_parameter<double>("ball_radius_mm", 20.0)));
+        // Lead/coast prediction, initialized from ROS parameters (defaults 0 =
+        // publish measurements only). The live-catch launch pins both to 0
+        // when the regression node consumes the output; the Option-panel
+        // sliders still allow live tuning in standalone runs.
+        ui.SetTraceLeadMs(
+            static_cast<float>(this->declare_parameter<double>("trace_lead_ms", 0.0)));
+        ui.SetTraceHoldMs(
+            static_cast<float>(this->declare_parameter<double>("trace_hold_ms", 0.0)));
         gui.SetTracePoseCalibration(camera.calibration, ui.BallRadiusMm());
         // Which 3D estimate feeds BallState: "circle" = per-detection circle-fit
         // pose (legacy algorithm, historical default); "trace" = outlier-filtered

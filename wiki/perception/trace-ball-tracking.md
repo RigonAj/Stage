@@ -1,7 +1,7 @@
 # Trace Ball Tracking
 
-> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09
-> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Trace analysis](../../src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Gui accumulation/panel](../../src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/Gui.h); [Live-catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml)
+> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09; GUI-framerate publish cadence analysis, 2026-07-09
+> Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Trace analysis](../../src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Gui accumulation/panel](../../src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/Gui.h); [Live-catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md)
 
 ## Overview
 
@@ -44,8 +44,13 @@ metres for `BallState.position`. The published frame is `camera_optical`
 
 ## Pipeline — Front-End (per timer tick, `Camera.cpp`)
 
-The ROS node timer runs at ~1 kHz (`publisher_member_function.cpp`,
-`timer_callback`). Each tick:
+The ROS node timer is declared at 1 ms (`publisher_member_function.cpp`,
+`timer_callback`), but the loop is **effectively capped at the GUI framerate**:
+`gui.Update()` renders with raylib `SetTargetFPS(60)` and `EndDrawing` blocks
+to hold the frame time, serializing acquisition, Trace analysis AND
+publication behind the render (2026-07-09 analysis). A heavy render (3D view,
+high `Max Events`) therefore drops the `BallState` cadence below 60 Hz;
+decoupling publish from render is an open task. Each tick:
 
 1. **Acquire** — `NextBatch()` pulls the next DVXplorer event batch (or the
    reader feeds recorded `.h5` events in file mode). Live batches are often
@@ -236,8 +241,8 @@ re-publish.
 | Slider | Default | Effect |
 |---|---|---|
 | `Trace ms` (`trace_memory_ms`) | 40 | Accumulation window length. Longer = more trail/support and better prediction, more mid-window lag. |
-| `Lead ms` (`trace_lead_ms`) | 0 | Publish position predicted at latest + lead. |
-| `Hold ms` (`trace_hold_ms`) | 0 | Coast duration after the ball leaves the ROI. |
+| `Lead ms` (`trace_lead_ms`, ROS param since 2026-07-09) | 0 | Publish position predicted at latest + lead. Pinned to 0 by the live-catch launch when `use_ball_regression:=true`: the measurement layer must not publish extrapolated points into the regression. |
+| `Hold ms` (`trace_hold_ms`, ROS param since 2026-07-09) | 0 | Coast duration after the ball leaves the ROI. Pinned to 0 under the regression for the same reason (coast points carry confidence < 1 and the regression drops them anyway). |
 | `ROI x/y/w/h` | full frame | Fixed work-ROI; crop out the robot region. |
 | `Max Events` | 1000 | Display/clustering event budget. Lower it if the UI lags; Trace accumulation still uses the full filtered stream. |
 | `Ball radius (mm)` (`ball_radius_mm`, ROS launch arg + Option panel) | 20 | Physical ball radius used by the width→depth model; initialized at launch, live-adjustable, clamped 1–100 mm. |
@@ -270,6 +275,12 @@ re-publish.
 - **Single-mover assumption**: without a follow-window, two movers inside the
   ROI corrupt the ribbon — keep the ROI tight around the ball's path and off the
   robot.
+- **Publish cadence tied to the render loop**: fresh-window publishes happen at
+  most once per GUI frame (`SetTargetFPS(60)`, dedup by latest sample stamp),
+  irregularly; coast publishes in bursts every callback. `ball_state_raw` is
+  therefore NOT a guaranteed 60 Hz — the downstream `ball_regression_node`
+  resamples it to a clean 60 Hz `ball_state` and is the recommended feed for
+  the policy ([Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md)).
 
 ## Main Code
 

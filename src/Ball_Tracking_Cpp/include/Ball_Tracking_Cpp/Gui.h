@@ -802,6 +802,11 @@ public:
     // width->depth conversion, so it must match the real ball.
     float BallRadiusMm() const { return std::clamp(ball_radius_mm, 1.0f, 100.0f); }
     void SetBallRadiusMm(float radiusMm) { ball_radius_mm = std::clamp(radiusMm, 1.0f, 100.0f); }
+    // ROS-parameter initialization of the lead/coast prediction sliders. The
+    // launch forces both to 0 when the ballistic-regression node consumes the
+    // output: the measurement layer must never publish extrapolated points.
+    void SetTraceLeadMs(float leadMs) { trace_lead_ms = std::clamp(leadMs, 0.0f, 500.0f); }
+    void SetTraceHoldMs(float holdMs) { trace_hold_ms = std::clamp(holdMs, 0.0f, 3000.0f); }
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
     bool TraceEdgeRefineEnabled() const { return trace_edge_refine_enabled; }
