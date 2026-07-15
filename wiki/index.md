@@ -90,7 +90,7 @@ Agent workflow, commands and wiki maintenance.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, hold_side:=left bring-up, `--tracker` real-perception stack option, package tests, Isaac sim2real export/check commands (current Isaac repo path, FT_TASK left variant) and wiki maintenance commands. | 2026-07-09 |
+| [Testing And Commands](operations/testing-and-commands.md) | Build, report compilation, launch, live-catch fake/real bring-up status, hold_side:=left bring-up, `--tracker` real-perception stack option, package tests, Isaac sim2real export/check commands (current Isaac repo path, FT_TASK left variant) and wiki maintenance commands. | 2026-07-15 |
 | [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md) | Operator checklist before enable_command, ±2π gate, staged v_safe_scale ramp-up, monitoring and the current lead=0/timestamp-latency warning. | 2026-07-10 |
 | [Wiki Maintenance](operations/wiki-maintenance.md) | Ingest/query/lint rules adapted from the Karpathy LLM wiki pattern. | 2026-06-29 |
 | [Source Document Map](operations/source-document-map.md) | How the raw Markdown docs are combined or split into compiled wiki concepts. | 2026-06-29 |

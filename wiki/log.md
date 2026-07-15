@@ -440,6 +440,20 @@
   hand-eye capture no longer requires a phone reload after every PC-side
   restart. Live non-fullscreen layouts remain rejected.
 
+## [2026-07-15] ingest | Documented LaTeX report compilation
+
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: `README.md` and `docs/latex_compilation.md`; documented the
+  user-local TeX Live 2026 installation, optional Ubuntu packages and the
+  `compile-report` workflow for `Stage_summary.tex`.
+
+## [2026-07-15] lint | LaTeX compilation documentation pass
+
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Result: lint still reports the pre-existing broken link
+  `wiki/calibration/camera-and-handeye-calibration.md` ->
+  `recordings/mire_calibration/handeye/handeye_samples_20260710_140949.json`.
+
 ## [2026-07-10] ingest | Dated physical hand-eye transform example
 
 - Updated: [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md)

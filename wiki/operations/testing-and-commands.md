@@ -1,13 +1,29 @@
 # Testing And Commands
 
-> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02; hold-side variant and Isaac repo path check, 2026-07-06; stack --tracker option, 2026-07-09
-> Raw: [README](../../README.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Stack script](../../scripts/launch_ur3e_virtual_ball_stack.sh)
+> Sources: repository README, 2026-07-15; LaTeX compilation guide, 2026-07-15; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02; hold-side variant and Isaac repo path check, 2026-07-06; stack --tracker option, 2026-07-09
+> Raw: [README](../../README.md); [LaTeX compilation guide](../../docs/latex_compilation.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Stack script](../../scripts/launch_ur3e_virtual_ball_stack.sh)
 
 ## Environment
 
 ```bash
 source env.sh
 ```
+
+## Internship Report
+
+The report is compiled from the repository root with `latexmk`. A user-local
+TeX Live installation works without `sudo`; add its binaries before sourcing
+`env.sh` so that the `compile-report` alias can find `latexmk`:
+
+```bash
+export PATH="$HOME/.local/texlive/2026/bin/x86_64-linux:$PATH"
+source env.sh
+compile-report
+```
+
+This generates `Stage_summary.pdf` and removes the temporary LaTeX files. See
+the [LaTeX compilation guide](../../docs/latex_compilation.md) for installation
+alternatives and the direct script command.
 
 ## Build
 

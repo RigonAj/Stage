@@ -152,6 +152,41 @@ run
 
 `build` sets up the ROS environment and builds the C++ package with colcon; `run` starts the `talker` node with the GUI.
 
+## Internship Report (LaTeX)
+
+`Stage_summary.tex` is compiled from the repository root with the provided
+script. It uses `latexmk` and produces `Stage_summary.pdf` while removing the
+temporary LaTeX files afterwards. Detailed notes are in
+[`docs/latex_compilation.md`](docs/latex_compilation.md).
+
+For a user-local installation without `sudo` (Ubuntu/Linux):
+
+```bash
+TMP_DIR="$(mktemp -d)"
+curl -fsSL https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz \
+  | tar -xz -C "$TMP_DIR"
+INSTALLER_DIR="$(find "$TMP_DIR" -maxdepth 1 -type d -name 'install-tl-*' -print -quit)"
+"$INSTALLER_DIR/install-tl" --no-interaction --scheme=minimal \
+  --texdir="$HOME/.local/texlive/2026" --persistent-downloads
+rm -rf "$TMP_DIR"
+```
+
+Add the local TeX Live binaries to the current shell, then compile:
+
+```bash
+export PATH="$HOME/.local/texlive/2026/bin/x86_64-linux:$PATH"
+source env.sh
+compile-report
+```
+
+Alternatively, on Ubuntu with administrative access:
+
+```bash
+sudo apt update
+sudo apt install latexmk texlive-latex-base texlive-latex-extra \
+  texlive-pictures texlive-lang-french texlive-fonts-recommended lmodern
+```
+
 ## UR3e Live-Catch Inference Stack
 
 Build the robot UI and live-catch packages before launching the inference stack:
