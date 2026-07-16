@@ -59,7 +59,7 @@
     Soutien financier & Bourse CIR ITPS, International Research Centre on Innovative Transportation and Production Systems, I-SITE CAP 20-25 \\
     Tuteurs de stage & Sébastien Lengagne, Céline Teulière, Antonio Claudio de Sousa dos Santos Filho \\
     Tuteur académique & Benoit Thuilot \\
-    Date de soutenance & à compléter \\
+    Date de soutenance & 4 septembre 2026 \\
   \end{tabular}
   \vfill
   {\small Soutien financier\par}
@@ -84,7 +84,7 @@
 \phantomsection
 \addcontentsline{toc}{chapter}{Remerciements}
 
-Je tiens tout d'abord à remercier mon tuteur de stage, Sébastien Lengagne, ainsi que Céline Teulière, pour leur encadrement, leur disponibilité, leur aide et les échanges qui ont orienté mon travail tout au long du stage. Leur accompagnement m'a permis de mieux comprendre les enjeux de la perception robotique rapide et de situer mon travail dans un contexte de recherche appliquée.
+Je tiens tout d'abord à remercier mon tuteur de stage, Sébastien Lengagne, ainsi que Céline Teulière et Antonio Claudio de Sousa dos Santos Filho, pour leur encadrement, leur disponibilité, leur aide et les échanges qui ont orienté mon travail tout au long du stage. Leur accompagnement m'a permis de mieux comprendre les enjeux de la perception robotique rapide et de situer mon travail dans un contexte de recherche appliquée.
 
 Je remercie également mon tuteur académique, Benoit Thuilot, pour le suivi du stage et pour les conseils apportés dans la structuration du travail. Je remercie plus largement les membres de l'Institut Pascal et les personnes avec lesquelles j'ai pu échanger au cours du stage, pour leur accueil.
 
@@ -100,7 +100,7 @@ Ce travail a bénéficié du soutien du Centre International de Recherche \emph{
 
 Ce rapport présente le travail réalisé pendant un stage effectué du 1\textsuperscript{er} avril 2026 au 25 juillet 2026 à l'Institut Pascal, unité mixte de recherche de l'Université Clermont Auvergne et du CNRS. Le sujet porte sur la détection et l'estimation 3D d'une balle rapide à partir d'une caméra événementielle DVXplorer, dans la perspective d'une tâche robotique d'interception.
 
-L'objectif du stage est de construire une chaîne de perception capable de transformer le flux d'événements produit par la caméra en une position de balle exploitable par un robot. Cette information doit être suffisamment rapide et cohérente pour préparer une interception, tout en tenant compte des contraintes de calibration, de bruit et de mouvement rapide. Le rapport présente le contexte de l'organisme d'accueil, l'environnement de travail, les choix algorithmiques, les étapes de calibration, les résultats obtenus et les perspectives d'intégration avec la partie robotique.
+L'objectif du stage est de construire une chaîne de perception capable de transformer le flux d'événements produit par la caméra en une position de balle exploitable par un robot. Cette information doit être suffisamment rapide et cohérente pour préparer une interception, tout en tenant compte des contraintes de calibration, de bruit et de mouvement rapide. Le rapport présente le contexte de l'organisme d'accueil, l'environnement de travail, les choix algorithmiques, les étapes de calibration intrinsèque et extrinsèque, la validation en simulation, les premiers essais d'intégration sur le robot UR3e réel et les perspectives pour l'interception complète.
 
 \textbf{Mots clés:} caméra événementielle, robotique, estimation 3D, détection de balle, ROS 2, Isaac Lab, apprentissage par renforcement.
 
@@ -126,15 +126,15 @@ Les objectifs généraux du projet sont les suivants:
   \item identifier les limites de la chaîne avant son intégration complète sur le robot réel.
 \end{itemize}
 
-Ce rapport commence par présenter l'organisme d'accueil, l'Université Clermont Auvergne et l'Institut Pascal, puis l'architecture générale du projet. La suite est organisée autour de deux grands blocs techniques: la perception événementielle de la balle, puis l'intégration robotique avec la calibration et le contrôle. Le rapport se termine par un bilan technique et personnel du stage.
+Ce rapport commence par présenter l'organisme d'accueil, l'Université Clermont Auvergne et l'Institut Pascal, ainsi que l'axe de recherche et les équipes qui ont accueilli et encadré le stage. La suite est organisée autour de deux grands blocs techniques. Le premier concerne la perception événementielle de la balle: l'environnement de travail, la chaîne de traitement, la calibration de la caméra, les deux méthodes d'estimation 3D développées et leur validation en simulation. Le second concerne l'intégration robotique: la calibration entre la caméra et le robot, l'apprentissage d'une politique d'interception en simulation et les premiers essais réalisés sur le robot réel. Le rapport se termine par un bilan technique et personnel du stage.
 
 \chapter{Présentation de l'organisme d'accueil}
 
 \section{Université Clermont Auvergne}
 
-L'Université Clermont Auvergne (UCA) est un établissement public expérimental d'enseignement supérieur et de recherche. La nouvelle UCA, sous ce statut, est née le 1\textsuperscript{er} janvier 2021 dans le prolongement de la structuration du site clermontois et de la démarche I-SITE CAP 20-25. Elle regroupe des activités de formation, de recherche et d'innovation sur plusieurs sites à Clermont-Ferrand et dans la région Auvergne.
+L'Université Clermont Auvergne (UCA) est un établissement public expérimental d'enseignement supérieur et de recherche. Elle est issue de deux étapes récentes de structuration du site clermontois: la fusion, en 2017, de l'université Blaise-Pascal et de l'université d'Auvergne, les deux universités historiques de Clermont-Ferrand, puis l'adoption du statut d'établissement public expérimental. La nouvelle UCA, sous ce statut, est née le 1\textsuperscript{er} janvier 2021 dans le prolongement de cette structuration et de la démarche I-SITE CAP 20-25; elle intègre notamment Clermont Auvergne INP, qui regroupe les écoles d'ingénieurs du site. Elle rassemble des activités de formation, de recherche et d'innovation sur plusieurs sites à Clermont-Ferrand et dans la région Auvergne.
 
-L'UCA indique rassembler environ 36\,000 étudiants, 350 formations et 47 structures de recherche. Elle s'organise autour de six instituts qui regroupent les composantes de formation et de recherche par grands domaines. Cette organisation permet de faire le lien entre enseignement supérieur, laboratoires, plateformes expérimentales et partenaires socio-économiques.
+L'UCA indique rassembler environ 36\,000 étudiants, 350 formations et 47 structures de recherche \cite{uca-universite}. Elle s'organise autour de six instituts qui regroupent les composantes de formation et de recherche par grands domaines. Cette organisation permet de faire le lien entre enseignement supérieur, laboratoires, plateformes expérimentales et partenaires socio-économiques.
 
 \begin{table}[H]
   \centering
@@ -162,31 +162,9 @@ L'UCA indique rassembler environ 36\,000 étudiants, 350 formations et 47 struct
 
 L'Institut Pascal est l'unité de recherche dans laquelle le stage s'est déroulé. Il s'agit d'une unité mixte de recherche et de formation interdisciplinaire, UMR 6602, placée sous la tutelle de l'Université Clermont Auvergne et du CNRS, avec le CHU de Clermont-Ferrand comme tutelle secondaire. L'institut est également membre de Clermont Auvergne INP. Il couvre les sciences de l'ingénierie du site clermontois: génie des procédés, mécanique, robotique, physique des sciences de l'information et ingénierie de la santé.
 
-L'Institut Pascal rassemble environ 400 personnes et se positionne sur des recherches allant du développement de connaissances fondamentales jusqu'à leur intégration dans des systèmes. Ses domaines d'application principaux sont la mobilité et les transports, l'usine et l'industrie 4.0, ainsi que l'hôpital du futur. Cette orientation explique la place importante donnée aux systèmes robotiques, à la perception, à la commande et aux plateformes expérimentales.
+L'Institut Pascal a été créé le 1\textsuperscript{er} janvier 2012 par le regroupement de laboratoires du site clermontois, dont le LASMEA pour l'électronique, l'automatique et la vision, le LaMI pour la mécanique et les ingénieries et le LGCB pour le génie chimique et biochimique, avec l'objectif de rassembler des compétences complémentaires en sciences de l'ingénierie et de favoriser des projets interdisciplinaires \cite{institut-pascal}. Ce périmètre s'est ensuite élargi par fusions successives, en 2017 puis en 2021, jusqu'à couvrir l'essentiel des sciences de l'ingénierie et des systèmes du site. L'institut rassemble environ 400 personnes, dont près de 150 enseignants-chercheurs et chercheurs et presque autant de doctorants \cite{institut-pascal}, et se positionne sur des recherches allant du développement de connaissances fondamentales jusqu'à leur intégration dans des systèmes. Ses domaines d'application principaux sont la mobilité et les transports, l'usine et l'industrie 4.0, ainsi que l'hôpital du futur. Cette orientation explique la place importante donnée aux systèmes robotiques, à la perception, à la commande et aux plateformes expérimentales.
 
-\section{Historique et implantation}
-
-La structuration de l'Institut Pascal s'est faite progressivement à partir de regroupements de laboratoires du site clermontois. L'objectif était de rassembler des compétences complémentaires dans les sciences de l'ingénierie et des systèmes, afin de favoriser des projets interdisciplinaires. Cette logique se retrouve aujourd'hui dans l'organisation de l'institut, où les axes scientifiques couvrent des domaines différents mais reliés par des problématiques communes: modéliser, percevoir, commander, fabriquer et valider expérimentalement.
-
-Le stage a eu lieu sur le campus universitaire des Cézeaux, à Aubière. Ce campus regroupe plusieurs composantes scientifiques et techniques de l'UCA, ainsi que des laboratoires et plateformes utiles aux travaux en robotique. L'implantation sur un même site facilite les échanges entre étudiants, enseignants-chercheurs, doctorants, ingénieurs et personnels techniques. La \figref{fig:implantation-uca-ip} situe schématiquement l'Institut Pascal dans cet environnement.
-
-\begin{figure}[H]
-  \centering
-  \begin{tikzpicture}[
-      site/.style={draw, rounded corners=2pt, align=center, minimum width=4.0cm, minimum height=1.15cm},
-      arrow/.style={-{Latex[length=3mm]}, thick}
-    ]
-    \node[site] (uca) {Université Clermont Auvergne\\Clermont-Ferrand};
-    \node[site, below left=1.1cm and 1.1cm of uca] (cezeaux) {Campus des Cézeaux\\Aubière};
-    \node[site, below right=1.1cm and 1.1cm of uca] (sites) {Autres sites UCA\\Auvergne};
-    \node[site, below=1.1cm of cezeaux] (ip) {Institut Pascal\\UMR 6602 UCA/CNRS};
-    \draw[arrow] (uca) -- (cezeaux);
-    \draw[arrow] (uca) -- (sites);
-    \draw[arrow] (cezeaux) -- (ip);
-  \end{tikzpicture}
-  \caption{Implantation schématique de l'organisme d'accueil dans l'environnement UCA.}
-  \label{fig:implantation-uca-ip}
-\end{figure}
+Le stage a eu lieu sur le campus universitaire des Cézeaux, à Aubière. Ce campus regroupe plusieurs composantes scientifiques et techniques de l'UCA, ainsi que des laboratoires et plateformes utiles aux travaux en robotique, ce qui facilite les échanges entre étudiants, enseignants-chercheurs, doctorants, ingénieurs et personnels techniques.
 
 \section{Activités et axes de recherche}
 
@@ -201,28 +179,9 @@ Ces activités s'appuient sur cinq axes de recherche:
   \item Thérapies Guidées par l'Image (TGI).
 \end{itemize}
 
-\section{Domaines d'application et partenariats}
+Ces activités se déclinent dans trois grands domaines d'application. Le premier concerne la mobilité et les transports des biens et des personnes, avec des systèmes plus sûrs, plus autonomes ou plus efficaces s'appuyant sur la mécanique, la robotique, la perception et la modélisation. Le deuxième concerne l'usine et l'industrie 4.0, avec des problématiques de production, d'automatisation, de robotique collaborative, de contrôle et d'interaction humain-machine. Le troisième concerne l'hôpital du futur, dans lequel l'image, les systèmes guidés et les dispositifs d'assistance jouent un rôle important.
 
-Les activités de l'Institut Pascal peuvent être regroupées autour de trois grands domaines d'application. Le premier concerne la mobilité et les transports des biens et des personnes. Il s'agit par exemple de concevoir des systèmes plus sûrs, plus autonomes ou plus efficaces, en s'appuyant sur la mécanique, la robotique, la perception et la modélisation. Le deuxième domaine concerne l'usine et l'industrie 4.0, avec des problématiques de production, d'automatisation, de robotique collaborative, de contrôle et d'interaction humain-machine. Le troisième domaine concerne l'hôpital du futur, dans lequel l'image, les systèmes guidés et les dispositifs d'assistance jouent un rôle important.
-
-\begin{table}[H]
-  \centering
-  \caption{Lecture synthétique des domaines d'application de l'Institut Pascal.}
-  \label{tab:domaines-ip}
-  \begin{tabular}{L{0.28\textwidth}L{0.62\textwidth}}
-    \toprule
-    Domaine & Exemples d'enjeux scientifiques et techniques \\
-    \midrule
-    Mobilité et transports & Perception de l'environnement, robotique mobile, modélisation de systèmes dynamiques, sécurité et autonomie. \\
-    Usine et industrie 4.0 & Robotique collaborative, automatisation, contrôle, instrumentation, procédés et optimisation industrielle. \\
-    Hôpital du futur & Imagerie, dispositifs guidés, assistance au geste, reconstruction 3D et systèmes d'aide à la décision. \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-Les bénéficiaires et partenaires de ces activités sont des équipes académiques, des établissements publics, des industriels, des collectivités, des doctorants et des étudiants. Les résultats produits prennent la forme de publications scientifiques, de prototypes, de logiciels, de bancs expérimentaux, de méthodes de modélisation, de jeux de données et de transferts vers des partenaires.
-
-L'Institut Pascal participe également à des dispositifs de partenariat structurants. Il est notamment associé à des projets soutenus par des opérateurs de recherche comme l'ANR, l'Union Européenne, la Région Auvergne-Rhône-Alpes ou le programme CAP 20-25. Il est aussi impliqué dans des collaborations avec le monde industriel, par exemple autour de FactoLab, laboratoire commun lié à Michelin et orienté vers l'industrie du futur. Cette proximité avec des problématiques réelles explique que les travaux de recherche ne se limitent pas à des modèles théoriques: ils cherchent souvent à produire des solutions testables sur des plateformes expérimentales.
+L'Institut Pascal participe également à des dispositifs de partenariat structurants, associés à des projets soutenus par l'ANR, l'Union Européenne, la Région Auvergne-Rhône-Alpes ou le programme CAP 20-25, ainsi qu'à des collaborations industrielles comme FactoLab, laboratoire commun lié à Michelin. Cette proximité avec des problématiques réelles explique que les travaux de recherche ne se limitent pas à des modèles théoriques: ils cherchent souvent à produire des solutions testables sur des plateformes expérimentales.
 
 \section{Centre International de Recherche CIR ITPS}
 
@@ -236,7 +195,7 @@ Le stage présenté dans ce rapport a bénéficié d'une bourse CIR ITPS. Cette 
 
 \section{Organisation interne}
 
-La structure interne de l'Institut Pascal repose sur des axes scientifiques qui correspondent à de grands ensembles de compétences. Cette organisation permet de regrouper les chercheurs et personnels techniques par disciplines, tout en favorisant des projets transversaux. Dans le cas de mon stage, la perception événementielle mobilise plusieurs notions complémentaires: géométrie 3D, traitement du signal, programmation temps réel, robotique et apprentissage. Le sujet se rattache principalement à l'axe ISPR, avec un lien vers l'équipe MACCS pour la robotique et la commande, et vers l'équipe ComSee pour la vision artificielle. La \figref{fig:organigramme-ip-stage} donne une lecture simplifiée de cette organisation et de la place du stage.
+La structure interne de l'Institut Pascal repose sur des axes scientifiques qui correspondent à de grands ensembles de compétences. Cette organisation permet de regrouper les chercheurs et personnels techniques par disciplines, tout en favorisant des projets transversaux. Dans le cas de mon stage, la perception événementielle mobilise plusieurs notions complémentaires: géométrie 3D, traitement du signal, programmation temps réel, robotique et apprentissage. Le sujet se rattache à l'axe ISPR, présenté en détail dans la section suivante avec les deux équipes qui ont encadré le travail. La \figref{fig:organigramme-ip-stage} donne une lecture simplifiée de cette organisation et de la place du stage.
 
 \begin{figure}[H]
   \centering
@@ -266,15 +225,47 @@ La structure interne de l'Institut Pascal repose sur des axes scientifiques qui 
   \label{fig:organigramme-ip-stage}
 \end{figure}
 
+\section{Unité d'accueil: l'axe ISPR et les équipes MACCS et ComSee}
+\label{sec:unite-accueil}
+
+\subsection{L'axe ISPR}
+
+Le stage s'est déroulé au sein de l'axe Image, Systèmes de Perception, Robotique (ISPR), l'un des cinq axes de recherche présentés plus haut. Cet axe travaille dans le domaine de la perception et de la vision artificielle pour la commande de systèmes robotiques. Son objectif scientifique est de développer des concepts théoriques, méthodologiques et architecturaux permettant à un système de percevoir son environnement, d'en extraire une information fiable, puis d'utiliser cette information pour agir \cite{ispr-axe}. Le sujet du stage, transformer le flux d'une caméra événementielle en une position de balle exploitable pour une interception robotique, est une déclinaison directe de cette question.
+
+L'axe regroupe des enseignants-chercheurs, des chercheurs, des ingénieurs et des doctorants, et il est organisé en quatre thèmes complémentaires \cite{ispr-axe}:
+
+\begin{itemize}
+  \item ComSee (\emph{Computers that See}), consacré à la vision par ordinateur;
+  \item DREAM, consacré aux architectures embarquées et aux systèmes multi-capteurs;
+  \item MACCS (Modélisation, Autonomie et Contrôle dans les Systèmes Complexes), consacré à la modélisation et à la commande des systèmes robotiques;
+  \item PerSyst, consacré aux systèmes de perception.
+\end{itemize}
+
+Ces thèmes partagent des applications communes: véhicules et robots mobiles autonomes, robotique de manipulation, perception embarquée et interaction avec l'environnement. Ils s'appuient sur les plateformes expérimentales du site clermontois et s'inscrivent dans les programmes structurants de l'institut et du CIR ITPS évoqués précédemment, pour lesquels la robotique autonome est une thématique fédératrice.
+
+\subsection{Les équipes MACCS et ComSee}
+
+Au sein de l'axe ISPR, le stage a été co-encadré par des chercheurs de deux équipes dont les compétences correspondent aux deux volets du sujet.
+
+L'équipe MACCS s'intéresse principalement à la modélisation et à la commande de robots mobiles et de manipulateurs, à la vision robotique, à l'asservissement visuel et aux comportements anticipatifs \cite{ip-maccs}. C'est la composante robotique du stage: le choix du robot UR3e, la définition de la tâche d'interception, l'apprentissage de la politique de commande et les contraintes de sécurité des essais réels relèvent de cette culture scientifique. Mon tuteur principal, Sébastien Lengagne, appartient à cette équipe, de même qu'Antonio Claudio de Sousa dos Santos Filho, doctorant de l'équipe qui a participé à mon encadrement et dont les travaux servent de point de départ à mon stage. Mon tuteur académique, Benoit Thuilot, en est également membre; ses travaux portent sur la commande et la robotique mobile \cite{ip-maccs}.
+
+L'équipe ComSee est consacrée à la vision par ordinateur \cite{ip-comsee}. Ses travaux portent notamment sur la calibration de capteurs et la reconstruction 3D sans contact, la reconnaissance et le suivi temps réel de motifs visuels, y compris par apprentissage, et la localisation de véhicules mobiles. La partie perception du stage, détection de la balle dans le flux événementiel, estimation 3D et calibration de la caméra, s'inscrit directement dans cette thématique, encadrée par Céline Teulière.
+
+Ces travaux de thèse \cite{antonio-stage} portaient sur la vision, l'apprentissage par renforcement et le transfert de compétences pour une tâche robotique dynamique. Ils m'ont assuré une continuité concrète: un objectif applicatif déjà défini, un robot disponible et de premières analyses sur lesquelles m'appuyer.
+
+\subsection{Environnement humain et technique du stage}
+
+Au quotidien, le stage s'est déroulé sur le campus des Cézeaux, dans l'environnement d'expérimentation robotique de l'équipe, où sont installés le robot UR3e et la caméra événementielle DVXplorer utilisés pour les essais réels. L'environnement matériel mis à disposition comprend le bras manipulateur et son contrôleur, la caméra événementielle, un poste de travail pour le développement et le traitement temps réel, une station de calcul équipée d'un processeur graphique pour la simulation et l'apprentissage par renforcement, ainsi qu'un accès à l'impression 3D pour la fabrication des pièces mécaniques du projet, comme le support de mire et le support du filet décrits dans la suite du rapport.
+
+L'environnement humain est celui d'une équipe de recherche: enseignants-chercheurs, doctorants et stagiaires partagent les mêmes espaces, ce qui facilite les échanges informels et l'entraide technique. Le suivi du stage s'est fait par des points réguliers avec les encadrants, au cours desquels les résultats intermédiaires étaient discutés et les orientations suivantes décidées. Cette double appartenance, commande côté MACCS et vision côté ComSee, s'est révélée particulièrement adaptée au sujet, qui exige en permanence de raisonner sur les deux bouts de la chaîne à la fois.
+
+Enfin, l'unité n'est pas isolée dans l'institut: les questions mécaniques du projet, comme la conception des supports imprimés en 3D ou la rigidité du montage de calibration, touchent aux compétences de l'axe M3G, et l'institut anime des programmes transversaux qui relient les axes entre eux autour des machines et robots intelligents \cite{institut-pascal}.
+
 \subsection*{Positionnement du sujet dans l'organisme}
 
-Le sujet de stage se situe au croisement de plusieurs objectifs de l'Institut Pascal: développer des méthodes de perception, les tester sur des systèmes rapides, et préparer leur utilisation dans un contexte robotique. Il ne s'agit pas uniquement de détecter une balle dans une image. Il faut produire une estimation 3D robuste, temporellement cohérente, suffisamment rapide et compatible avec une commande robotique.
+Le sujet de stage se situe au croisement de plusieurs objectifs de l'Institut Pascal: développer des méthodes de perception, les tester sur des systèmes rapides, et préparer leur utilisation dans un contexte robotique. Il ne s'agit pas uniquement de détecter une balle dans une image. Il faut produire une estimation 3D robuste, temporellement cohérente, suffisamment rapide et compatible avec une commande robotique. Le sujet est ainsi représentatif d'une problématique de mécatronique: le résultat dépend à la fois du capteur, de l'algorithme, du modèle géométrique, du logiciel temps réel et du système robotique.
 
-Ce positionnement justifie l'utilisation d'une caméra événementielle. Pour une tâche d'interception, une caméra classique peut fournir trop peu d'informations temporelles ou introduire une latence trop importante. La caméra événementielle répond à cette difficulté en transmettant uniquement les variations de luminosité, avec une résolution temporelle plus fine. En revanche, elle impose de changer les méthodes de traitement: on ne travaille plus sur une image dense, mais sur un nuage d'événements irrégulier, bruité et dépendant du mouvement.
-
-Le stage contribue donc à une étape intermédiaire essentielle entre la perception brute et la robotique. Les méthodes développées doivent transformer un flux d'événements en une trajectoire exploitable. Cette trajectoire pourra ensuite être calibrée dans le repère du robot, filtrée, prédite et utilisée par une politique d'interception ou un contrôleur. Le sujet est ainsi représentatif d'une problématique de mécatronique: le résultat dépend à la fois du capteur, de l'algorithme, du modèle géométrique, du logiciel temps réel et du système robotique.
-
-\chapter{Architecture générale du projet}
+\chapter{Perception événementielle de la balle}
 
 \section{Poste occupé et étude confiée}
 
@@ -291,6 +282,8 @@ Les tâches principales ont été les suivantes:
   \item identifier les besoins de calibration entre la caméra et le robot;
   \item préparer le lien avec une politique d'interception apprise en simulation.
 \end{itemize}
+
+L'annexe~\ref{ann:realisations} donne un récapitulatif synthétique, par thème, de l'ensemble des réalisations techniques produites pendant le stage.
 
 \section{Environnement technique}
 
@@ -360,17 +353,11 @@ La chaîne de traitement transforme le flux brut d'événements en une position 
 \end{figure}
 
 \section{Calibration intrinsèque et repère caméra}
+\label{sec:calibration-intrinseque}
 
-Cette section présente la calibration intrinsèque utilisée par la chaîne de perception. Elle décrit le modèle optique de la caméra et les paramètres nécessaires pour passer d'une position image à une estimation 3D dans le repère caméra. La calibration entre la caméra et le robot est traitée plus loin, dans la partie consacrée à l'intégration robotique.
+Les méthodes de perception présentées dans la suite de ce chapitre convertissent une détection dans l'image en une position 3D exprimée dans le repère de la caméra. Cette conversion repose entièrement sur le modèle optique du capteur: les focales \(f_x\) et \(f_y\), le centre optique \((c_x, c_y)\) et les coefficients de distorsion. Une erreur sur ces paramètres se propage directement aux positions 3D estimées, en particulier à la profondeur, qui dépend linéairement de la focale. Avant tout essai quantitatif, il faut donc estimer ces paramètres: c'est le rôle de la calibration intrinsèque. La calibration entre la caméra et le robot, qui répond à un besoin différent, est traitée plus loin, dans la partie consacrée à l'intégration robotique.
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.82\textwidth]{images/Calibration/Calibration.png}
-  \caption{Calibration intrinsèque de la caméra événementielle.}
-  \label{fig:calibration-intrinseque}
-\end{figure}
-
-La première calibration intrinsèque de la caméra réelle donne les paramètres suivants:
+La difficulté vient de la nature du capteur. Les méthodes classiques détectent les coins d'un échiquier dans des images complètes, alors qu'une caméra événementielle ne produit que des changements locaux de luminosité. Une première calibration a été réalisée avec les outils officiels d'iniVation \cite{inivation-docs}, qui reconstruisent une image à partir des événements accumulés: il faut alors bouger constamment la mire d'échiquier devant la caméra afin de générer assez d'événements pour obtenir une image exploitable, comme le montre la \figref{fig:calibration-intrinseque}. Cette première calibration donne les paramètres suivants, avec une erreur de reprojection d'environ \(0.486~\text{px}\):
 
 \[
 f_x \approx 761~\text{px}, \quad
@@ -379,26 +366,53 @@ c_x \approx 305~\text{px}, \quad
 c_y \approx 196~\text{px}.
 \]
 
-Cette première calibration a été réalisée avec les outils officiels d'iniVation \cite{inivation-docs}. Comme la caméra événementielle ne fournit pas directement une image complète, il a fallu bouger constamment la mire d'échiquier devant la caméra afin de générer assez d'événements pour reconstruire une image exploitable. L'erreur de calibration obtenue est d'environ \(0.486~\text{px}\).
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{images/Calibration/Calibration.png}
+  \caption{Première calibration intrinsèque par échiquier: les coins de la mire sont recherchés dans une image reconstruite à partir des événements accumulés pendant le déplacement de la mire.}
+  \label{fig:calibration-intrinseque}
+\end{figure}
 
-Le bruit observé avec cette méthode a ensuite motivé la création d'un nouvel outil Python, avec un principe de calibration pensé directement pour une caméra événementielle. Au lieu de chercher les coins d'un échiquier dans une image reconstruite, la méthode utilise une mire affichée sur un écran, qui produit volontairement des variations de luminosité. Les disques lumineux clignotent sur fond noir, ce qui génère des événements nets aux positions utiles. Cette approche est aussi plus simple à mettre en œuvre et moins contraignante expérimentalement, car elle évite de devoir déplacer continuellement une mire physique pour produire suffisamment d'événements. Elle a également réduit de manière importante le temps nécessaire pour réaliser une calibration exploitable.
+Cette procédure fonctionne, mais elle présente deux limites: l'image reconstruite reste bruitée, et l'acquisition est contraignante puisque la mire doit être déplacée en continu pendant toute la calibration. Ces limites ont motivé le développement d'un nouvel outil de calibration dont le principe est pensé directement pour une caméra événementielle. L'idée est d'inverser le problème: au lieu de créer des variations de luminosité en déplaçant une mire imprimée, c'est la mire elle-même qui produit ces variations. Des disques lumineux clignotant sur fond noir sont affichés sur un écran; chaque changement d'état génère des événements nets exactement aux positions utiles, sans aucun mouvement. Cette approche est plus simple à mettre en œuvre, et elle a réduit de manière importante le temps nécessaire pour réaliser une calibration exploitable.
 
-Le principe est séparé en deux étapes. Le premier programme Python affiche une mire de \(4 \times 5\) disques, avec un disque manquant et un disque plus grand servant d'ancre. Cela donne \(19\) points détectables et limite les ambiguïtés d'orientation. Pendant une courte fenêtre temporelle, les événements positifs et négatifs sont accumulés dans une image d'activité. Les zones actives sont ensuite seuillées, regroupées en composantes connexes, puis chaque centre de disque est estimé par barycentre pondéré de l'activité. Comme la taille physique de l'écran est connue, chaque disque possède aussi une coordonnée 3D connue dans le plan de la mire, exprimée en millimètres. Chaque acquisition fournit alors les correspondances entre les points de la mire \((X,Y,0)\) et leurs centres image \((u,v)\).
+La mire retenue, illustrée par la \figref{fig:calibration-mire-concept}, est une grille de \(4 \times 5\) disques rendue volontairement asymétrique par un disque manquant et un disque plus grand servant d'ancre, soit \(19\) points détectables. Cette asymétrie lève les ambiguïtés d'orientation: quelle que soit la pose de l'écran, chaque disque détecté peut être associé sans confusion à un point physique connu de la mire. Un léger gradient radial de luminosité peut aussi être appliqué aux disques, afin d'adoucir l'activité générée à leurs bords tout en gardant un centre bien marqué.
 
-Le second programme Python regroupe ces observations et lance la calibration OpenCV \cite{opencv-calib3d}. Il estime la matrice intrinsèque, les coefficients de distorsion et l'erreur de reprojection. Une sélection robuste peut être activée: plusieurs sous-ensembles d'observations sont testés, les vues cohérentes sont conservées, puis la calibration finale est relancée sur les vues retenues. Cette étape permet d'écarter automatiquement des captures où l'association de points est moins fiable.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\textwidth]{images/Calibration/mire_concept.png}
+  \caption{Mire de calibration affichée sur un écran: grille asymétrique de disques lumineux, avec un disque manquant et un disque plus grand servant d'ancre. Les disques clignotent pour générer une activité événementielle exploitable par la caméra DVXplorer \cite{inivation-dvxplorer}.}
+  \label{fig:calibration-mire-concept}
+\end{figure}
 
-Dans l'essai conservé, la calibration robuste utilise \(32\) observations de mire sur une image \(640 \times 480\), avec une erreur RMS d'environ \(0.189~\text{px}\). Elle produit notamment:
+La détection des disques repose sur une image d'activité. Pendant une courte fenêtre temporelle \(\mathcal{W}\) entourant un changement d'état de la mire, les événements positifs et négatifs sont accumulés pixel par pixel:
 
 \[
-f_x \approx 526.3~\text{px}, \quad
-f_y \approx 525.6~\text{px}, \quad
-c_x \approx 330.9~\text{px}, \quad
-c_y \approx 242.2~\text{px}.
+A(u,v) = \sum_{k \in \mathcal{W}} \mathbf{1}\left[(u_k,v_k)=(u,v)\right].
+\]
+
+Les zones où l'activité est forte correspondent aux disques qui viennent de changer de luminosité. Elles sont seuillées puis regroupées en composantes connexes, et le centre de chaque disque est estimé par barycentre pondéré de l'activité:
+
+\[
+u_c = \frac{\sum u\,A(u,v)}{\sum A(u,v)}, \qquad
+v_c = \frac{\sum v\,A(u,v)}{\sum A(u,v)}.
+\]
+
+Ce centre est plus stable qu'un simple centre de boîte englobante, car il exploite la distribution complète de l'activité du blob. Comme la taille physique de l'écran est connue, chaque disque possède aussi une coordonnée 3D connue dans le plan de la mire, exprimée en millimètres. Chaque acquisition fournit alors les correspondances entre les points de la mire \((X,Y,0)\) et leurs centres image \((u,v)\). Cette mire et cette détection sont réutilisées au chapitre suivant pour la calibration entre la caméra et le robot.
+
+Les observations accumulées sur plusieurs poses de la mire alimentent ensuite la calibration OpenCV \cite{opencv-calib3d}, qui estime la matrice intrinsèque, les coefficients de distorsion et l'erreur de reprojection. Une sélection robuste peut être activée: plusieurs sous-ensembles d'observations sont testés, les vues cohérentes sont conservées, puis la calibration finale est relancée sur les vues retenues. Cette étape permet d'écarter automatiquement des captures où l'association de points est moins fiable.
+
+Dans l'essai conservé, la calibration robuste utilise \(17\) observations de mire sur une image \(640 \times 480\), avec une erreur RMS d'environ \(0.15~\text{px}\). Elle produit notamment:
+
+\[
+f_x \approx 526.4~\text{px}, \quad
+f_y \approx 525.8~\text{px}, \quad
+c_x \approx 331.3~\text{px}, \quad
+c_y \approx 242.7~\text{px}.
 \]
 
 Ces valeurs ne doivent pas être comparées directement à celles de la calibration par échiquier présentée plus haut. Entre les deux essais, la monture de la caméra a été touchée, ce qui a pu modifier le réglage mécanique et donc les paramètres observés. L'écart entre les deux calibrations ne permet donc pas, à lui seul, de conclure qu'une méthode est meilleure que l'autre; il montre surtout que les deux acquisitions ne correspondent pas exactement au même état matériel.
 
-Les coefficients de distorsion radiale estimés sont environ \(k_1=-0.403\) et \(k_2=0.167\), avec une distorsion tangentielle fixée à zéro et \(k_3\) fixé à zéro. Le résultat est ensuite sauvegardé dans un format compatible avec la chaîne de suivi de balle.
+Les coefficients de distorsion radiale estimés sont environ \(k_1=-0.402\) et \(k_2=0.170\), avec une distorsion tangentielle fixée à zéro et \(k_3\) fixé à zéro. Le résultat est ensuite directement utilisé par la chaîne de perception, notamment pour la correction de distorsion et le calcul de la profondeur.
 
 Un test complémentaire a été ajouté pour vérifier que cette calibration ne fonctionne pas seulement sur la mire utilisée pour l'estimation. Une cible carrée à quatre points est affichée dans plusieurs positions et tailles, puis les distances reconstruites sont comparées aux dimensions réelles de l'écran. Sur l'exemple retenu, les quatre carrés sont validés, avec une erreur RMS d'environ \(0.13~\text{px}\) et une erreur moyenne d'espacement d'environ \(0.16~\text{mm}\). La \figref{fig:intrinsic-mire-script} montre le montage utilisé et une sortie de validation.
 
@@ -417,6 +431,8 @@ Un test complémentaire a été ajouté pour vérifier que cette calibration ne 
   \label{fig:intrinsic-mire-script}
 \end{figure}
 
+Cette procédure étant rapide à rejouer, la caméra a été recalibrée avant les essais réels sur le robot: la calibration utilisée pour les essais du chapitre suivant atteint une erreur RMS d'environ \(0{,}149~\text{px}\) avec \(17\) observations de mire.
+
 Pour les essais en simulation, la caméra virtuelle est définie avec une calibration synthétique différente:
 
 \[
@@ -424,8 +440,6 @@ f_x = f_y = 520~\text{px}, \quad
 c_x = 320~\text{px}, \quad
 c_y = 240~\text{px}.
 \]
-
-\chapter{Perception événementielle de la balle}
 
 \section{Méthode par circle fitting}
 
@@ -437,18 +451,53 @@ Une caméra événementielle ne transmet pas des images complètes à fréquence
 e = (x, y, t, p),
 \]
 
-où \(x\) et \(y\) sont les coordonnées du pixel, \(t\) est le timestamp, et \(p\) est la polarité. La polarité indique le signe de la variation de luminosité: une polarité positive correspond à une augmentation locale de luminosité, tandis qu'une polarité négative correspond à une diminution. Pour une balle en mouvement, ces polarités apparaissent souvent de manière structurée autour du contour de l'objet. Elles peuvent donc aider à vérifier qu'un groupe d'événements ressemble bien au passage d'une balle plutôt qu'à du bruit isolé.
+où \(x\) et \(y\) sont les coordonnées du pixel, \(t\) est le timestamp, et \(p\) est la polarité. La polarité indique le signe de la variation de luminosité: une polarité positive correspond à une augmentation locale de luminosité, tandis qu'une polarité négative correspond à une diminution. Pour une balle en mouvement, ces polarités apparaissent souvent de manière structurée autour du contour de l'objet. Elles peuvent donc aider à vérifier qu'un groupe d'événements ressemble bien au passage d'une balle plutôt qu'à du bruit isolé. La \figref{fig:event-ball-zoom} montre à quoi ressemble cette sortie pour une balle réelle: seuls les pixels dont la luminosité vient de changer produisent un événement, et les deux polarités se répartissent de part et d'autre du contour selon le sens du déplacement.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.3\textwidth]{\detokenize{images/Algo_Cricle_Fitting/ball_events_zoom.png}}
+  \caption{Sortie typique de la caméra événementielle pour une balle en mouvement, agrandie autour de la balle. Chaque pixel coloré est un événement: en bleu les événements positifs (augmentation de luminosité), en rouge les événements négatifs (diminution). La balle se déplaçant vers la droite, son bord avant assombrit le fond et génère les événements négatifs, tandis que son bord arrière le découvre et génère les événements positifs.}
+  \label{fig:event-ball-zoom}
+\end{figure}
 
 Ce fonctionnement est particulièrement intéressant pour une balle rapide. La caméra ne produit des données que là où quelque chose change, ce qui réduit fortement la quantité d'information à traiter. En revanche, si l'on accumule trop longtemps les événements, la balle ne forme plus un contour circulaire instantané: elle laisse une trace allongée. L'algorithme doit donc conserver assez d'événements pour être robuste, mais pas au point de mélanger plusieurs positions de la balle.
 
 \subsection{Pipeline de l'algorithme}
 
-La méthode par \emph{circle fitting} considère que la balle est une sphère dont la projection dans l'image peut être approchée par un cercle. L'idée est de détecter les événements appartenant probablement à la balle, d'ajuster un cercle sur ces points, puis d'utiliser le rayon apparent pour calculer la profondeur. La \figref{fig:algo-fitting-circle} résume les étapes principales de cette chaîne de traitement.
+La méthode par \emph{circle fitting} considère que la balle est une sphère dont la projection dans l'image peut être approchée par un cercle. L'idée est de détecter les événements appartenant probablement à la balle, d'ajuster un cercle sur ces points, puis d'utiliser le rayon apparent pour calculer la profondeur. La \figref{fig:algo-fitting-circle} résume les étapes principales de cette chaîne de traitement et l'information produite par chacune; une version détaillée des étapes internes est donnée dans l'annexe~\ref{ann:pipeline-circle}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{\detokenize{images/Algo_Cricle_Fitting/Algo_Fitting_Circle.png}}
-  \caption{Pipeline général de l'algorithme de détection 3D par circle fitting.}
+  \resizebox{\textwidth}{!}{%
+  \begin{tikzpicture}[
+      font=\small,
+      block/.style={draw, rounded corners=2pt, align=center, text width=3.0cm, minimum height=1.2cm},
+      source/.style={block, fill=blue!8},
+      prep/.style={block, fill=cyan!8},
+      estimate/.style={block, fill=orange!12},
+      output/.style={block, fill=green!10},
+      arrow/.style={-{Latex[length=2.5mm]}, thick},
+      flow/.style={font=\footnotesize\itshape, midway, above}
+    ]
+    \node[source] (events) at (0,0) {Flux d'événements\\caméra ou séquence};
+    \node[prep] (window) at (5.8,0) {Filtrage du bruit et\\fenêtre récente};
+    \node[prep] (sample) at (11.6,0) {Échantillonnage et\\correction de distorsion};
+    \node[prep] (dbscan) at (17.4,0) {Regroupement spatial\\DBSCAN};
+
+    \node[estimate] (circle) at (17.4,-3.2) {Ajustement du cercle et\\validations: polarités,\\symétrie, points aberrants};
+    \node[output] (pose) at (11.6,-3.2) {Pose 3D par\\projection inverse};
+    \node[output] (traj) at (5.8,-3.2) {Régression de trajectoire\\et publication ROS 2};
+
+    \draw[arrow] (events) -- node[flow] {événements bruts} (window);
+    \draw[arrow] (window) -- node[flow] {événements récents} (sample);
+    \draw[arrow] (sample) -- node[flow] {points corrigés} (dbscan);
+    \draw[arrow] (dbscan) -- node[flow, right=1mm, align=left] {clusters candidats} (circle);
+    \draw[arrow] (circle) -- node[flow] {cercle \((u,v,r)\)} (pose);
+    \draw[arrow] (pose) -- node[flow] {position 3D} (traj);
+    \draw[arrow, dashed] (circle.east) -- ++(1.0,0) |- (dbscan.east);
+    \node[font=\footnotesize\itshape, anchor=west, align=left] at (20.15,-1.6) {validation échouée:\\cluster suivant};
+  \end{tikzpicture}}
+  \caption{Pipeline simplifié de la détection 3D par circle fitting. Chaque flèche porte l'information transmise à l'étape suivante; lorsqu'une validation échoue, le candidat est rejeté et le cluster suivant est examiné.}
   \label{fig:algo-fitting-circle}
 \end{figure}
 
@@ -575,55 +624,7 @@ Y(t) = a_y t + b_y,
 Z(t) = a_z t^2 + b_z t + c_z.
 \]
 
-Pour une coordonnée linéaire \(q \in \{X,Y\}\), les coefficients sont calculés directement à partir des sommes accumulées:
-
-\[
-D = n \sum t_i^2 - \left(\sum t_i\right)^2,
-\]
-
-\[
-a = \frac{n \sum t_i q_i - \left(\sum t_i\right)\left(\sum q_i\right)}{D},
-\qquad
-b = \frac{\sum q_i - a \sum t_i}{n}.
-\]
-
-Pour la coordonnée quadratique \(Z\), le modèle est:
-
-\[
-q(t) = a t^2 + b t + c.
-\]
-
-Les grandeurs intermédiaires utilisées sont:
-
-\[
-S_{11} = \sum t_i^2 - \frac{\left(\sum t_i\right)^2}{n},
-\qquad
-S_{12} = \sum t_i^3 - \frac{\left(\sum t_i\right)\left(\sum t_i^2\right)}{n},
-\]
-
-\[
-S_{22} = \sum t_i^4 - \frac{\left(\sum t_i^2\right)^2}{n},
-\qquad
-S_{q1} = \sum t_i q_i - \frac{\left(\sum q_i\right)\left(\sum t_i\right)}{n},
-\]
-
-\[
-S_{q2} = \sum t_i^2 q_i - \frac{\left(\sum q_i\right)\left(\sum t_i^2\right)}{n},
-\qquad
-D_q = S_{22}S_{11} - S_{12}^2.
-\]
-
-Les coefficients quadratiques sont alors:
-
-\[
-b = \frac{S_{q1}S_{22} - S_{q2}S_{12}}{D_q},
-\qquad
-a = \frac{S_{q2}S_{11} - S_{q1}S_{12}}{D_q},
-\]
-
-\[
-c = \bar{q} - b\bar{t} - a\overline{t^2}.
-\]
+Les coefficients de ces modèles sont estimés par moindres carrés. Les régressions ne sont pas résolues par un système matriciel général recalculé à chaque itération: comme la forme des modèles est connue à l'avance, les sommes nécessaires (\(\sum t_i\), \(\sum t_i^2\), \(\sum t_i q_i\), etc.) sont accumulées au fil des mesures, et les coefficients s'en déduisent directement avec peu d'opérations. Ce choix garde la boucle de traitement rapide, ce qui est essentiel pour une application temps réel. Les expressions complètes des coefficients sont données dans l'annexe~\ref{ann:regressions}.
 
 Une version pondérée peut aussi être activée. Elle garde les mêmes modèles, mais remplace les sommes simples par des sommes pondérées. Le poids d'un point combine un terme de récence et un terme robuste basé sur le résidu:
 
@@ -638,9 +639,7 @@ où \(r_i\) est le résidu par rapport à la première régression et \(s\) est 
 
 Ce choix correspond au mouvement attendu d'un projectile: deux axes sont modélisés de manière linéaire, tandis que l'axe soumis principalement à la gravité est modélisé par une parabole. L'objectif n'est pas seulement d'afficher les points mesurés; la trajectoire sert surtout de filtre temporel pour stabiliser la suite de positions 3D et vérifier que les poses successives restent cohérentes.
 
-La méthode n'utilise pas une résolution matricielle générale pour ces régressions à chaque boucle. Elle accumule directement les sommes nécessaires aux modèles linéaire et quadratique. Ce choix est volontaire: la boucle doit rester rapide, et ces modèles simples peuvent être mis à jour avec peu d'opérations. Construire et résoudre une matrice complète à chaque itération serait plus général, mais moins adapté à une application temps réel où la forme du modèle est déjà connue.
-
-La position de la balle est envoyée en boucle sur le topic ROS 2 \cite{ros2-docs} à partir des poses 3D validées. La trajectoire 3D sert donc principalement à lisser et filtrer la perception, plutôt qu'à remplacer la mesure instantanée par une prédiction longue.
+La position de la balle est publiée en continu dans ROS 2 \cite{ros2-docs} à partir des poses 3D validées. La trajectoire 3D sert donc principalement à lisser et filtrer la perception, plutôt qu'à remplacer la mesure instantanée par une prédiction longue.
 
 \subsection{Limite principale: sensibilité du rayon}
 
@@ -670,13 +669,13 @@ Cela signifie qu'une erreur de \(1~\text{px}\) sur le rayon produit environ \(Z/
     \(Z\) & \(r\) image & Largeur & Erreur \(1~\text{px}\) rayon & Erreur \(1~\text{px}\) largeur \\
     \midrule
     \(1.00~\text{m}\) & \(15.23~\text{px}\) & \(30.45~\text{px}\) & \(6.6~\text{cm}\) & \(3.3~\text{cm}\) \\
-    \(1.47~\text{m}\) & \(10.36~\text{px}\) & \(20.71~\text{px}\) & \(14.2~\text{cm}\) & \(7.1~\text{cm}\) \\
+    \(1.50~\text{m}\) & \(10.15~\text{px}\) & \(20.31~\text{px}\) & \(14.8~\text{cm}\) & \(7.4~\text{cm}\) \\
     \(2.00~\text{m}\) & \(7.61~\text{px}\) & \(15.23~\text{px}\) & \(26.3~\text{cm}\) & \(13.1~\text{cm}\) \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-À \(1.47~\text{m}\), le rayon apparent vaut seulement environ \(10.36~\text{px}\). Une erreur d'un pixel sur ce rayon représente donc environ \(14~\text{cm}\) d'erreur de profondeur. Si l'on raisonne sur une largeur ou un diamètre, l'erreur d'un pixel correspond à environ \(7~\text{cm}\). Cette sensibilité explique pourquoi le circle fitting devient insuffisant pour une balle rapide.
+À \(1.50~\text{m}\), le rayon apparent vaut seulement environ \(10.15~\text{px}\). Une erreur d'un pixel sur ce rayon représente donc environ \(15~\text{cm}\) d'erreur de profondeur. Si l'on raisonne sur une largeur ou un diamètre, l'erreur d'un pixel correspond à environ \(7~\text{cm}\). Cette sensibilité explique pourquoi le circle fitting devient insuffisant pour une balle rapide.
 
 En pratique, la caméra événementielle ne voit pas toujours un contour circulaire net. Lors d'un mouvement rapide, les événements s'étalent dans le temps et forment une traînée. Le cercle ajusté peut alors surestimer le rayon apparent. Comme \(Z\) est inversement proportionnel à \(r\), un rayon surestimé donne une balle artificiellement trop proche.
 
@@ -784,306 +783,25 @@ L'idée est donc de mesurer la largeur réelle de la trace, puis d'utiliser cett
   \label{fig:trace-test}
 \end{figure}
 
-\subsection{Construction des événements de trace}
+\subsection{Reconstruction du ruban}
 
-La première étape consiste à construire un nuage d'événements correspondant uniquement à la balle. La méthode utilise pour cela une fenêtre mobile centrée sur la trajectoire 2D déjà estimée. Lorsque la parabole 2D de suivi est disponible, la fenêtre n'est pas un simple disque: elle devient un couloir autour de la courbe prédite. Un événement est conservé s'il se trouve assez près de cette trajectoire, avec une tolérance latérale adaptée au rayon apparent de la balle.
+La reconstruction transforme le nuage d'événements en un ruban dont la largeur peut être mesurée. Elle suit cinq étapes principales; les critères précis et les expressions utilisées à chaque étape sont détaillés dans l'annexe~\ref{ann:trace-details}.
 
-Les événements sont accumulés pendant une courte mémoire temporelle. Cette accumulation est importante: une fenêtre trop courte donne une trace incomplète, alors qu'une mémoire trop longue mélange plusieurs positions et peut épaissir artificiellement le ruban. Le nombre total d'événements accumulés est aussi limité pour éviter une perte de performances. Les polarités peuvent être gardées ensemble ou filtrées séparément, ce qui permet d'isoler le front ou l'arrière de la balle si une polarité est plus stable dans une scène donnée.
+\begin{enumerate}
+  \item \emph{Sélection des événements.} Une fenêtre mobile suit la trajectoire 2D déjà estimée et accumule, sur une courte mémoire temporelle, les événements proches de la courbe prédite. La trace analysée ne contient ainsi, en principe, que la balle.
+  \item \emph{Repère local par PCA.} Le centre du nuage est estimé de manière robuste, puis une analyse en composantes principales (PCA) fournit la direction principale de la trace, corrigée sur des sous-parties temporelles lorsque la trajectoire est courbe. Chaque événement est alors projeté dans ce repère et repéré par deux coordonnées: \(s\), sa position le long de la direction principale, et \(h\), sa position sur la perpendiculaire à cette direction, c'est-à-dire dans l'épaisseur du ruban. Cette transformation convertit un problème 2D difficile en une série de problèmes 1D.
+  \item \emph{Découpage en bins spatiaux.} La trace est découpée en petites portions le long de \(s\). Dans chaque bin, il ne reste plus qu'un problème 1D: les valeurs \(h\) des événements du bin forment un paquet sur l'axe perpendiculaire, dont il faut trouver les deux extrémités. Chaque bin fournit ainsi une estimation locale unique: la position du bord bas, celle du bord haut, et la ligne médiane qui en est déduite. La largeur locale du ruban est la distance entre les deux bords, mesurée perpendiculairement à la direction de la trace.
+  \item \emph{Détection de bords soutenus.} Pour trouver ces extrémités, prendre simplement le minimum et le maximum des valeurs \(h\) serait trop sensible au bruit: un seul événement isolé deviendrait un faux bord et fausserait la largeur, donc la profondeur. L'axe \(h\) est donc balayé depuis chaque extrémité, et un bord n'est accepté que s'il est soutenu par suffisamment d'événements voisins.
+  \item \emph{Filtrage et courbes du ruban.} Les bins incohérents avec la tendance générale du ruban ou avec leurs voisins sont rejetés. Les trois courbes du ruban, bord bas, ligne médiane et bord haut, sont ensuite ajustées sur les échantillons restants par des régressions locales pondérées, ce qui garde le ruban régulier sans lui imposer une forme globale unique.
+\end{enumerate}
 
-\subsection{Repère local de la trace}
-
-Une fois les événements sélectionnés, la méthode cherche le repère naturel du ruban. Le centre \(c\) est estimé de manière robuste avec les médianes des coordonnées, puis les points trop éloignés sont retirés à partir d'un quantile radial. Une PCA globale fournit ensuite la direction principale \(d\) de la trace. Pour les trajectoires courbes, cette direction est corrigée par des PCA temporelles calculées sur plusieurs sous-parties de la trace. L'orientation finale combine la direction globale, la moyenne pondérée des directions locales et le déplacement temporel entre le début et la fin de la trace.
-
-Le repère local est défini par:
-
-\[
-s = (p - c) \cdot d,
-\qquad
-h = (p - c) \cdot n,
-\]
-
-où \(p\) est un événement image et \(n=(-d_y,d_x)\) est la normale à la trace. La coordonnée \(s\) donne la position le long de la trajectoire, tandis que \(h\) donne la position dans l'épaisseur du ruban. Cette transformation convertit un problème 2D difficile en une série de problèmes 1D: pour chaque petite zone découpée le long de \(s\), il faut trouver les deux bords sur l'axe \(h\).
-
-Il faut distinguer deux notions qui peuvent facilement être confondues. Les sous-parties temporelles utilisées pendant l'estimation de l'orientation servent à stabiliser la direction principale \(d\) lorsque la trace est courbe. Elles ne correspondent pas directement aux mesures de largeur. Une fois le repère \((s,h)\) construit, la méthode travaille surtout avec des \emph{bins spatiaux} le long de \(s\). Chaque bin spatial regroupe les événements qui se trouvent dans une petite portion de la trace, puis produit une estimation locale du bord bas, du bord haut et de la ligne médiane. La \figref{fig:trace-ribbon} montre cette reconstruction dans l'interface.
+La \figref{fig:trace-ribbon} montre le résultat de cette reconstruction dans l'interface de visualisation.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.78\textwidth]{\detokenize{images/Algo_Trace/Screenshot from 2026-06-04 17-32-17.png}}
   \caption{Vue Trace dans l'interface pour une balle lancée vers la caméra. Les événements récents sont colorés selon le temps, puis le ruban est reconstruit avec un bord haut, une ligne médiane, un bord bas et plusieurs mesures de largeur.}
   \label{fig:trace-ribbon}
-\end{figure}
-
-
-\subsection{Découpage spatial et estimation locale de la largeur}
-
-La trace n'est pas découpée ici en tranches temporelles, mais en bins spatiaux selon la coordonnée \(s\). Un bin spatial correspond à une petite portion du ruban le long de sa direction principale. Dans chaque bin, on récupère toutes les valeurs \(h\), c'est-à-dire les positions des événements dans l'épaisseur du ruban.
-
-Le point important est le suivant: un bin spatial ne produit pas plusieurs estimations indépendantes de largeur. Il produit une seule estimation locale composée de trois valeurs:
-
-\[
-(s_j,h_{\text{bas},j}),
-\qquad
-(s_j,h_{\text{milieu},j}),
-\qquad
-(s_j,h_{\text{haut},j}).
-\]
-
-Autrement dit, pour le bin \(j\), l'algorithme cherche où se trouve le bord bas, où se trouve le bord haut, puis il en déduit le milieu:
-
-\[
-h_{\text{milieu},j}
-=
-\frac{h_{\text{haut},j}+h_{\text{bas},j}}{2}.
-\]
-
-On obtient donc une série d'échantillons le long de la trace:
-
-\[
-\begin{array}{c|c|c|c|c}
-\text{bin} & s_j & h_{\text{bas},j} & h_{\text{milieu},j} & h_{\text{haut},j} \\
-\hline
-1 & s_1 & h_{\text{bas},1} & h_{\text{milieu},1} & h_{\text{haut},1} \\
-2 & s_2 & h_{\text{bas},2} & h_{\text{milieu},2} & h_{\text{haut},2} \\
-3 & s_3 & h_{\text{bas},3} & h_{\text{milieu},3} & h_{\text{haut},3} \\
-\vdots & \vdots & \vdots & \vdots & \vdots
-\end{array}
-\]
-
-
-
-La position \(s_j\) d'un bin est généralement prise comme une valeur représentative des coordonnées \(s\) des événements du bin, par exemple la médiane. Les valeurs \(h_{\text{bas},j}\) et \(h_{\text{haut},j}\) sont ensuite estimées à partir de la distribution des valeurs \(h\) contenues dans ce bin.
-
-\subsection{Détection des bords soutenus}
-
-La recherche des bords est faite séparément dans chaque bin spatial. La recherche devient donc un problème 1D: à partir de toutes les valeurs \(h\) présentes dans le bin, il faut déterminer où commence et où finit le paquet d'événements.
-
-Une solution naïve consisterait à prendre directement le minimum et le maximum des valeurs \(h\):
-
-\[
-h_{\text{bas}} = \min(h_i),
-\qquad
-h_{\text{haut}} = \max(h_i).
-\]
-
-Cette solution est volontairement évitée, car elle serait trop sensible au bruit. Un seul événement isolé très loin du ruban pourrait devenir un faux bord et agrandir artificiellement la largeur. L'algorithme cherche donc des \emph{bords soutenus}: un bord n'est accepté que s'il possède assez de voisins proches sur l'axe \(h\).
-
-Le nombre de voisins requis est calculé à partir du nombre d'événements dans le bin:
-
-\[
-\text{localSupport}
-=
-\operatorname{clamp}
-\left(
-\frac{N}{\text{supportDiv}},
-\text{supportMin},
-\text{supportMax}
-\right).
-\]
-
-Les valeurs finies de \(h\) sont triées. Pour le bord bas, le balayage part du plus petit \(h\). Pour chaque candidat \(h_k\), on compte combien de valeurs se trouvent dans une fenêtre locale de rayon \(r_s\) vers la droite. Le premier candidat qui atteint le support devient le bord bas:
-
-\[
-h_{\text{bas}}
-=
-\min h_k
-\quad \text{tel que} \quad
-\#\{h_i \in [h_k, h_k+r_s]\}
-\geq \text{localSupport}.
-\]
-
-Pour le bord haut, le principe est symétrique. Le balayage part des grandes valeurs de \(h\), puis vérifie combien de voisins se trouvent dans une fenêtre locale vers la gauche:
-
-\[
-h_{\text{haut}}
-=
-\max h_k
-\quad \text{tel que} \quad
-\#\{h_i \in [h_k-r_s, h_k]\}
-\geq \text{localSupport}.
-\]
-
-La \figref{fig:trace-support-edges} illustre cette logique. Les points isolés aux extrémités peuvent avoir une valeur \(h\) plus faible ou plus forte que les autres, mais ils ne sont pas retenus comme bords s'ils ne possèdent pas assez de voisins proches.
-
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{images/Algo_Trace/Trace_Support_Edges.png}
-  \caption{Recherche locale des bords par support sur l'axe \(h\). Les événements isolés sont ignorés; seuls les extrêmes possédant assez de voisins proches deviennent \(h_{\text{bas}}\) et \(h_{\text{haut}}\).}
-  \label{fig:trace-support-edges}
-\end{figure}
-
-
-Après la détection des deux extrêmes soutenus, une petite correction extérieure est appliquée. Elle compense le fait que les événements correspondent aux centres des pixels et que le bord apparent peut se trouver légèrement au-delà du dernier événement soutenu. Cette correction est bornée:
-
-\[
-\delta_b
-=
-\operatorname{clamp}
-\left(
-(h_{\text{haut}}-h_{\text{bas}})\,\text{borderRatio},
-0,
-1.5~\text{px}
-\right).
-\]
-
-Les bords finaux deviennent:
-
-\[
-h_{\text{bas}} \leftarrow h_{\text{bas}}-\delta_b,
-\qquad
-h_{\text{haut}} \leftarrow h_{\text{haut}}+\delta_b.
-\]
-
-La coupe est ensuite validée. Elle est rejetée si elle ne contient pas assez d'événements finis, si \(h_{\text{haut}}\leq h_{\text{bas}}\), si la largeur brute est trop faible, ou si le nombre d'événements compris entre les deux bords finaux reste inférieur au support minimal demandé. La largeur locale du bin \(j\) est alors:
-
-\[
-w_j = h_{\text{haut},j} - h_{\text{bas},j}.
-\]
-
-\subsection{Filtrage des estimations locales}
-
-Après l'étape précédente, chaque bin valide fournit une estimation locale. Cette estimation peut toutefois être mauvaise si un bin contient peu d'événements, si un bruit structuré tombe dans la coupe, ou si le ruban est localement mal couvert. L'algorithme applique donc un filtrage de cohérence avant de construire les courbes finales du ruban.
-
-Le filtrage se fait en deux niveaux. Le premier niveau vérifie la cohérence globale du ruban. À partir des lignes médianes détectées dans les bins, un modèle polynomial simple est ajusté, linéaire ou quadratique selon le nombre d'échantillons disponibles. Ce modèle ne sert pas encore à tracer définitivement le ruban. Il sert d'abord à repérer les bins incohérents: un bin est rejeté si sa ligne médiane est trop éloignée de la tendance générale ou si sa largeur locale est trop différente de la largeur médiane du ruban.
-
-Le second niveau vérifie la cohérence locale. Pour chaque bin \(j\), on regarde les bins voisins et prédit localement la valeur attendue du bord haut, du bord bas, de la ligne médiane et de la largeur. L'idée est simple: si les bins voisins disent que le ruban passe à un certain endroit avec une certaine largeur, le bin courant ne doit pas créer un saut brutal sans raison.
-
-On peut résumer cette étape par une prédiction locale:
-
-\[
-\hat{h}_{\text{bas},j},
-\qquad
-\hat{h}_{\text{milieu},j},
-\qquad
-\hat{h}_{\text{haut},j},
-\qquad
-\hat{w}_j.
-\]
-
-La prédiction est construite à partir d'une petite régression locale sur les échantillons voisins. Ce ne sont donc pas seulement les voisins immédiats qui comptent. Selon le paramétrage, cette fenêtre peut couvrir plusieurs bins autour de \(j\). Par exemple, le bin \(j\) peut être comparé aux bins \(j-4\) à \(j+4\), en ignorant le bin courant pour éviter qu'il ne se valide lui-même.
-
-Un bin est considéré comme aberrant s'il casse la continuité locale. Pour la largeur, le principe peut s'écrire:
-
-\[
-|w_j - \hat{w}_j| > \tau_w.
-\]
-
-La même logique est appliquée au bord bas, à la ligne médiane et au bord haut:
-
-\[
-|h_{\text{bas},j}-\hat{h}_{\text{bas},j}| > \tau_{\text{bas}},
-\qquad
-|h_{\text{milieu},j}-\hat{h}_{\text{milieu},j}| > \tau_{\text{milieu}},
-\qquad
-|h_{\text{haut},j}-\hat{h}_{\text{haut},j}| > \tau_{\text{haut}}.
-\]
-
-Les seuils dépendent de la largeur médiane du ruban et de la dispersion locale, souvent estimée par une MAD. L'intérêt de cette étape est d'éviter deux erreurs opposées. Premièrement, elle évite de garder un bin totalement incohérent qui ferait exploser la largeur et donc fausserait la profondeur. Deuxièmement, elle évite de supprimer un bin simplement parce qu'il n'est pas exactement égal à la moyenne globale: il est supprimé seulement s'il est incohérent avec son voisinage. La \figref{fig:trace-local-neighbour-filter} résume ce filtrage local.
-
-\begin{figure}[H]
-  \centering
-  \begin{tikzpicture}[x=1.05cm,y=0.9cm,>=Latex]
-    \draw[-Latex,thick] (0,0) -- (9.2,0) node[right] {$s$};
-    \draw[-Latex,thick] (0,-0.2) -- (0,3.2) node[above] {$h$};
-
-    \foreach \x/\y in {0.8/0.8,1.6/1.0,2.4/1.15,3.2/1.35,4.0/1.55,4.8/2.85,5.6/1.85,6.4/2.0,7.2/2.15,8.0/2.35}
-      \fill[black] (\x,\y) circle (1.8pt);
-
-    \draw[dashed,thick] (0.6,0.75) .. controls (2.5,1.1) and (6.2,1.9) .. (8.2,2.35);
-    \draw[red,thick] (4.8,2.85) circle (5pt);
-    \node[above] at (4.8,3.05) {bin aberrant};
-    \node[below] at (4.8,-0.15) {$j$};
-    \draw[decorate,decoration={brace,amplitude=5pt}] (2.4,-0.55) -- (7.2,-0.55)
-      node[midway,below=5pt] {voisins utilisés pour prédire le bin $j$};
-  \end{tikzpicture}
-  \caption{Principe du filtrage local. Le bin courant est comparé à une prédiction construite avec ses voisins; s'il crée une rupture trop forte, il est supprimé.}
-  \label{fig:trace-local-neighbour-filter}
-\end{figure}
-
-\subsection{Courbes du ruban}
-
-Après le filtrage, il reste trois listes d'échantillons propres:
-
-\[
-\mathcal{B} = \{(s_j,h_{\text{bas},j})\},
-\qquad
-\mathcal{M} = \{(s_j,h_{\text{milieu},j})\},
-\qquad
-\mathcal{H} = \{(s_j,h_{\text{haut},j})\}.
-\]
-
-Ces points ne sont pas reliés par une régression séparée dans chaque bin. Un bin ne contient qu'une mesure locale. Les courbes sont construites après coup, à partir de l'ensemble des bins valides restants. Il ne s'agit pas non plus nécessairement d'une seule grande parabole globale imposée sur toute la trace. L'algorithme utilise un ajustement local: autour de la position \(s_0\), les échantillons proches de \(s_0\) ont plus de poids que les échantillons éloignés.
-
-La bonne lecture est donc la suivante:
-
-\begin{itemize}
-  \item les bins servent à produire les points de mesure \((s_j,h_j)\);
-  \item le filtrage supprime les points incohérents;
-  \item les courbes haut, milieu et bas sont ajustées sur tous les échantillons restants, mais avec un poids local autour de la position évaluée.
-\end{itemize}
-
-Pour un ajustement local quadratique, la forme utilisée autour de \(s_0\) est:
-
-\[
-h(s) = a(s-s_0)^2 + b(s-s_0) + c.
-\]
-
-Le fait de centrer le modèle sur \(s_0\) est pratique: la valeur estimée au point courant est directement \(c\), puisque \(s=s_0\) donne:
-
-\[
-h(s_0)=c.
-\]
-
-Les coefficients sont recalculés localement pour plusieurs positions \(s_0\) le long du ruban. L'idée générale est de donner davantage d'influence aux échantillons proches de la position évaluée et moins d'influence aux échantillons éloignés. Ainsi, la courbe reste régulière sans être forcée par une seule régression globale sur toute la trace. Si une zone contient peu d'échantillons, la fenêtre locale peut être élargie afin de conserver une estimation stable.
-
-Les trois courbes sont ajustées indépendamment:
-
-\[
-h_{\text{bas}}(s),
-\qquad
-h_{\text{milieu}}(s),
-\qquad
-h_{\text{haut}}(s).
-\]
-
-Cela permet au ruban de rester souple. Le bord haut et le bord bas ne sont pas forcés à avoir exactement la même forme, ce qui est utile si la trace est légèrement asymétrique, si une polarité domine localement, ou si une zone contient moins d'événements.
-
-Pour tracer une courbe complète, plusieurs positions \(s_0\) sont échantillonnées entre le début et la fin du ruban. À chaque position, un petit ajustement local est recalculé afin de récupérer la valeur estimée. Le point est ensuite reconverti dans le repère image avec:
-
-\[
-p(s_0) = c_{\text{trace}} + s_0 d + h(s_0)n,
-\]
-
-où \(c_{\text{trace}}\) est le centre du ruban, \(d\) sa direction principale et \(n\) sa normale. Cette opération est faite pour la ligne médiane, le bord bas et le bord haut. La \figref{fig:trace-local-fit-curves} illustre l'ajustement local des trois courbes du ruban.
-
-\begin{figure}[H]
-  \centering
-  \begin{tikzpicture}[x=0.95cm,y=0.8cm,>=Latex]
-    \draw[-Latex,thick] (0,0) -- (9,0) node[right] {$s$};
-    \draw[-Latex,thick] (0,-1.2) -- (0,3.0) node[above] {$h$};
-
-    \foreach \x/\yb/\ym/\yh in {0.8/0.2/1.0/1.8,1.6/0.35/1.12/1.9,2.4/0.55/1.3/2.05,3.2/0.75/1.45/2.18,4.0/0.9/1.55/2.28,4.8/1.05/1.68/2.42,5.6/1.15/1.82/2.55,6.4/1.35/1.98/2.68,7.2/1.55/2.15/2.8,8.0/1.75/2.35/2.95}
-    {
-      \fill[magenta] (\x,\yb) circle (1.6pt);
-      \fill[orange] (\x,\ym) circle (1.6pt);
-      \fill[green!60!black] (\x,\yh) circle (1.6pt);
-    }
-
-    \draw[magenta,thick] (0.7,0.15) .. controls (2.7,0.55) and (5.3,1.05) .. (8.2,1.78);
-    \draw[orange,thick,dashed] (0.7,0.95) .. controls (2.8,1.35) and (5.4,1.75) .. (8.2,2.35);
-    \draw[green!60!black,thick] (0.7,1.78) .. controls (2.8,2.05) and (5.4,2.52) .. (8.2,2.95);
-
-    \node[right] at (8.25,2.95) {$h_{\text{haut}}(s)$};
-    \node[right] at (8.25,2.35) {$h_{\text{milieu}}(s)$};
-    \node[right] at (8.25,1.78) {$h_{\text{bas}}(s)$};
-
-    \draw[gray,densely dashed] (4.8,-1.05) -- (4.8,3.0);
-    \node[above right] at (4.8,0.05) {$s_0$};
-    \draw[decorate,decoration={brace,amplitude=5pt}] (3.2,-0.95) -- (6.4,-0.95)
-      node[midway,below=8pt] {fenêtre locale de fit};
-  \end{tikzpicture}
-  \caption{Les trois courbes du ruban sont ajustées à partir des échantillons valides. L'ajustement est local: autour de \(s_0\), les points proches pèsent davantage que les points éloignés.}
-  \label{fig:trace-local-fit-curves}
 \end{figure}
 
 
@@ -1114,37 +832,7 @@ Dans l'affichage 3D, ces coordonnées sont ensuite remappées dans le repère ut
 
 \subsection{Régression pondérée de trajectoire}
 
-Une régression est ensuite calculée sur les positions 3D obtenues. Le modèle reste volontairement simple, comme pour la première méthode:
-
-\[
-x(t) = a t + b,\qquad
-y(t) = a t + b,\qquad
-z(t) = a t^2 + b t + c.
-\]
-
-Les axes \(x\) et \(y\) sont modélisés par une droite car la vitesse horizontale varie peu sur la courte durée observée. L'axe \(z\) est modélisé par un polynôme du second degré pour représenter la courbure verticale de la trajectoire. La différence entre la version non pondérée et la version pondérée vient du poids associé à chaque observation.
-
-La pondération combine deux termes. Le premier donne plus d'importance aux points récents:
-
-\[
-w_{\text{temps},i} = \exp(-3\,\text{age}_i).
-\]
-
-Le second réduit l'influence des points dont le résidu est élevé:
-
-\[
-w_{\text{robuste},i} =
-\frac{1}{1+\left(\frac{r_i}{\sigma}\right)^2}.
-\]
-
-Le poids final est donc:
-
-\[
-w_i = w_{\text{temps},i}w_{\text{robuste},i}.
-\]
-
-Sans pondération, une mauvaise estimation ancienne peut tirer la courbe finale et créer un décalage visible. Avec pondération, la trajectoire suit davantage les points récents tout en diminuant l'effet des mesures aberrantes. Cela ne change pas le modèle physique, mais rend l'estimation plus stable pour une utilisation en temps réel.
-La comparaison visuelle entre la version pondérée et la version non pondérée est donc placée dans la section de validation, afin de garder ici l'explication de l'algorithme et de réserver les résultats expérimentaux à la suite de la partie perception.
+Une régression est ensuite calculée sur les positions 3D obtenues. Les modèles et la pondération sont les mêmes que ceux présentés pour la méthode par circle fitting: axes horizontaux linéaires, axe vertical quadratique, et poids combinant un terme de récence et un terme robuste basé sur le résidu. Sans pondération, une mauvaise estimation ancienne peut tirer la courbe finale et créer un décalage visible. Avec pondération, la trajectoire suit davantage les points récents tout en diminuant l'effet des mesures aberrantes. La comparaison visuelle entre les deux réglages est présentée dans la section de validation.
 
 \subsection{Bilan de la méthode Trace}
 
@@ -1166,16 +854,7 @@ Pour tester l'algorithme dans un cadre contrôlé, des séquences simulées ont 
 
 Cette organisation permet de comparer directement les positions estimées par l'algorithme avec une vérité terrain. Dans les figures 3D de cette section, chaque carré de la grille représente \(25~\text{cm}\). Les estimations de l'algorithme sont affichées en bleu, tandis que les positions réelles de référence sont affichées en rouge.
 
-Les essais simulés ont été réalisés avec les paramètres suivants:
-
-\begin{itemize}
-  \item résolution vidéo: \(640 \times 480\);
-  \item fréquence d'entrée: \(500~\text{fps}\);
-  \item rayon de balle: \(0.02~\text{m}\);
-  \item calibration synthétique: \(f_x=f_y=520~\text{px}\);
-  \item résolution temporelle des événements: \(200~\mu\text{s}\);
-  \item seuils de génération ON/OFF: \(0.15\).
-\end{itemize}
+Les paramètres complets de génération de ces séquences (résolution, fréquence d'entrée, seuils de contraste et résolution temporelle des événements) sont donnés dans l'annexe~\ref{ann:sequences}. Les trois séquences retenues sont récapitulées dans le tableau~\ref{tab:simulated-sequences}.
 
 \begin{table}[H]
   \centering
@@ -1274,14 +953,7 @@ Les méthodes de perception précédentes estiment la balle dans le repère de l
 {}^{B}T_{C}.
 \]
 
-Le principe retenu est d'utiliser le robot lui-même comme système de déplacement connu. Une mire dynamique est affichée sur un écran fixé au bout du bras robotique. Comme l'écran est solidaire de l'effecteur, sa pose dans la base du robot peut être calculée à partir de la cinématique directe et de la géométrie du support mécanique. La caméra événementielle observe cette mire pour plusieurs poses du robot. Chaque observation donne une contrainte géométrique, et l'ensemble des poses permet d'estimer la transformation fixe entre la caméra et le robot. La \figref{fig:calibration-mire-concept} présente une première idée de mire dynamique.
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.82\textwidth]{images/Calibration/mire_concept.png}
-  \caption{Mire conceptuelle affichée sur un écran. Les disques lumineux peuvent clignoter pour générer une activité événementielle exploitable par la caméra DVXplorer \cite{inivation-dvxplorer}.}
-  \label{fig:calibration-mire-concept}
-\end{figure}
+Le principe retenu est d'utiliser le robot lui-même comme système de déplacement connu. Une mire dynamique est affichée sur un écran fixé au bout du bras robotique. Comme l'écran est solidaire de l'effecteur, sa pose dans la base du robot peut être calculée à partir de la cinématique directe et de la géométrie du support mécanique. La caméra événementielle observe cette mire pour plusieurs poses du robot. Chaque observation donne une contrainte géométrique, et l'ensemble des poses permet d'estimer la transformation fixe entre la caméra et le robot. La mire utilisée est celle déjà développée pour la calibration intrinsèque (section~\ref{sec:calibration-intrinseque}, \figref{fig:calibration-mire-concept}).
 
 Cette approche est intéressante car elle ne demande pas de déplacer manuellement une mire dans l'espace. Le robot fournit directement des poses connues et répétables, ce qui rend possible une calibration multi-poses cohérente.
 
@@ -1333,23 +1005,7 @@ Pour une pose robot \(i\), la cinématique directe donne la transformation \({}^
   \label{fig:calibration-3d-cao}
 \end{figure}
 
-La position réelle de l'écran dans le téléphone doit aussi être prise en compte, car la mire n'occupe pas toute la surface physique du smartphone. Cette position est estimée à partir d'une image du téléphone: on mesure en pixels l'épaisseur des bords entre le contour du téléphone et la zone active de l'écran, puis on convertit ces valeurs en millimètres par proportionnalité, en utilisant les dimensions réelles du téléphone comme référence. Cette méthode revient à appliquer une règle de trois entre les dimensions mesurées sur l'image et les dimensions physiques.
-
-\begin{table}[H]
-  \centering
-  \caption{Estimation des bords entre le téléphone et la zone active de l'écran.}
-  \label{tab:smartphone-screen-offsets}
-  \begin{tabular}{lcc}
-    \toprule
-    Élément & En pixels & En millimètres estimés \\
-    \midrule
-    Bord gauche & \(\approx 23~\text{px}\) & \(\approx 2{,}92~\text{mm}\) \\
-    Bord droit & \(\approx 21\) à \(22~\text{px}\) & \(\approx 2{,}67\) à \(2{,}80~\text{mm}\) \\
-    Bord haut & \(\approx 23~\text{px}\) & \(\approx 2{,}93~\text{mm}\) \\
-    Bord bas & \(\approx 26~\text{px}\) & \(\approx 3{,}31~\text{mm}\) \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+La position réelle de l'écran dans le téléphone doit aussi être prise en compte, car la mire n'occupe pas toute la surface physique du smartphone. Cette position est estimée à partir d'une image du téléphone: on mesure en pixels l'épaisseur des bords entre le contour du téléphone et la zone active de l'écran, puis on convertit ces valeurs en millimètres par proportionnalité, en utilisant les dimensions réelles du téléphone comme référence. Cette méthode revient à appliquer une règle de trois entre les dimensions mesurées sur l'image et les dimensions physiques; les valeurs mesurées sont détaillées dans l'annexe~\ref{ann:handeye}.
 
 La pose de la mire dans la base du robot est alors:
 
@@ -1365,35 +1021,9 @@ De son côté, la caméra observe la mire et permet d'estimer la transformation 
 
 Une seule pose reste cependant fragile: une erreur de détection, un mauvais angle de vue ou une légère erreur mécanique peut produire une estimation biaisée. L'objectif réel est donc d'utiliser plusieurs poses et de trouver une transformation unique \({}^{B}T_C\) qui explique au mieux toutes les observations.
 
-\subsection{Design de la mire dynamique}
+\subsection{Mire événementielle et détection des points}
 
-La mire envisagée est composée de disques lumineux sur fond noir. Les disques alternent entre un état visible et un état invisible, ou entre deux niveaux de luminosité, afin de générer des événements dans la caméra. Pour une caméra événementielle, l'intérêt n'est pas seulement la forme visible à l'oeil, mais surtout la variation temporelle de luminosité produite par la mire.
-
-Ce choix est directement lié à la méthode utilisée dans le script Python. Celui-ci ne cherche pas des coins comme avec un échiquier classique: il construit une image d'activité, applique un léger flou, réalise un seuillage, puis regroupe les pixels actifs en composantes connexes. Chaque composante est alors considérée comme un \emph{blob}. Le centre de chaque blob est ensuite estimé par barycentre pondéré de l'activité. La mire doit donc produire des zones actives compactes, séparées et faciles à associer à des points physiques connus.
-
-Les disques sont adaptés à cette détection par blobs, car leur projection donne une composante compacte avec un centre bien défini. Un gradient radial peut aussi être utilisé: le centre du disque reste plus lumineux, tandis que les bords deviennent plus progressifs. Cette forme peut rendre l'activité moins brutale et aider le barycentre à être moins dépendant d'un pixel isolé. En revanche, un gradient trop doux peut rendre le seuil de détection moins net, car les bords du blob deviennent plus diffus. Le réglage du gradient doit donc rester un compromis entre stabilité du centre et séparation claire des blobs.
-
-La mire ne doit pas être parfaitement ambiguë. Une grille régulière de disques identiques peut être difficile à orienter si plusieurs associations 2D/3D sont possibles. Le design retenu utilise donc une grille asymétrique, avec un disque manquant et un disque plus grand servant d'ancre. Le disque plus grand produit généralement un blob plus fort, ce qui aide le script à identifier l'orientation de la mire et à associer les blobs détectés aux points attendus.
-
-La \figref{fig:calibration-mire-concept} illustre cette idée de mire: un fond noir, des disques lumineux, un disque manquant et un disque plus grand permettant d'aider l'identification de l'orientation.
-
-\subsection{Extraction des points dans les événements}
-
-La caméra événementielle fournit des événements de la forme:
-
-\[
-e_k = (u_k, v_k, t_k, p_k),
-\]
-
-où \((u_k,v_k)\) sont les coordonnées image, \(t_k\) le timestamp et \(p_k\) la polarité. Pour détecter une mire clignotante, l'idée générale est d'accumuler l'activité sur une courte fenêtre temporelle autour du changement d'état de la mire. Dans cette première approche, les polarités positives et négatives ne sont pas soustraites: elles sont toutes les deux considérées comme de l'activité utile.
-
-On peut donc construire une image d'activité:
-
-\[
-A(u,v) = \sum_{k \in \mathcal{W}} \mathbf{1}\left[(u_k,v_k)=(u,v)\right],
-\]
-
-avec \(\mathcal{W}\) la fenêtre temporelle utilisée. Les zones où l'activité est forte correspondent aux disques qui viennent de changer de luminosité. Après seuillage et regroupement spatial, chaque composante détectée peut être associée à un disque de la mire.
+La mire affichée sur l'écran et sa détection dans le flux d'événements sont exactement celles présentées pour la calibration intrinsèque, dans la section~\ref{sec:calibration-intrinseque}: une grille asymétrique de disques clignotants, détectée par image d'activité, seuillage, regroupement en composantes connexes, puis barycentre pondéré. Le disque manquant et le disque-ancre y jouent un rôle encore plus important, car le robot présente l'écran sous des orientations très variées et l'association entre blobs détectés et points physiques doit rester sans ambiguïté pour chaque pose. La \figref{fig:mire-blob-output} montre une sortie de cette détection dans la configuration de calibration extrinsèque.
 
 \begin{figure}[H]
   \centering
@@ -1402,14 +1032,7 @@ avec \(\mathcal{W}\) la fenêtre temporelle utilisée. Les zones où l'activité
   \label{fig:mire-blob-output}
 \end{figure}
 
-Le centre d'un disque peut être estimé par barycentre pondéré:
-
-\[
-u_c = \frac{\sum u\,A(u,v)}{\sum A(u,v)}, \qquad
-v_c = \frac{\sum v\,A(u,v)}{\sum A(u,v)}.
-\]
-
-Ce centre est généralement plus stable qu'un simple centre de boîte englobante, car il utilise la distribution complète de l'activité dans le blob. Si la mire est vue avec un angle important, un ajustement d'ellipse pourrait aussi être envisagé, mais le barycentre constitue une première estimation simple et rapide.
+La principale différence avec l'utilisation en calibration intrinsèque tient aux angles d'observation. Lorsque l'écran est fortement incliné, la projection d'un disque s'allonge en ellipse et le barycentre peut se décaler légèrement par rapport au centre géométrique; un ajustement d'ellipse pourrait alors être envisagé pour affiner le centre. Le protocole retenu privilégie une solution plus simple: les acquisitions dont l'orientation détectée est jugée invalide sont rejetées avant la résolution.
 
 \subsection{Association 2D/3D et pose de la mire}
 
@@ -1490,14 +1113,7 @@ e_{\mathrm{cote}} =
 \frac{1}{4}\sum_{k=1}^{4}\left|L_k^{\mathrm{mesure}}-L_k^{\mathrm{reel}}\right|.
 \]
 
-La \figref{fig:square-test-validation} montre une sortie de ce test. Sur cet essai, les quatre carrés de validation sont acceptés. L'erreur de reprojection globale est d'environ \(0{,}13~\text{px}\), tandis que l'erreur moyenne sur les longueurs reconstruites des côtés est d'environ \(0{,}16~\text{mm}\). La pose utilisée pour cette validation place l'écran à environ \(634~\text{mm}\) de la caméra, avec une inclinaison d'environ \(20^\circ\). Ces valeurs ne constituent pas encore une précision finale de calibration robot-caméra, mais elles montrent que la chaîne de détection, d'association, de projection et de reconstruction métrique est cohérente sur le plan de l'écran.
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.78\textwidth]{recordings/mire_calibration/square_test_20260611_110401_090251.png}
-  \caption{Sortie du test carré utilisé pour valider la cohérence géométrique de la mire événementielle. Les carrés projetés à partir de la pose estimée sont comparés aux blobs détectés dans les événements.}
-  \label{fig:square-test-validation}
-\end{figure}
+Une sortie de ce test est visible sur la partie droite de la \figref{fig:intrinsic-mire-script}, déjà présentée pour la calibration intrinsèque. Sur cet essai, les quatre carrés de validation sont acceptés. L'erreur de reprojection globale est d'environ \(0{,}13~\text{px}\), tandis que l'erreur moyenne sur les longueurs reconstruites des côtés est d'environ \(0{,}16~\text{mm}\). La pose utilisée pour cette validation place l'écran à environ \(634~\text{mm}\) de la caméra, avec une inclinaison d'environ \(20^\circ\). Ces valeurs ne constituent pas encore une précision finale de calibration robot-caméra, mais elles montrent que la chaîne de détection, d'association, de projection et de reconstruction métrique est cohérente sur le plan de l'écran.
 
 La précision finale de la calibration extrinsèque dépendra ensuite à la fois de cette détection événementielle, de la géométrie du montage mécanique et de la diversité des poses robot utilisées. L'erreur angulaire reste particulièrement importante: une erreur d'orientation de \(1^\circ\) représente environ \(17~\text{mm}\) d'erreur latérale à \(1~\text{m}\), et environ \(35~\text{mm}\) à \(2~\text{m}\). Pour une tâche d'interception de balle, cette erreur peut devenir aussi critique qu'une erreur directe sur la profondeur.
 
@@ -1512,6 +1128,48 @@ Le protocole expérimental devra donc privilégier:
   \item l'analyse des résidus de reprojection après optimisation.
 \end{itemize}
 
+\subsection{Résultats de la calibration physique caméra-robot}
+
+Ce protocole a été appliqué sur le montage réel, visible sur la \figref{fig:handeye-setup-reel}: le smartphone affichant la mire est fixé sur le support imprimé en 3D au bout du bras UR3e, et la caméra événementielle observe la scène depuis un trépied fixe. Le robot présente ensuite la mire dans une série de poses variées pendant que la caméra détecte les disques clignotants.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Calibration/Calibration_photo_setup.jpg}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Calibration/Calibration_photo_setup2.jpg}
+  \end{minipage}
+  \caption{Montage réel de la calibration extrinsèque. Le smartphone affichant la mire clignotante est porté par le UR3e via le support imprimé en 3D, et la caméra événementielle observe la scène depuis un trépied fixe.}
+  \label{fig:handeye-setup-reel}
+\end{figure}
+
+Après rejet des acquisitions dont l'orientation d'écran détectée était invalide, dix-huit poses variées ont été retenues pour la résolution, conformément à la cible de quinze à vingt poses fixée par le protocole.
+
+Cette calibration passe les critères d'acceptation numériques fixés à l'avance. Le résidu de translation entre les poses prédites et observées est de \(0{,}94~\text{mm}\) en moyenne et de \(2{,}24~\text{mm}\) au maximum, et le résidu de rotation de \(0{,}25^\circ\) en moyenne et de \(0{,}44^\circ\) au maximum. Une validation croisée en retirant chaque pose à tour de rôle déplace la solution d'au plus \(0{,}36~\text{mm}\) et \(0{,}05^\circ\), ce qui indique qu'aucune pose isolée ne domine le résultat. L'erreur de reprojection de bout en bout, mesurée sur \(342\) points de mire, est de \(1{,}22~\text{px}\) en RMS avec un maximum de \(3{,}46~\text{px}\). La diversité angulaire des poses utilisées est d'environ \(90^\circ\), ce qui évite une configuration dégénérée du problème. Rapportés à la sensibilité angulaire discutée plus haut, ces résidus correspondent, pour l'erreur de rotation moyenne, à un décalage latéral de l'ordre de \(4~\text{mm}\) à \(1~\text{m}\), soit un ordre de grandeur en dessous des quelques centimètres qui suffisent à faire rater une interception: la précision obtenue est donc compatible avec le besoin, sous réserve des vérifications physiques indépendantes mentionnées plus bas.
+
+La transformation obtenue est ensuite publiée dans le système robotique et restituée dans l'interface de supervision 3D, comme le montre la \figref{fig:handeye-ui-3d}: la caméra apparaît sous forme d'une pyramide de vue avec son repère, positionnée par rapport au modèle du robot et à l'écran porté par l'effecteur. Cette visualisation fournit une première vérification qualitative immédiate: la position et l'orientation de la caméra affichées correspondent bien au placement physique du trépied par rapport au robot. Les valeurs numériques complètes de la transformation sont données dans l'annexe~\ref{ann:handeye}.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Calibration/Sortie_calibration_extrinseque_1.jpg}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/Calibration/Sortie_calibration_extrinseque_2.jpg}
+  \end{minipage}
+  \caption{Pose 3D de la caméra restituée dans l'interface de supervision après la calibration extrinsèque, sous deux angles de vue. La pyramide jaune représente le champ de vision de la caméra avec son repère; sa position et son orientation par rapport au robot et à l'écran porté par l'effecteur sont cohérentes avec le montage physique de la \figref{fig:handeye-setup-reel}.}
+  \label{fig:handeye-ui-3d}
+\end{figure}
+
+Cette transformation reste propre à l'installation: déplacer la caméra ou modifier le support du téléphone l'invalide immédiatement. Deux vérifications physiques restent à confirmer avant de considérer la calibration comme définitive: la cohérence avec des mesures indépendantes du montage (mètre ruban et modèle CAO) et la vérification quantitative de la transformation publiée en continu, notamment en comparant la position d'une même balle exprimée directement dans le repère du robot et reconstruite depuis le repère caméra.
+
 \subsection{Lien avec l'interception robotique}
 
 Cette calibration est l'étape qui rend la perception exploitable par le robot. Une fois \({}^{B}T_C\) connue, une position de balle estimée dans le repère caméra peut être transformée dans le repère de la base:
@@ -1522,7 +1180,7 @@ P^B = {}^{B}T_C\,P^C.
 
 La trajectoire obtenue par la méthode Trace peut alors être exprimée dans le repère robot, filtrée, prédite, puis transmise à la commande ou à une politique d'interception. La qualité de cette transformation conditionne directement la précision finale: même une bonne estimation caméra ne suffit pas si la calibration extrinsèque déplace la balle de plusieurs centimètres dans le repère du robot.
 
-\section{Contrôle robotique: Isaac Lab et PPO}
+\section{Apprentissage d'une politique d'interception en simulation}
 
 \subsection{Objectif de la partie robot}
 
@@ -1537,19 +1195,54 @@ L'objectif de PPO \cite{schulman-ppo} est d'apprendre une politique de commande.
   \label{fig:robot-setup}
 \end{figure}
 
-\subsection{Résultats d'entraînement observés}
+\subsection{Environnement d'apprentissage}
 
-D'après les essais présentés pendant le stage, l'entraînement atteint une convergence autour de \(15\,000\) itérations. L'entraînement complet a été poussé jusqu'à environ \(35\,000\) itérations. Avec \(32\) rollouts et environ \(12\,000\) environnements, cela représente approximativement:
+L'environnement simulé reproduit le robot UR3e portant le filet et une balle lancée vers lui. À chaque pas de temps, la politique reçoit une observation de \(32\) valeurs exprimées dans le repère de la base du robot:
 
-\[
-15\,000 \times 32 \times 12\,000 = 5.76 \times 10^9
-\]
+\begin{itemize}
+  \item les positions et les vitesses des six articulations (\(12\) valeurs);
+  \item la position du centre du filet (\(3\) valeurs);
+  \item la position de la balle (\(3\) valeurs) et sa vitesse (\(3\) valeurs);
+  \item la direction unitaire du filet vers la balle (\(3\) valeurs) et la distance filet-balle (\(1\) valeur);
+  \item un indicateur du côté du plan du filet où se trouvait la balle au pas précédent, dont le changement sert à détecter un passage (\(1\) valeur);
+  \item la dernière action appliquée (\(6\) valeurs).
+\end{itemize}
 
-steps de simulation pour la phase de convergence. Le temps total observé est d'environ \(26\) minutes, avec environ \(11\) minutes pour atteindre la convergence.
+Cette définition est importante pour la suite: le système réel devra construire exactement la même observation, dans le même ordre et le même repère, pour que la politique apprise reste valable.
 
-Ces chiffres montrent que la simulation permet d'entraîner rapidement un comportement de base. Cependant, le passage vers le système réel demande de prendre en compte plusieurs défis supplémentaires.
+La politique produit six actions normalisées entre \(-1\) et \(1\), interprétées comme des incréments de consigne articulaire à \(60~\text{Hz}\). L'incrément maximal par pas de temps correspond à la vitesse limite de l'axe, soit \(\pi~\text{rad/s}\) pour les trois premiers axes et \(2\pi~\text{rad/s}\) pour les poignets, c'est-à-dire au plus environ \(3^\circ\) et \(6^\circ\) par pas respectivement. Avant d'être intégrés en une cible de position, ces incréments sont en outre limités en accélération par articulation, et la cible reste bornée sur chaque axe. Ce choix incrémental borne physiquement le mouvement demandé, quelles que soient les sorties du réseau, et les mêmes limites sont réappliquées lors du déploiement réel.
 
-\subsection{Défis pour l'intégration perception-robot}
+La récompense combine un terme continu qui augmente lorsque la distance entre le filet et la balle diminue, un fort bonus lorsque la balle traverse le filet et une pénalité lorsque l'épisode se termine par un contact avec le bras ou par la chute de la balle au sol. S'y ajoute une pénalisation quadratique de l'amplitude des actions, réglée articulation par articulation: les coefficients sont environ cinq fois plus élevés sur les axes de l'épaule et du coude que sur les poignets, afin de pénaliser davantage les mouvements des axes les plus massifs, et ils augmentent progressivement pendant la première partie de l'entraînement, ce qui laisse la politique apprendre d'abord le geste d'interception avant de l'affiner en mouvements plus sobres. Deux pénalités complémentaires régularisent enfin le comportement: l'une décourage la saturation des actions au-delà de leurs bornes, l'autre les variations brusques d'action entre deux pas de temps consécutifs. Chaque épisode dure au plus \(4~\text{s}\). La balle apparaît entre \(1{,}2\) et \(2{,}1~\text{m}\) devant le robot, à une hauteur comprise entre \(0{,}5\) et \(1{,}2~\text{m}\), et est lancée vers lui avec une vitesse principale de \(3{,}5\) à \(5~\text{m/s}\), une composante latérale de l'ordre de \(\pm 0{,}7~\text{m/s}\) et une composante verticale initiale pouvant atteindre \(1{,}5~\text{m/s}\), ce qui laisse un vol libre de l'ordre de \(0{,}3\) à \(0{,}5~\text{s}\) pour réagir. Un bruit gaussien, d'écart-type de \(1\) à \(5~\text{cm}\) selon la variante, est ajouté à la position de balle observée pour préparer la robustesse au bruit de perception, et une balle qui traverse le filet réapparaît aussitôt pour un nouveau lancer sans interrompre l'épisode. Deux variantes existent, avec le filet monté à droite ou à gauche de l'effecteur; une politique apprise pour un côté n'est pas transférable à l'autre, et le déploiement doit donc rester cohérent avec le montage physique.
+
+\subsection{Déroulement et résultats de l'entraînement}
+
+L'entraînement fait progresser \(12\,000\) environnements simulés en parallèle, par pas de \(16{,}7~\text{ms}\). La politique est mise à jour toutes les \(32\) étapes de collecte à partir des trajectoires accumulées, et l'état du réseau est sauvegardé régulièrement, ce qui permet de suivre la récompense moyenne par épisode au cours de l'apprentissage et de conserver le comportement retenu.
+
+Les deux entraînements retenus, un par côté de montage du filet, suivent la même dynamique. La récompense moyenne par épisode part d'une valeur négative, dominée par les pénalités de fin d'épisode, devient positive après environ \(1\,500\) étapes de collecte, puis atteint un plateau de l'ordre de \(1\,400\) à \(1\,550\) en moins de \(10\,000\) étapes, soit environ \(1{,}2 \times 10^{8}\) pas de simulation cumulés et quelques minutes de calcul. La suite de l'entraînement ne modifie plus ce plateau et sert essentiellement à en vérifier la stabilité. La variante droite a ainsi été poursuivie jusqu'à \(400\,000\) étapes de collecte, soit \(4{,}8 \times 10^{9}\) pas de simulation et \(12\,500\) mises à jour de la politique en environ \(2\,\text{h}\,45\); la variante gauche a été arrêtée après environ \(194\,000\) étapes, soit \(2{,}3 \times 10^{9}\) pas en environ \(1\,\text{h}\,20\), le plateau étant atteint depuis longtemps. C'est le dernier état sauvegardé de cet entraînement gauche qui est déployé sur le robot réel.
+
+Ces chiffres montrent que la simulation massivement parallèle permet d'apprendre l'essentiel du comportement d'interception en quelques minutes, le reste du budget de calcul servant à confirmer la stabilité du résultat. Cependant, le passage vers le système réel demande de reconstruire fidèlement, autour du robot réel, les conditions vues par la politique en simulation.
+
+\section{Boucle d'interception temps réel}
+
+Pour utiliser la politique sur le robot réel, une boucle de commande à \(60~\text{Hz}\) a été mise en place. À chaque cycle, elle reçoit la dernière position de balle estimée, la transforme dans le repère de la base du robot grâce à la calibration extrinsèque, construit le vecteur d'observation de \(32\) valeurs décrit précédemment, exécute la politique apprise, convertit l'action en consigne articulaire avec les mêmes limites de vitesse et d'accélération qu'en simulation, puis applique une couche de sécurité indépendante avant toute transmission au robot. La consigne finale est envoyée au contrôleur du robot sous forme d'un flux interpolé à \(500~\text{Hz}\), ce qui lisse le mouvement entre deux décisions de la politique.
+
+La sécurité est traitée comme une propriété du système et non de la politique. L'émission de commande vers le robot est désactivée par défaut et doit être armée explicitement par l'opérateur. La boucle refuse de commander le robot si aucun modèle de politique n'est chargé, si la position de la balle arrive dans un repère inconnu, ou si la transformation donnant la position du filet n'est pas disponible. Un facteur global de réduction de vitesse permet une montée en régime progressive lors des essais, et un chien de garde interrompt la commande si les données nécessaires cessent d'arriver.
+
+\section{Premiers essais sur le robot réel}
+
+\subsection{Validation de la chaîne de commande avec une balle virtuelle}
+
+La chaîne de commande a d'abord été validée sans caméra, en remplaçant la perception par un générateur de balles virtuelles suivant la même enveloppe de lancers que la simulation d'apprentissage. Dans cette configuration, la chaîne complète fonctionne sur le robot réel: la politique calcule les actions à partir de la balle virtuelle, le robot suit le point d'interception, puis maintient sa position une fois la balle au sol. Sous les limites de mise en service, avec le facteur de vitesse réduit de moitié, la réponse du robot reste cependant plus lente que le comportement simulé; l'optimisation de cette réponse fait partie des travaux restants.
+
+\subsection{Premiers essais commandés avec la caméra réelle}
+
+Les premiers essais de la chaîne complète, avec la caméra événementielle réelle, la méthode Trace et la commande du robot activée, ont mis en évidence un défaut d'architecture plutôt que de perception: le robot ne produisait que des tressaillements et l'état de commande oscillait dans l'interface. Le diagnostic a montré que deux instances de la boucle de décision et deux sources de position de balle fonctionnaient simultanément, la pile de test à balle virtuelle étant restée active à côté de la chaîne réelle. Les messages invalides intercalés par la source virtuelle inactive déclenchaient des arrêts contrôlés répétés, d'où les tressaillements.
+
+Des protections en ont été tirées: la boucle détecte désormais la présence de plusieurs producteurs sur les données de balle et bloque l'émission de commande dans ce cas, l'interface signale les oscillations de l'état de commande, et la procédure de lancement a été réorganisée autour d'une pile logicielle unique. Cet incident illustre un enseignement important du stage: sur un système robotique réel, la fiabilité de l'architecture système, notamment l'unicité des sources de données et la discipline des procédures de lancement, est aussi critique que la qualité des algorithmes.
+
+\section{Défis pour l'intégration perception-robot}
+
+Le tableau~\ref{tab:robot-challenges} récapitule les principaux défis identifiés pour passer d'une perception fonctionnelle à une interception fiable, et sert de grille de lecture pour l'état d'avancement du projet.
 
 \begin{table}[H]
   \centering
@@ -1570,7 +1263,434 @@ Ces chiffres montrent que la simulation permet d'entraîner rapidement un compor
   \end{tabular}
 \end{table}
 
-La suite logique du projet consiste donc à connecter la perception Trace à la partie robotique. La position de balle estimée doit être convertie dans le repère du robot, filtrée, prédite, puis utilisée comme entrée de la politique de commande ou d'un contrôleur d'interception.
+La plupart de ces défis ont maintenant une réponse au moins partielle: la calibration extrinsèque est réalisée et validée numériquement, la chaîne de commande fonctionne sur le robot réel avec une balle virtuelle, et les mécanismes de sécurité ont été éprouvés lors des premiers essais. Les points encore ouverts concernent la mesure des latences réelles de la chaîne, la validation quantitative de la perception réelle et l'optimisation de la vitesse de réponse du robot.
+
+\chapter{Conclusion}
+
+\section*{Bilan technique}
+
+L'objectif central du stage, obtenir une position 3D exploitable d'une balle rapide à partir d'une caméra événementielle, a été atteint et dépassé sur plusieurs points. Deux méthodes d'estimation ont été développées et comparées. La méthode par ajustement de cercle a fourni une première solution fonctionnelle, mais son analyse a mis en évidence une limite structurelle: la profondeur dépend entièrement d'un rayon apparent très sensible à la vitesse de la balle. La méthode par trace événementielle, construite pour répondre à cette limite, exploite la forme réellement produite par la balle dans le flux d'événements et s'est montrée plus adaptée aux lancers rapides. La validation sur des séquences simulées avec vérité terrain a permis de séparer les erreurs algorithmiques des difficultés expérimentales.
+
+Au-delà de la perception, le stage a couvert l'ensemble de la chaîne d'interception. Deux outils de calibration adaptés aux caméras événementielles ont été développés, pour les paramètres intrinsèques puis pour la transformation caméra-robot, avec des erreurs résiduelles de l'ordre du millimètre et de quelques dixièmes de degré sur le montage réel. Une boucle de commande temps réel relie la perception à une politique d'interception apprise par renforcement, avec une architecture de sécurité indépendante de la politique. La chaîne complète a été validée sur le robot réel avec une balle virtuelle, et les premiers essais avec la caméra réelle ont été réalisés. L'interception complète d'une balle réelle n'est pas encore démontrée: elle dépend des validations restantes sur les latences, la qualité de la perception réelle et la vitesse de réponse du robot, qui constituent la suite naturelle du projet.
+
+\section*{Bilan personnel}
+
+Ce stage m'a permis de travailler sur un système mécatronique complet, du capteur jusqu'au mouvement du robot, dans un contexte de recherche appliquée. J'ai appris à raisonner sur des compromis concrets: fenêtre temporelle contre réactivité, robustesse contre latence, généralité contre performance temps réel. Les incidents rencontrés lors des essais réels ont été particulièrement formateurs: ils m'ont montré que la mise en service d'un robot repose autant sur la rigueur des procédures, l'analyse des journaux et la discipline de l'architecture système que sur les algorithmes eux-mêmes. Enfin, ce stage m'a donné une vision claire du travail de recherche expérimentale en robotique, où chaque affirmation doit être appuyée par une mesure, et où la sécurité du matériel et des personnes structure l'ensemble de la démarche.
+
+\appendix
+
+\chapter{Expressions des régressions de trajectoire par moindres carrés}
+\label{ann:regressions}
+
+Cette annexe détaille les expressions utilisées pour ajuster les modèles de trajectoire présentés dans la partie perception. Les coordonnées horizontales sont modélisées par une droite et la coordonnée verticale par une parabole; les coefficients sont calculés directement à partir de sommes accumulées au fil des mesures, sans résolution matricielle générale.
+
+Pour une coordonnée linéaire \(q \in \{X,Y\}\), avec \(n\) observations \((t_i, q_i)\):
+
+\[
+D = n \sum t_i^2 - \left(\sum t_i\right)^2,
+\]
+
+\[
+a = \frac{n \sum t_i q_i - \left(\sum t_i\right)\left(\sum q_i\right)}{D},
+\qquad
+b = \frac{\sum q_i - a \sum t_i}{n}.
+\]
+
+Pour la coordonnée quadratique \(Z\), le modèle est \(q(t) = a t^2 + b t + c\). Les grandeurs intermédiaires utilisées sont:
+
+\[
+S_{11} = \sum t_i^2 - \frac{\left(\sum t_i\right)^2}{n},
+\qquad
+S_{12} = \sum t_i^3 - \frac{\left(\sum t_i\right)\left(\sum t_i^2\right)}{n},
+\]
+
+\[
+S_{22} = \sum t_i^4 - \frac{\left(\sum t_i^2\right)^2}{n},
+\qquad
+S_{q1} = \sum t_i q_i - \frac{\left(\sum q_i\right)\left(\sum t_i\right)}{n},
+\]
+
+\[
+S_{q2} = \sum t_i^2 q_i - \frac{\left(\sum q_i\right)\left(\sum t_i^2\right)}{n},
+\qquad
+D_q = S_{22}S_{11} - S_{12}^2.
+\]
+
+Les coefficients quadratiques sont alors:
+
+\[
+b = \frac{S_{q1}S_{22} - S_{q2}S_{12}}{D_q},
+\qquad
+a = \frac{S_{q2}S_{11} - S_{q1}S_{12}}{D_q},
+\qquad
+c = \bar{q} - b\bar{t} - a\overline{t^2}.
+\]
+
+La version pondérée conserve les mêmes modèles mais remplace chaque somme simple par la somme pondérée correspondante, avec les poids de récence et de robustesse définis dans le corps du rapport.
+
+\chapter{Pipeline détaillé de la détection par circle fitting}
+\label{ann:pipeline-circle}
+
+Cette annexe détaille les étapes internes de la méthode par circle fitting, dont la vue simplifiée est donnée par la \figref{fig:algo-fitting-circle}. La \figref{fig:pipeline-circle-detaille} décompose les trois phases du traitement: la réduction du flux d'événements, la validation du cluster avec l'ajustement du cercle, puis le calcul de la pose 3D et de la trajectoire.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{\textwidth}{!}{%
+  \begin{tikzpicture}[
+      font=\small,
+      block/.style={draw, rounded corners=2pt, align=center, text width=2.6cm, minimum height=1.35cm},
+      source/.style={block, fill=blue!8},
+      prep/.style={block, fill=cyan!8},
+      clust/.style={block, fill=orange!12},
+      fitc/.style={block, fill=violet!10},
+      valid/.style={block, fill=red!8},
+      output/.style={block, fill=green!10},
+      phase/.style={font=\small\bfseries},
+      note/.style={draw, rounded corners=2pt, align=center, fill=red!5, font=\footnotesize},
+      arrow/.style={-{Latex[length=2.5mm]}, thick},
+      lbl/.style={font=\scriptsize\itshape, align=center}
+    ]
+    % Phase 1
+    \node[phase] at (9.3,1.35) {Phase 1: prétraitement et réduction du flux};
+    \node[source] (acq)    at (0,0)    {Acquisition\\caméra ou séquence enregistrée};
+    \node[prep]   (noise)  at (3.1,0)  {Filtre à bruit\\activité isolée supprimée};
+    \node[prep]   (recent) at (6.2,0)  {Fenêtre récente\\événements des derniers instants};
+    \node[prep]   (ech)    at (9.3,0)  {Échantillonnage\\limitation du nombre de points};
+    \node[prep]   (undist) at (12.4,0) {Correction de distorsion\\modèle intrinsèque calibré};
+    \node[prep]   (roi)    at (15.5,0) {Zone d'intérêt\\restriction spatiale et temporelle};
+    \node[clust]  (dbscan) at (18.6,0) {Regroupement DBSCAN\\clusters 2D triés par taille};
+
+    \draw[arrow] (acq) -- (noise);
+    \draw[arrow] (noise) -- (recent);
+    \draw[arrow] (recent) -- (ech);
+    \draw[arrow] (ech) -- (undist);
+    \draw[arrow] (undist) -- (roi);
+    \draw[arrow] (roi) -- (dbscan);
+
+    % Phase 2
+    \node[phase] at (9.3,-1.85) {Phase 2: validation du cluster et ajustement du cercle};
+    \node[clust] (cand)   at (0,-3.2)    {Cluster candidat\\points, polarités,\\durée};
+    \node[fitc]  (slice)  at (3.1,-3.2)  {Sous-tranche optionnelle\\par temps ou par nombre};
+    \node[fitc]  (fit1)   at (6.2,-3.2)  {Premier cercle\\moindres carrés sur le contour};
+    \node[valid] (polar)  at (9.3,-3.2)  {Validation des polarités\\symétrie des directions};
+    \node[valid] (outl)   at (12.4,-3.2) {Rejet des aberrants\\résidu RMS par point};
+    \node[fitc]  (fit2)   at (15.5,-3.2) {Second cercle\\réajustement et contrôle du rayon};
+    \node[fitc]  (okc)    at (18.6,-3.2) {Cercle validé\\centre \((u,v)\),\\rayon \(r\)};
+
+    \draw[arrow] (cand) -- (slice);
+    \draw[arrow] (slice) -- (fit1);
+    \draw[arrow] (fit1) -- (polar);
+    \draw[arrow] (polar) -- (outl);
+    \draw[arrow] (outl) -- (fit2);
+    \draw[arrow] (fit2) -- (okc);
+
+    \node[note, text width=12.4cm] (reject) at (9.3,-5.05)
+      {Si une validation échoue: rejet de la sous-tranche ou du cluster, puis essai du candidat suivant.};
+    \draw[arrow, dashed, red!60] (polar.south) -- (reject.north -| polar.south);
+    \draw[arrow, dashed, red!60] (outl.south) -- (reject.north -| outl.south);
+    \draw[arrow, dashed, red!60] (fit2.south) -- (reject.north -| fit2.south);
+
+    % Phase 3
+    \node[phase] at (9.3,-6.1) {Phase 3: pose 3D, historique et trajectoire};
+    \node[output] (pose)  at (0,-7.7)    {Pose 3D\\projection inverse en millimètres};
+    \node[valid]  (jump)  at (3.72,-7.7) {Rejet anti-saut\\variation de profondeur trop rapide};
+    \node[output] (hist)  at (7.44,-7.7) {Historique\\positions 3D datées};
+    \node[output] (regr)  at (11.16,-7.7){Régression\\\(X,Y\) linéaires,\\\(Z\) quadratique};
+    \node[output] (pub)   at (14.88,-7.7){Publication\\position 3D pour la partie robotique};
+    \node[output] (disp)  at (18.6,-7.7) {Affichage\\vues 2D et 3D de contrôle};
+
+    \draw[arrow] (pose) -- (jump);
+    \draw[arrow] (jump) -- (hist);
+    \draw[arrow] (hist) -- (regr);
+    \draw[arrow] (regr) -- (pub);
+    \draw[arrow] (pub) -- (disp);
+
+    % Inter-phase connectors
+    \draw[arrow] (dbscan.south) -- ++(0,-0.5) -| ($(cand.north)+(0,0.5)$) -- (cand.north);
+    \draw[arrow] (okc.south) -- ++(0,-2.9) -| ($(pose.north)+(0,0.5)$) -- (pose.north);
+
+    % Formules
+    \node[align=center, font=\small] at (9.3,-9.6)
+      {\(Z = \dfrac{f_x\,R}{r}\) \qquad
+       \(X = \dfrac{(u-c_x)\,Z}{f_x}\) \qquad
+       \(Y = \dfrac{(v-c_y)\,Z}{f_y}\) \qquad
+       avec \(R\) le rayon réel de la balle.};
+  \end{tikzpicture}}
+  \caption{Pipeline détaillé de la détection 3D par circle fitting, en trois phases: réduction du flux d'événements, validation du cluster et ajustement du cercle, puis pose 3D et trajectoire. Les formules du bas donnent la conversion du cercle image \((u,v,r)\) en position 3D dans le repère caméra.}
+  \label{fig:pipeline-circle-detaille}
+\end{figure}
+
+\chapter{Détails de la reconstruction du ruban de trace}
+\label{ann:trace-details}
+
+Cette annexe détaille les critères et les expressions utilisés par la méthode par trace événementielle pour reconstruire le ruban, dont les étapes principales sont résumées dans la partie perception.
+
+\section*{Repère local de la trace}
+
+Le centre \(c\) du nuage est estimé de manière robuste avec les médianes des coordonnées, puis les points trop éloignés sont retirés à partir d'un quantile radial. Une PCA globale fournit ensuite la direction principale \(d\) de la trace. Pour les trajectoires courbes, cette direction est corrigée par des PCA temporelles calculées sur plusieurs sous-parties de la trace; l'orientation finale combine la direction globale, la moyenne pondérée des directions locales et le déplacement temporel entre le début et la fin de la trace. Le repère local est défini par:
+
+\[
+s = (p - c) \cdot d,
+\qquad
+h = (p - c) \cdot n,
+\]
+
+où \(p\) est un événement image et \(n=(-d_y,d_x)\) est la normale à la trace. Dans les schémas de cette annexe, l'axe \(h\) est dessiné verticalement comme une hauteur; il s'agit en réalité de la coordonnée transversale à la trace: l'étendue des événements selon \(h\) correspond donc à la largeur locale du ruban, celle mesurée dans chaque bin.
+
+\section*{Bins spatiaux}
+
+La trace est découpée en bins spatiaux le long de \(s\). Chaque bin \(j\) produit une estimation locale unique, composée de trois valeurs:
+
+\[
+(s_j,h_{\text{bas},j}),
+\qquad
+(s_j,h_{\text{milieu},j}),
+\qquad
+(s_j,h_{\text{haut},j}),
+\qquad \text{avec} \quad
+h_{\text{milieu},j}=\frac{h_{\text{haut},j}+h_{\text{bas},j}}{2}.
+\]
+
+La position \(s_j\) du bin est une valeur représentative des coordonnées \(s\) de ses événements, par exemple la médiane, et la largeur locale vaut \(w_j = h_{\text{haut},j}-h_{\text{bas},j}\).
+
+\section*{Détection des bords soutenus}
+
+Prendre directement \(h_{\text{bas}}=\min h_i\) et \(h_{\text{haut}}=\max h_i\) serait trop sensible au bruit: un seul événement isolé deviendrait un faux bord et fausserait la largeur, donc la profondeur. Un bord n'est donc accepté que s'il est soutenu par assez d'événements voisins. Le support requis \(n_{\text{support}}\) est une fraction du nombre d'événements du bin, bornée entre un minimum et un maximum fixés.
+
+Les valeurs de \(h\) sont triées, puis balayées depuis chaque extrémité. Pour le bord bas, le balayage part du plus petit \(h\) et retient le premier candidat \(h_k\) dont la fenêtre \([h_k,\ h_k+r_s]\) contient au moins \(n_{\text{support}}\) événements. Le bord haut est obtenu de manière symétrique, en partant des grandes valeurs de \(h\). La \figref{fig:trace-support-edges} illustre cette logique: les points isolés aux extrémités ne sont pas retenus comme bords s'ils ne possèdent pas assez de voisins proches.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{images/Algo_Trace/Trace_Support_Edges_crop.png}
+  \caption{Recherche locale des bords par support sur l'axe \(h\). Les événements isolés sont ignorés; seuls les extrêmes possédant assez de voisins proches deviennent \(h_{\text{bas}}\) et \(h_{\text{haut}}\). L'écart entre ces deux bords, dessiné ici comme une hauteur, est la largeur locale du bin.}
+  \label{fig:trace-support-edges}
+\end{figure}
+
+Comme les événements correspondent aux centres des pixels, le bord apparent peut se trouver légèrement au-delà du dernier événement soutenu: les deux bords sont donc écartés d'une petite correction proportionnelle à la largeur locale et bornée à \(1{,}5~\text{px}\). La coupe est enfin validée: elle est rejetée si elle contient trop peu d'événements, si \(h_{\text{haut}}\leq h_{\text{bas}}\), si la largeur brute est trop faible, ou si le nombre d'événements compris entre les deux bords finaux reste inférieur au support minimal.
+
+\section*{Filtrage des estimations locales}
+
+Le filtrage se fait en deux niveaux. Le premier vérifie la cohérence globale du ruban: un modèle polynomial simple, linéaire ou quadratique selon le nombre d'échantillons, est ajusté sur les lignes médianes, et un bin est rejeté si sa ligne médiane est trop éloignée de la tendance générale ou si sa largeur locale est trop différente de la largeur médiane du ruban.
+
+Le second niveau vérifie la cohérence locale. Pour chaque bin \(j\), une petite régression sur les bins voisins, par exemple \(j-4\) à \(j+4\) en ignorant le bin courant pour éviter qu'il ne se valide lui-même, prédit les valeurs attendues \(\hat{h}_{\text{bas},j}\), \(\hat{h}_{\text{milieu},j}\), \(\hat{h}_{\text{haut},j}\) et \(\hat{w}_j\). Le bin est supprimé s'il casse la continuité locale:
+
+\[
+|w_j - \hat{w}_j| > \tau_w,
+\qquad
+|h_{\text{bas},j}-\hat{h}_{\text{bas},j}| > \tau_{\text{bas}},
+\qquad
+|h_{\text{milieu},j}-\hat{h}_{\text{milieu},j}| > \tau_{\text{milieu}},
+\qquad
+|h_{\text{haut},j}-\hat{h}_{\text{haut},j}| > \tau_{\text{haut}},
+\]
+
+où les seuils \(\tau\) dépendent de la largeur médiane du ruban et de la dispersion locale, estimée par une MAD. Cette étape évite deux erreurs opposées: garder un bin totalement incohérent qui ferait exploser la largeur, donc la profondeur; ou supprimer un bin simplement parce qu'il s'écarte de la moyenne globale alors qu'il reste cohérent avec son voisinage. La \figref{fig:trace-local-neighbour-filter} résume ce principe.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[x=1.05cm,y=0.9cm,>=Latex]
+    \draw[-Latex,thick] (0,0) -- (9.2,0) node[right] {$s$};
+    \draw[-Latex,thick] (0,-0.2) -- (0,3.2) node[above] {$h$};
+
+    \foreach \x/\y in {0.8/0.8,1.6/1.0,2.4/1.15,3.2/1.35,4.0/1.55,4.8/2.85,5.6/1.85,6.4/2.0,7.2/2.15,8.0/2.35}
+      \fill[black] (\x,\y) circle (1.8pt);
+
+    \draw[dashed,thick] (0.6,0.75) .. controls (2.5,1.1) and (6.2,1.9) .. (8.2,2.35);
+    \draw[red,thick] (4.8,2.85) circle (5pt);
+    \node[above] at (4.8,3.05) {bin aberrant};
+    \node[below] at (4.8,-0.15) {$j$};
+    \draw[decorate,decoration={brace,amplitude=5pt}] (2.4,-0.55) -- (7.2,-0.55)
+      node[midway,below=5pt] {voisins utilisés pour prédire le bin $j$};
+  \end{tikzpicture}
+  \caption{Principe du filtrage local. Le bin courant est comparé à une prédiction construite avec ses voisins; s'il crée une rupture trop forte, il est supprimé.}
+  \label{fig:trace-local-neighbour-filter}
+\end{figure}
+
+\section*{Courbes du ruban}
+
+Après filtrage, il reste trois listes d'échantillons \(\{(s_j,h_{\text{bas},j})\}\), \(\{(s_j,h_{\text{milieu},j})\}\) et \(\{(s_j,h_{\text{haut},j})\}\). Les trois courbes sont ajustées indépendamment, ce qui laisse le ruban souple: le bord haut et le bord bas ne sont pas forcés d'avoir exactement la même forme, ce qui est utile si la trace est asymétrique ou si une polarité domine localement.
+
+L'ajustement est local: autour d'une position \(s_0\), les échantillons proches pèsent davantage que les échantillons éloignés. Pour un ajustement local quadratique centré sur \(s_0\):
+
+\[
+h(s) = a(s-s_0)^2 + b(s-s_0) + c,
+\qquad
+h(s_0)=c.
+\]
+
+Les coefficients sont recalculés pour plusieurs positions \(s_0\) le long du ruban, et la fenêtre locale peut être élargie dans les zones pauvres en échantillons afin de conserver une estimation stable. Chaque point estimé est ensuite reconverti dans le repère image avec:
+
+\[
+p(s_0) = c_{\text{trace}} + s_0 d + h(s_0)n,
+\]
+
+où \(c_{\text{trace}}\) est le centre du ruban, \(d\) sa direction principale et \(n\) sa normale. La \figref{fig:trace-local-fit-curves} illustre cet ajustement.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[x=0.95cm,y=0.8cm,>=Latex]
+    \draw[-Latex,thick] (0,0) -- (9,0) node[right] {$s$};
+    \draw[-Latex,thick] (0,-1.2) -- (0,3.0) node[above] {$h$};
+
+    \foreach \x/\yb/\ym/\yh in {0.8/0.2/1.0/1.8,1.6/0.35/1.12/1.9,2.4/0.55/1.3/2.05,3.2/0.75/1.45/2.18,4.0/0.9/1.55/2.28,4.8/1.05/1.68/2.42,5.6/1.15/1.82/2.55,6.4/1.35/1.98/2.68,7.2/1.55/2.15/2.8,8.0/1.75/2.35/2.95}
+    {
+      \fill[magenta] (\x,\yb) circle (1.6pt);
+      \fill[orange] (\x,\ym) circle (1.6pt);
+      \fill[green!60!black] (\x,\yh) circle (1.6pt);
+    }
+
+    \draw[magenta,thick] (0.7,0.15) .. controls (2.7,0.55) and (5.3,1.05) .. (8.2,1.78);
+    \draw[orange,thick,dashed] (0.7,0.95) .. controls (2.8,1.35) and (5.4,1.75) .. (8.2,2.35);
+    \draw[green!60!black,thick] (0.7,1.78) .. controls (2.8,2.05) and (5.4,2.52) .. (8.2,2.95);
+
+    \node[right] at (8.25,2.95) {$h_{\text{haut}}(s)$};
+    \node[right] at (8.25,2.35) {$h_{\text{milieu}}(s)$};
+    \node[right] at (8.25,1.78) {$h_{\text{bas}}(s)$};
+
+    \draw[gray,densely dashed] (4.8,-1.05) -- (4.8,3.0);
+    \node[above right] at (4.8,0.05) {$s_0$};
+    \draw[decorate,decoration={brace,amplitude=5pt}] (3.2,-0.95) -- (6.4,-0.95)
+      node[midway,below=8pt] {fenêtre locale de fit};
+  \end{tikzpicture}
+  \caption{Les trois courbes du ruban sont ajustées à partir des échantillons valides. L'ajustement est local: autour de \(s_0\), les points proches pèsent davantage que les points éloignés.}
+  \label{fig:trace-local-fit-curves}
+\end{figure}
+
+\chapter{Paramètres des séquences simulées}
+\label{ann:sequences}
+
+Les séquences de validation présentées dans la partie perception ont été générées avec Isaac Sim \cite{nvidia-isaac-sim}, puis converties en flux événementiel avec \texttt{v2e} \cite{v2e-github,v2e-paper}, avec les paramètres suivants:
+
+\begin{itemize}
+  \item résolution vidéo: \(640 \times 480\);
+  \item fréquence d'entrée: \(500~\text{fps}\);
+  \item rayon de balle: \(0.02~\text{m}\);
+  \item calibration synthétique: \(f_x=f_y=520~\text{px}\), \(c_x=320~\text{px}\), \(c_y=240~\text{px}\);
+  \item résolution temporelle des événements: \(200~\mu\text{s}\);
+  \item seuils de génération ON/OFF: \(0.15\).
+\end{itemize}
+
+\chapter{Résultats numériques de la calibration caméra-robot}
+\label{ann:handeye}
+
+Cette annexe regroupe les valeurs numériques de la calibration extrinsèque caméra-robot décrite dans la partie intégration robotique. Les longueurs sont en mètres et les quaternions sont donnés dans l'ordre \((x, y, z, w)\).
+
+La pose de la caméra dans le repère de la base du robot est:
+
+\[
+t_{B \to C} =
+\begin{bmatrix}
+0{,}4294 \\
+-0{,}5946 \\
+0{,}4345
+\end{bmatrix}~\text{m},
+\qquad
+q_{B \to C} =
+\begin{bmatrix}
+0{,}4319 \\
+0{,}5815 \\
+-0{,}5498 \\
+-0{,}4160
+\end{bmatrix},
+\]
+
+soit une orientation d'environ \((-92{,}8^\circ,\ -0{,}5^\circ,\ 106{,}3^\circ)\) en angles roulis-tangage-lacet.
+
+La transformation entre l'effecteur du robot et le centre de la zone active de l'écran, issue de la géométrie du support et des mesures de bords, est:
+
+\[
+t_{E \to S} =
+\begin{bmatrix}
+-0{,}0053 \\
+-0{,}0006 \\
+0{,}1588
+\end{bmatrix}~\text{m},
+\qquad
+q_{E \to S} =
+\begin{bmatrix}
+-0{,}0002 \\
+0{,}7118 \\
+-0{,}0007 \\
+0{,}7024
+\end{bmatrix}.
+\]
+
+Pour cette seconde transformation, la représentation en angles d'Euler est à éviter: le tangage proche de \(90^\circ\) place la conversion au voisinage du blocage de cardan, et seule la forme quaternion est numériquement fiable.
+
+Les critères de validation associés à cette calibration sont les suivants:
+
+\begin{table}[H]
+  \centering
+  \caption{Métriques de validation de la calibration extrinsèque caméra-robot.}
+  \label{tab:handeye-metrics}
+  \begin{tabular}{L{0.52\textwidth}L{0.38\textwidth}}
+    \toprule
+    Métrique & Valeur \\
+    \midrule
+    Poses retenues & 18 \\
+    Résidu de translation (moyen / max) & \(0{,}94~\text{mm}\) / \(2{,}24~\text{mm}\) \\
+    Résidu de rotation (moyen / max) & \(0{,}25^\circ\) / \(0{,}44^\circ\) \\
+    Sensibilité au retrait d'une pose (pire cas) & \(0{,}36~\text{mm}\) / \(0{,}05^\circ\) \\
+    Erreur de reprojection (RMS / max, 342 points) & \(1{,}22~\text{px}\) / \(3{,}46~\text{px}\) \\
+    Diversité angulaire des poses & \(\approx 90^\circ\) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+L'estimation de la position de la zone active de l'écran dans le téléphone, utilisée pour construire la transformation effecteur-écran, repose sur les mesures de bords suivantes:
+
+\begin{table}[H]
+  \centering
+  \caption{Estimation des bords entre le téléphone et la zone active de l'écran.}
+  \label{tab:smartphone-screen-offsets}
+  \begin{tabular}{lcc}
+    \toprule
+    Élément & En pixels & En millimètres estimés \\
+    \midrule
+    Bord gauche & \(\approx 23~\text{px}\) & \(\approx 2{,}92~\text{mm}\) \\
+    Bord droit & \(\approx 21\) à \(22~\text{px}\) & \(\approx 2{,}67\) à \(2{,}80~\text{mm}\) \\
+    Bord haut & \(\approx 23~\text{px}\) & \(\approx 2{,}93~\text{mm}\) \\
+    Bord bas & \(\approx 26~\text{px}\) & \(\approx 3{,}31~\text{mm}\) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\chapter{Récapitulatif des réalisations du stage}
+\label{ann:realisations}
+
+Cette annexe récapitule, par thème, les principales réalisations produites pendant le stage. Chacune est décrite et analysée dans le corps du rapport; la liste sert de vue d'ensemble de la contribution personnelle.
+
+\section*{Perception événementielle}
+
+\begin{itemize}
+  \item Algorithme de détection 3D par circle fitting: filtrage et réduction du flux d'événements, clustering, ajustement de cercle avec validations de polarité et de symétrie, calcul de la pose 3D et régression de trajectoire.
+  \item Algorithme de détection 3D par trace événementielle: reconstruction du ruban laissé par la balle, estimation locale des largeurs, conversion 3D et régression pondérée, conçu pour répondre aux limites du circle fitting sur les balles rapides.
+  \item Interface de visualisation temps réel développée avec raylib \cite{raylib}: affichage des événements, des détections et des trajectoires en vues 2D et 3D, avec les outils de diagnostic utilisés pour l'analyse des erreurs.
+\end{itemize}
+
+\section*{Calibration}
+
+\begin{itemize}
+  \item Logiciel de calibration intrinsèque par mire événementielle affichée sur écran: génération de la mire clignotante, détection des disques, calibration robuste et test de validation par cibles carrées.
+  \item Logiciel de calibration extrinsèque caméra-robot: détection de la mire portée par le robot, résolution multi-poses de la transformation caméra-base et métriques de validation associées.
+  \item Conception et impression 3D du support fixant le smartphone porte-mire à l'effecteur du robot.
+\end{itemize}
+
+\section*{Simulation et apprentissage}
+
+\begin{itemize}
+  \item Génération de séquences événementielles simulées avec vérité terrain: balle lancée dans Isaac Sim \cite{nvidia-isaac-sim}, conversion du rendu en flux d'événements, utilisée pour valider quantitativement les deux méthodes de perception.
+  \item Entraînement par renforcement PPO \cite{schulman-ppo} d'une politique d'interception dans Isaac Lab \cite{nvidia-isaac-lab}, avec les deux variantes de montage du filet.
+\end{itemize}
+
+\section*{Intégration robotique}
+
+\begin{itemize}
+  \item Boucle d'interception temps réel à \(60~\text{Hz}\) reliant la perception à la politique apprise, avec limites articulaires, couche de sécurité indépendante et chien de garde.
+  \item Générateur de balles virtuelles permettant de valider la chaîne de commande complète sans caméra.
+  \item Interface de supervision et de contrôle: visualisation 3D en direct du robot et de la balle, suivi du mouvement commandé, restitution de la calibration extrinsèque, armement de la commande, réglage du facteur de vitesse et lancement de balles virtuelles.
+  \item Conception et impression 3D du support de maintien du filet d'interception sur l'effecteur.
+\end{itemize}
 
 \clearpage
 \phantomsection
@@ -1590,6 +1710,31 @@ CAP 20-25,
 CAP 20-25,
 \emph{Useful information of CIR ITPS}.
 \href{https://cap2025.fr/en/research/scientific-challenges/international-research-centre-on-innovative-transportation-and-production-systems/useful-information-of-cir-itps}{https://cap2025.fr/.../useful-information-of-cir-itps}
+
+\bibitem{uca-universite}
+Université Clermont Auvergne,
+\emph{Site institutionnel de l'Université Clermont Auvergne}.
+\url{https://www.uca.fr/}
+
+\bibitem{institut-pascal}
+Institut Pascal,
+\emph{Présentation de l'Institut Pascal}, site officiel.
+\url{http://www.institutpascal.uca.fr/index.php/fr/l-institut-pascal/presentation}
+
+\bibitem{ispr-axe}
+Institut Pascal,
+\emph{Axe Image, Systèmes de Perception, Robotique (ISPR)}, site officiel.
+\url{http://www.institutpascal.uca.fr/index.php/fr/presentation-ispr}
+
+\bibitem{ip-maccs}
+Institut Pascal,
+\emph{Équipe MACCS -- Modélisation, Autonomie et Contrôle dans les Systèmes Complexes}, site officiel.
+\url{http://www.institutpascal.uca.fr/index.php/fr/maccs}
+
+\bibitem{ip-comsee}
+Institut Pascal,
+\emph{Équipe ComSee -- Computers that See}, site officiel.
+\url{http://www.institutpascal.uca.fr/index.php/fr/comsee}
 
 \bibitem{inivation-dvxplorer}
 iniVation,

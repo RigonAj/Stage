@@ -270,6 +270,41 @@ See [docs/COMMANDS.md](docs/COMMANDS.md) for dependency installation, builds,
 calibration capture/solve, real Trace integration, diagnostics, replay,
 system-identification, tests and every useful command.
 
+## Internship Report (LaTeX)
+
+`Stage_summary.tex` is compiled from the repository root with the provided
+script. It uses `latexmk` and produces `Stage_summary.pdf` while removing the
+temporary LaTeX files afterwards. Detailed notes are in
+[`docs/latex_compilation.md`](docs/latex_compilation.md).
+
+For a user-local installation without `sudo` (Ubuntu/Linux):
+
+```bash
+TMP_DIR="$(mktemp -d)"
+curl -fsSL https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz \
+  | tar -xz -C "$TMP_DIR"
+INSTALLER_DIR="$(find "$TMP_DIR" -maxdepth 1 -type d -name 'install-tl-*' -print -quit)"
+"$INSTALLER_DIR/install-tl" --no-interaction --scheme=minimal \
+  --texdir="$HOME/.local/texlive/2026" --persistent-downloads
+rm -rf "$TMP_DIR"
+```
+
+Add the local TeX Live binaries to the current shell, then compile:
+
+```bash
+export PATH="$HOME/.local/texlive/2026/bin/x86_64-linux:$PATH"
+source env.sh
+compile-report
+```
+
+Alternatively, on Ubuntu with administrative access:
+
+```bash
+sudo apt update
+sudo apt install latexmk texlive-latex-base texlive-latex-extra \
+  texlive-pictures texlive-lang-french texlive-fonts-recommended lmodern
+```
+
 ## Notes
 
 Depth estimation is sensitive to the width measured in pixels: a small pixel error can create a large depth error, especially when the ball is far from the camera. The Trace view exposes every parameter of the supported-edge detector (`Support div/min/max`, `Support radius px`, `Border %`) and of the ribbon fit so this measurement can be inspected and tuned. See `docs/trace_algorithm_explanation.html` for the tuning guide.

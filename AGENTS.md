@@ -57,6 +57,14 @@ diaporama/slides, read `skills/soutenance-catch-slides/SKILL.md` before editing
 the LaTeX deck. Follow that skill for the Catch a ball visual style, Okular
 video handling, layout validation, and common slide-design errors to avoid.
 
+## Stage Report Requests
+
+When the user asks to create, modify, continue, review or fix the internship
+report `Stage_summary.tex`, read `skills/stage-report-editor/SKILL.md` before
+editing it. Preserve the report's academic narrative and surrounding context,
+and describe the engineering work without source-code or software-internals
+narration unless the user explicitly requests such details.
+
 ## Wiki Page Conventions
 
 - `wiki/` uses one topic directory level only: `wiki/<topic>/<article>.md`.

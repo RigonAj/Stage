@@ -90,7 +90,7 @@ Agent workflow, commands and wiki maintenance.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Testing And Commands](operations/testing-and-commands.md) | README quick start, detailed command reference, the exact 2026-07-16 real-ball launch/diagnostic commands and the new offline replay / rosbag diagnostic commands. | 2026-07-16 |
+| [Testing And Commands](operations/testing-and-commands.md) | README quick start, detailed command reference, report compilation, the exact 2026-07-16 real-ball launch/diagnostic commands and the offline replay / rosbag diagnostic commands. | 2026-07-16 |
 | [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md) | Operator checklist before enable_command, ±2π gate, staged v_safe_scale ramp-up, monitoring and the current lead=0/timestamp-latency warning. | 2026-07-10 |
 | [Wiki Maintenance](operations/wiki-maintenance.md) | Ingest/query/lint rules adapted from the Karpathy LLM wiki pattern. | 2026-06-29 |
 | [Source Document Map](operations/source-document-map.md) | How the raw Markdown docs are combined or split into compiled wiki concepts. | 2026-06-29 |

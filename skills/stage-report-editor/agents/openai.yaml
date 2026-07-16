@@ -1,0 +1,4 @@
+interface:
+  display_name: "Éditeur du rapport de stage"
+  short_description: "Réviser le rapport avec cohérence académique"
+  default_prompt: "Utilise $stage-report-editor pour modifier Stage_summary.tex en conservant le contexte scientifique et sans détails de code."
