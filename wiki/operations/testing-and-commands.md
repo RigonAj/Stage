@@ -1,7 +1,32 @@
 # Testing And Commands
 
-> Sources: repository README, 2026-07-02; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02; hold-side variant and Isaac repo path check, 2026-07-06; stack --tracker option, 2026-07-09
-> Raw: [README](../../README.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Stack script](../../scripts/launch_ur3e_virtual_ball_stack.sh)
+> Sources: repository README quick start, 2026-07-16; project command reference, 2026-07-16; live-catch README, 2026-06-29; implementation status, 2026-06-30; web UI docs, 2026-06-30; user hardware report, 2026-07-02; hold-side variant and Isaac repo path check, 2026-07-06; stack --tracker option, 2026-07-09; real-ball perception diagnosis commands, 2026-07-16
+> Raw: [README](../../README.md); [Command reference](../../docs/COMMANDS.md); [Live-catch README](../../src/ur3e_live_catch/README.md); [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Web UI docs](../../docs/Robot_Control/ur3e_web_ui.md); [Stack script](../../scripts/launch_ur3e_virtual_ball_stack.sh)
+
+## Root Command Reference
+
+The root `README.md` is a short operator quick start with five entries:
+standalone Trace perception, real UR3e + Web UI, publication/validation of the
+hand-eye TF, the live-catch integration stack, and (since 2026-07-16) the
+ordered **robot-disarmed real-ball perception test** — four terminals (TF,
+`--tracker` stack with `--ball-radius 45.0`, raw boundary, fitted boundary),
+startup log checks, heartbeat/validity acceptance criteria and the manual
+REC recording with automatic timestamp archiving. The stack
+distinguishes fake-hardware virtual-ball testing, virtual-ball testing on the
+real UR3e, and real DVXplorer `--tracker` mode: `--tracker` replaces
+`test_ball_node`, so the UI virtual-ball controls are intentionally disabled. The full command inventory
+moved to `docs/COMMANDS.md`; it groups
+environment/dependency setup, targeted builds, perception, intrinsic and
+extrinsic calibration, robot/UI bring-up, single-stack live catch, dry-run
+diagnostics, rollout replay, system identification, tests and wiki/report
+maintenance. The topic runbooks linked in `## See Also` remain authoritative
+for ordered physical procedures and acceptance gates.
+
+The `env.sh` helper `build` is intentionally perception-only: it builds
+`ur3e_catch_msgs`, then `ball_tracking_cpp` with GCC 13. The Python robot
+packages (`ur3e_live_catch`, `ur3e_rollout_replay`, `ur3e_web_ui`,
+`ur3e_sysid`) require the explicit `colcon build --symlink-install
+--packages-select ...` command from the README.
 
 ## Environment
 
@@ -24,6 +49,95 @@ colcon build --packages-select ball_tracking_cpp
 run
 ur3e_stack
 ur3e_catch_stack
+```
+
+### Commands From The 2026-07-16 Real-Ball Session
+
+The first three README entries were launched separately during bring-up:
+
+```bash
+source env.sh
+run
+
+UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 ur3e_stack
+
+python3 scripts/publish_camera_tf.py calibration/handeye_result.yaml
+```
+
+They start standalone perception, the real robot/Web UI and the hand-eye TF,
+respectively. They do **not** start `live_catch_node`; the integrated inference
+session must instead use the single live-catch stack below. Do not keep the
+standalone tracker running beside `--tracker`, because that would create a
+second perception producer.
+
+The real-camera graph inspected later corresponds to this single-stack mode:
+
+```bash
+source env.sh
+ur3e_catch_stop
+UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 \
+  ur3e_catch_stack --real --tracker \
+  --hold-side left \
+  --ball-radius 45.0 \
+  --model-path data/models/latest-left/policy_deterministic.onnx
+```
+
+Commands entered or used during the diagnosis:
+
+```bash
+ros2 node list | grep -E 'live_catch|ball_regression|ball_tracking'
+ros2 topic info /ball_state_raw --verbose
+ros2 topic info /ball_state --verbose
+ros2 topic info /catch_telemetry --verbose
+ros2 topic echo /catch_telemetry --once
+ros2 control list_controllers
+ros2 param dump /ball_tracking_cpp
+ros2 param dump /ball_regression_node
+```
+
+The graph was correct, but `/ball_state` was only the regression node's 60 Hz
+`valid=false` heartbeat. Before another physical throw, use the Web UI
+**Stop / back to safe** control and verify the command heartbeat, then inspect
+the raw and fitted boundaries separately:
+
+```bash
+ros2 topic echo /catch_telemetry --once | grep command_enabled
+# Expected: command_enabled: false
+
+ros2 topic echo /ball_state_raw
+ros2 topic echo /ball_state
+```
+
+The 2026-07-16 evidence showed no first valid raw Trace sample; changing
+ball-regression gates cannot repair that upstream failure. See
+[Real Perception Trace Test Runbook](../perception/real-perception-trace-test.md)
+for the full diagnosis and perception-GUI checks.
+
+Root cause fixed the same day: the tracker used to start in File/reader mode
+(GUI default) and processed no camera events. New `ball_tracking_cpp`
+parameters (`live_catch.yaml` defaults): `use_reader:=false` (live camera at
+startup), `trace_polarity_mode:=all`, manual recording via the GUI REC toggle
+(`record:=false` default, `record_file:=realtest.h5` target under
+`recordings/`, existing non-empty targets archived with a timestamp suffix)
+and `reader_file` for scripted replay. The tracker
+now logs a 2 s `trace status` heartbeat with per-stage peaks. Offline replay
+diagnostic (robot disarmed, no driver):
+
+```bash
+# Replay a recorded session through the tracker alone:
+ros2 run ball_tracking_cpp talker --ros-args \
+  --params-file src/ur3e_live_catch/config/live_catch.yaml \
+  -p ball_state_topic:=ball_state_raw \
+  -p use_reader:=true -p reader_file:=realtest_2026-07-09_backup.h5 -p record:=false
+
+# Or through the launch (tracker + regression + live node dry-run):
+ros2 launch ur3e_live_catch live_catch.launch.py \
+  use_tracker:=true use_ball_regression:=true enable_command:=false \
+  use_reader:=true reader_file:=realtest_2026-07-09_backup.h5
+
+# ROS-level capture during live sessions, next to the default H5 recording:
+ros2 bag record -o rosbags/real_$(date +%Y%m%d_%H%M%S) \
+  /ball_state_raw /ball_state /catch_telemetry /joint_states /tf /tf_static
 ```
 
 `ur3e_catch_stack` is the one-command live-catch inference bring-up. It starts
@@ -94,21 +208,20 @@ Offline regression tuning on real captures (record during throws, then replay
 with parameter overrides — no robot session needed):
 
 ```bash
-ros2 bag record /ball_state_raw /tf_static
-python3 scripts/replay_ball_regression.py <bag_dir> \
+BAG_DIRECTORY="recordings/ball_regression_$(date +%Y%m%d_%H%M%S)"
+ros2 bag record -o "$BAG_DIRECTORY" /ball_state_raw /tf_static
+# Stop recording with Ctrl+C, then:
+python3 scripts/replay_ball_regression.py "$BAG_DIRECTORY" \
   --set depth_sigma_scale=8.0 --set max_rms_m=0.05
-```
-
-```bash
 ```
 
 ## Tests
 
 ```bash
-cd src/ur3e_live_catch && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q
-cd src/ur3e_rollout_replay && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q
-cd src/ur3e_web_ui && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q
-cd src/ur3e_sysid && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q
+(cd src/ur3e_live_catch && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q)
+(cd src/ur3e_rollout_replay && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q)
+(cd src/ur3e_web_ui && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q)
+(cd src/ur3e_sysid && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q)
 ```
 
 ## Isaac Sim2real Checks
@@ -173,6 +286,11 @@ python3 scripts/update_agent_wiki.py
 ## See Also
 
 - [Real Robot Bring-Up Runbook](real-robot-bringup-runbook.md)
+- [Real Perception Trace Test Runbook](../perception/real-perception-trace-test.md)
+- [Intrinsic Calibration Runbook](../calibration/intrinsic-calibration-runbook.md)
+- [Extrinsic Calibration Runbook](../calibration/extrinsic-calibration-runbook.md)
+- [Rollout Replay And Driver Setup](../replay/rollout-replay-and-driver-setup.md)
+- [UR3e Actuator Identification](../system-id/ur3e-actuator-identification.md)
 - [Isaac Training Environment](../sim-to-real/isaac-training-environment.md)
 - [Wiki Maintenance](wiki-maintenance.md)
 - [Source Document Map](source-document-map.md)

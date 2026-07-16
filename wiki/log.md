@@ -447,3 +447,97 @@
   Europe/Paris from 18 cleaned physical samples. Records the example
   `base -> camera_optical` and `tool0 -> screen_center` transforms, static TF
   command, solver/residual validation and remaining physical parity checks.
+
+## [2026-07-16] ingest | Centralize useful project commands in the root README
+
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: expanded `README.md` command reference covering dependencies, scoped
+  builds, perception, intrinsic/extrinsic calibration, UR3e/UI and live-catch
+  bring-up, diagnostics, replay, system identification, tests and maintenance.
+
+## [2026-07-16] ingest | Split quick start from detailed command reference
+
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: `README.md` now keeps only perception, real robot/UI, hand-eye TF and
+  fake-hardware live-catch launch commands; the complete inventory moved to
+  `docs/COMMANDS.md`.
+
+## [2026-07-16] ingest | Clarify virtual-ball testing on the real UR3e
+
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: operator validation and `README.md` quick-start update. The real-UR3e
+  virtual-ball command omits `--tracker`, uses the left hold/model pair, and
+  starts in dry-run; `--tracker` intentionally disables virtual-ball controls.
+
+## [2026-07-16] ingest | Real-ball session blocked before ballistic regression
+
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: operator real-UR3e/real-ball report, live ROS graph/parameter
+  inspection and current-session ROS logs. The tracker, regression and live
+  node were singular and correctly wired, but the regression never left idle:
+  C++ Trace produced no first valid `/ball_state_raw` sample. The 60 Hz
+  `/ball_state` stream was only an invalid heartbeat and the live watchdog
+  correctly held the robot with `no_valid_ball`. Records the launch and
+  boundary-diagnostic commands and makes robot-disarmed raw Trace validation
+  the first blocker.
+
+## [2026-07-16] ingest | Tracker reader-mode root cause fixed; perception chain validated offline
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: same-day code diagnosis and changes in `Ball_Tracking_Cpp`
+  (publisher node, Gui) + `live_catch.yaml`/launch. Root cause of the
+  2026-07-16 no-valid-sample session: the GUI hardcoded `reader_mode = true`,
+  so the tracker always started in File mode and processed no camera events;
+  polarity also defaulted to Negative. New ROS parameters: `use_reader`
+  (default live camera), `trace_polarity_mode` (default all), `record` +
+  `record_file` (default H5 capture to `recordings/realtest.h5`, overwritten
+  per session), `reader_file` (scripted replay, autoplay); throttled
+  idle/no-camera warnings and a 2 s trace-status heartbeat with stage peaks.
+  Offline replay of the 2026-07-09 real throw
+  (`recordings/realtest_2026-07-09_backup.h5`) through tracker + regression +
+  hand-eye TF produced 12–13 valid raw samples and 27 valid fitted samples on
+  `/ball_state` (flight idle→collecting→tracking→ended, RMS 0.013 m).
+
+## [2026-07-16] ingest | README gains the ordered disarmed real-ball test procedure
+
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: user request; `README.md` section 5 now holds the four-terminal
+  robot-disarmed real-ball procedure (hand-eye TF, `--tracker` stack with
+  `--ball-radius 45.0` and left model, raw/fitted echo boundaries, optional
+  rosbag), the startup log checks, the heartbeat/validity acceptance criteria
+  and the post-session copy of the overwritten `recordings/realtest.h5`.
+  Radius semantics documented: 45.0 mm radius = Ø 90 mm ball.
+
+## [2026-07-16] ingest | Reader UI preselects realtest.h5 at startup
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Source: user request; new `ball_tracking_cpp` parameter
+  `default_reader_file` (default `realtest.h5`, set in `live_catch.yaml`).
+  It fills the GUI Read-file box and switches the reader source to
+  Recordings at startup without changing modes, so File → Play replays the
+  session buffer in one click. `reader_file` (forced autoplay replay) takes
+  priority. Verified: camera-mode startup unchanged, forced replay unchanged.
+
+## [2026-07-16] ingest | Recording made manual again + timestamp archiving (data-loss incident)
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: operator incident during the first live real-ball session after the
+  reader-mode fix. The brief `record: true` default truncated the previous
+  `realtest.h5` on session start and a File-mode review click closed an empty
+  writer over it. Note: the same session log showed `published=210` — live
+  Trace published 210 valid samples on real throws, first live evidence the
+  perception path works. Changes: `record` default back to `false` (manual
+  GUI REC toggle; `record:=true` arms at launch), and `Gui::OpenWriterFromUi`
+  now archives any existing non-empty recording target as
+  `<name>_YYYYMMDD_HHMMSS.h5` (collision-safe) instead of truncating.
+  The 2026-07-09 real throw remains safe in
+  `recordings/realtest_2026-07-09_backup.h5` and was restored to
+  `recordings/realtest.h5` for the one-click GUI replay.

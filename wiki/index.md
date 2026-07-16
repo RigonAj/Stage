@@ -15,8 +15,8 @@ Event-camera ball tracking and 3D pose estimation.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, ROI/ribbon/width-depth pipeline, output contract, GUI-capped cadence, event-clock re-anchoring, binary live confidence and non-persisted robustness controls. | 2026-07-10 |
-| [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure for calibrated real Trace and the single `--tracker` stack, now with the 2026-07-10 lead=0 baseline and timestamp-measurement warning before command mode. | 2026-07-10 |
+| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, ROI/ribbon/width-depth pipeline, output contract, GUI-capped cadence, event-clock re-anchoring, binary live confidence, and the 2026-07-16 I/O parameters (camera-mode startup, polarity all, H5 recording, scripted replay, trace-status heartbeat) validated offline on a real throw. | 2026-07-16 |
+| [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure for calibrated real Trace and the single `--tracker` stack; the 2026-07-16 no-valid-sample diagnosis, its root cause (tracker started in File/reader mode) and the offline replay validation of the fixed chain. | 2026-07-16 |
 | [Perception Robustness And Flight Lifecycle](perception/perception-robustness-flight-lifecycle.md) | Independent review of the 2026-07-09 incident: lead=0 default decision, timestamp/quality gaps, explicit throw lifecycle, left-policy envelope and validation gates. | 2026-07-10 |
 
 ## calibration
@@ -48,7 +48,7 @@ Closed-loop perception-to-policy-to-robot path.
 | [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState`, raw/fitted topics, velocity/confidence/heartbeat contracts, single-producer rule, lead=0 default and the measurement-vs-state timestamp mismatch. | 2026-07-10 |
 | [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model/v_safe_scale runtime gates, safety/watchdog, 500 Hz streaming, ±2π gate, producer-conflict protection and the open synchronous command-authority exclusivity gap. | 2026-07-10 |
 | [Single Producer Contract](live-catch/single-producer-contract.md) | 2026-07-09 duplicate live_catch_node / dual ball_state producer incident, failure signatures (twitching robot, flapping UI command state), diagnostics watchdog, UI flap detection, `--tracker` stack rule and pre-command checks. | 2026-07-09 |
-| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, diagnosed duplicate-stack incident, passing post-fix checks, applied lead=0 baseline, and remaining real-data, timestamp, quality, calibration and speed blockers. | 2026-07-10 |
+| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, diagnosed duplicate-stack incident, lead=0 baseline and the 2026-07-16 real-ball result: reader-mode root cause fixed, perception chain validated offline on the recorded throw, live-throw confirmation pending. | 2026-07-16 |
 
 ## sim-to-real
 
@@ -90,7 +90,7 @@ Agent workflow, commands and wiki maintenance.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Testing And Commands](operations/testing-and-commands.md) | Build, launch, live-catch fake/real bring-up status, hold_side:=left bring-up, `--tracker` real-perception stack option, package tests, Isaac sim2real export/check commands (current Isaac repo path, FT_TASK left variant) and wiki maintenance commands. | 2026-07-09 |
+| [Testing And Commands](operations/testing-and-commands.md) | README quick start, detailed command reference, the exact 2026-07-16 real-ball launch/diagnostic commands and the new offline replay / rosbag diagnostic commands. | 2026-07-16 |
 | [Real Robot Bring-Up Runbook](operations/real-robot-bringup-runbook.md) | Operator checklist before enable_command, ±2π gate, staged v_safe_scale ramp-up, monitoring and the current lead=0/timestamp-latency warning. | 2026-07-10 |
 | [Wiki Maintenance](operations/wiki-maintenance.md) | Ingest/query/lint rules adapted from the Karpathy LLM wiki pattern. | 2026-06-29 |
 | [Source Document Map](operations/source-document-map.md) | How the raw Markdown docs are combined or split into compiled wiki concepts. | 2026-06-29 |

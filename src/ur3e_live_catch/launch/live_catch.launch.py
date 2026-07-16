@@ -156,6 +156,12 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("camera_calibration_file",
                               default_value="recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml",
                               description="OpenCV XML intrinsics consumed by ball_tracking_cpp"),
+        DeclareLaunchArgument("use_reader", default_value="false",
+                              description="tracker input: false = live DVXplorer camera, "
+                                          "true = File/reader playback"),
+        DeclareLaunchArgument("reader_file", default_value="",
+                              description="recordings/ H5 file to replay through the tracker "
+                                          "(forces reader mode, autoplay); empty = no replay"),
         DeclareLaunchArgument("policy_python", default_value=policy_python_default,
                               description="python interpreter for live_catch_node; empty => ROS Python"),
         LogInfo(msg=interpreter_note),
@@ -178,6 +184,8 @@ def generate_launch_description() -> LaunchDescription:
                 {"camera_calibration_file": ParameterValue(camera_calibration_file, value_type=str)},
                 {"trace_lead_ms": ParameterValue(tracker_lead_ms, value_type=float)},
                 {"trace_hold_ms": ParameterValue(tracker_hold_ms, value_type=float)},
+                {"use_reader": ParameterValue(LaunchConfiguration("use_reader"), value_type=bool)},
+                {"reader_file": ParameterValue(LaunchConfiguration("reader_file"), value_type=str)},
             ],
             output="screen",
             condition=IfCondition(use_tracker),

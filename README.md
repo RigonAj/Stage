@@ -101,127 +101,174 @@ Generated folders such as `build/`, `install/`, `log/`, `.deps/` are ignored by 
 - `src/Ball_Tracking_Cpp/src/EventWriter.cpp`: H5/bin reading and writing, v2e `(N,4)` event format support.
 - `src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/RegressionAccumulator.hpp`: linear and quadratic regressions.
 
-## Dependencies
+## Essential Commands
 
-- Linux
-- ROS 2
-- CMake
-- GCC/G++
-- OpenCV
-- Eigen3
-- fmt
-- TBB
-- Raylib
-- raygui
-- libusb
-- HDF5
-- `dv-processing`
-- DVXplorer camera support
-
-## Ubuntu 24.04 Dependency Setup
-
-Check what is missing first:
+Run commands from the workspace root:
 
 ```bash
-scripts/install_dependencies_ubuntu24.sh --check
-```
-
-Install missing dependencies after the check:
-
-```bash
-scripts/install_dependencies_ubuntu24.sh --install
-```
-
-Or source the environment helper and use the aliases:
-
-```bash
+cd ~/Dv-Rosws/Dv-Rosws
 source env.sh
-deps-check
-deps-install
 ```
 
-## Build and Run
+### 1. Launch Perception
 
-From the workspace root:
+Starts the DVXplorer Trace application and its graphical interface:
 
 ```bash
-source env.sh
-build
 run
 ```
 
-`build` sets up the ROS environment and builds the C++ package with colcon; `run` starts the `talker` node with the GUI.
+### 2. Launch the UR3e Robot and Web UI
 
-## UR3e Live-Catch Inference Stack
-
-Build the robot UI and live-catch packages before launching the inference stack:
+Starts the real UR3e driver, MoveIt and the Web UI at
+<http://127.0.0.1:8080>:
 
 ```bash
-source env.sh
-colcon build --symlink-install --packages-select \
-  ur3e_catch_msgs ur3e_live_catch ur3e_rollout_replay ur3e_web_ui
-source install/setup.bash
+UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 ur3e_stack
 ```
 
-Recommended one-command bring-up with fake hardware:
+This targets the physical robot. Check the workspace, reduced-speed mode and
+E-stop before sending any motion from the UI. Stop the stack with:
 
 ```bash
-source env.sh
+ur3e_stop
+```
+
+### 3. Publish the Hand-Eye Camera TF
+
+Keep this command running in a separate terminal while using calibrated
+perception:
+
+```bash
+python3 scripts/publish_camera_tf.py calibration/handeye_result.yaml
+```
+
+Validate the transform from another sourced terminal:
+
+```bash
+ros2 run tf2_ros tf2_echo base_link camera_optical
+```
+
+### 4. Launch the Integrated Live-Catch Stack
+
+The stack uses exactly one ball source. For a safe integration check, start
+fake hardware with a virtual ball:
+
+```bash
 ur3e_catch_stack --fake
 ```
 
-Recommended one-command bring-up on the real UR3e:
+To launch a **virtual ball on the real UR3e** with the documented left-hand
+mount and matching policy, omit `--tracker`:
 
 ```bash
-source env.sh
-UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 ur3e_catch_stack --real
+UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 \
+  ur3e_catch_stack --real \
+  --hold-side left \
+  --model-path data/models/latest-left/policy_deterministic.onnx
 ```
 
-`ur3e_catch_stack` launches the UR driver, MoveIt, `live_catch_node`,
-`test_ball_node` in trigger mode, the Isaac-matched `wrist_3_link -> hoop_center`
-TF, and the Web UI at `http://127.0.0.1:8080`. The live-catch node loads the
-default policy from `data/models/policy_deterministic.onnx` with TorchScript
-fallback, publishes telemetry, and stays in dry-run by default
-(`enable_command=false`), so no robot command is emitted until the Web UI Test
-tab explicitly enables command mode.
-
-Open the Web UI, select the **Test** tab, choose `latest` or `best` if needed,
-then use **Launch virtual ball** or **Isaac random**. To stop the stack:
+Both variants start with robot commanding disabled. Open
+<http://127.0.0.1:8080>, select the **Test** tab and use **Launch virtual
+ball**. The `--tracker` option selects the real DVXplorer instead and therefore
+disables all virtual-ball controls. Stop either stack with:
 
 ```bash
 ur3e_catch_stop
 ```
 
+### 5. Real-Ball Perception Test (Robot Disarmed)
 
-Useful variants:
+First validation of real Trace perception after the 2026-07-16 fix: the
+tracker now starts on the **live camera** by default (`use_reader:=false`),
+uses polarity `all` and prints a `trace status` heartbeat every 2 s. Event
+recording is **manual**: press **REC** in the GUI to capture throws into
+`recordings/realtest.h5` (or arm it from launch with `record:=true`). When a
+recording starts, an existing non-empty target file is archived with a
+timestamp suffix — never truncated. `--ball-radius` expects the **radius** in
+millimetres: `45.0` corresponds to a Ø 90 mm ball (if your ball measures
+45 mm across, use `22.5`). Trace depth scales directly with this value.
 
-```bash
-# Use a specific exported policy.
-ur3e_catch_stack --fake --model-path data/models/latest/policy_deterministic.onnx
-
-# Expose the UI on the LAN or use another local port.
-UR3E_UI_HOST=0.0.0.0 ur3e_catch_stack --fake
-ur3e_catch_stack --fake --port 8081
-
-# Start in command mode only after workspace/E-stop checks.
-ur3e_catch_stack --real --model-path data/models/latest/policy_deterministic.onnx --enable-command
-```
-
-Direct ROS launch equivalents:
+**Terminal A — hand-eye camera TF** (keep running for the whole session):
 
 ```bash
-# Fake hardware + virtual ball + inference + UI.
-ros2 launch ur3e_live_catch virtual_ball_robot.launch.py use_fake_hardware:=true
-
-# Real robot + virtual ball + inference + UI.
-ros2 launch ur3e_live_catch virtual_ball_robot.launch.py \
-  robot_ip:=192.168.0.5 reverse_ip:=192.168.0.3 use_fake_hardware:=false
-
-# If a separate UR3e driver stack is already running, start only live-catch + test ball.
-ros2 launch ur3e_live_catch live_catch.launch.py \
-  use_test_ball:=true trigger_mode:=true publish_frame:=base_link enable_command:=false
-ros2 service call /test_ball_node/throw std_srvs/srv/Trigger {}
+cd ~/Dv-Rosws/Dv-Rosws && source env.sh
+python3 scripts/publish_camera_tf.py calibration/handeye_result.yaml
 ```
+
+**Terminal B — the single live-catch stack with the real tracker** (dry-run;
+robot command stays disabled):
+
+```bash
+cd ~/Dv-Rosws/Dv-Rosws && source env.sh
+ur3e_catch_stop
+UR3E_ROBOT_IP=192.168.0.5 UR3E_REVERSE_IP=192.168.0.3 \
+  ur3e_catch_stack --real --tracker \
+  --hold-side left \
+  --ball-radius 45.0 \
+  --model-path data/models/latest-left/policy_deterministic.onnx
+```
+
+Verify in the tracker output **before any throw**:
+
+- `Input source: live camera (use_reader), trace polarity filter: all`
+- `Calibration loaded from recordings/mire_calibration/intrinsics_from_mire_robust_constrained.xml`
+- `Ball radius set to 45.0 mm`
+- a `trace status: ...` heartbeat line every 2 s
+
+To record the throws, press **REC** in the GUI (the terminal then prints
+`Writer ready at recordings/realtest.h5`).
+
+**Terminal C — one-time checks, then watch the raw tracker boundary:**
+
+```bash
+cd ~/Dv-Rosws/Dv-Rosws && source env.sh && source install/setup.bash
+ros2 run tf2_ros tf2_echo base_link camera_optical              # TF must resolve
+ros2 topic info /ball_state --verbose                           # exactly ONE publisher
+ros2 topic echo /catch_telemetry --once | grep command_enabled  # expect: false
+ros2 topic echo /ball_state_raw
+```
+
+**Terminal D — watch the fitted 60 Hz policy input:**
+
+```bash
+cd ~/Dv-Rosws/Dv-Rosws && source env.sh && source install/setup.bash
+ros2 topic echo /ball_state
+```
+
+Optional ROS-level capture for offline analysis:
+
+```bash
+ros2 bag record -o rosbags/real_$(date +%Y%m%d_%H%M%S) \
+  /ball_state_raw /ball_state /catch_telemetry /joint_states /tf /tf_static
+```
+
+**Procedure** — the robot stays disarmed for the whole session:
+
+1. Throw the ball 5–10 times through the camera field of view.
+2. During each flight, the Terminal B heartbeat must show `peak` rising above
+   ~10 000 events and the `published=` counter incrementing. If not, the
+   heartbeat names the starving stage (events → ribbon → 3d).
+3. Terminal C must show `valid: true` bursts in `camera_optical` with a
+   plausible positive depth (`position.z`); Terminal D must show `valid: true`
+   fitted samples in `base_link` with a non-zero `velocity`.
+4. Recordings survive by themselves: every time a recording (re)starts on an
+   existing non-empty file, the previous one is archived as
+   `realtest_YYYYMMDD_HHMMSS.h5` in `recordings/`.
+5. Only when steps 2–3 are repeatable, arm command mode from the Web UI
+   **Test** tab (<http://127.0.0.1:8080>) with a low `v_safe_scale` and the
+   E-stop at hand.
+
+A failed session can be replayed offline without the camera or robot
+(`use_reader:=true reader_file:=<file>.h5`); the known-good reference is
+`recordings/realtest_2026-07-09_backup.h5`. In the GUI, the reader Read-file
+box starts preselected on `realtest.h5`, so **Reader → File** then **Play**
+replays the last recording in one click. See
+[docs/COMMANDS.md](docs/COMMANDS.md).
+
+See [docs/COMMANDS.md](docs/COMMANDS.md) for dependency installation, builds,
+calibration capture/solve, real Trace integration, diagnostics, replay,
+system-identification, tests and every useful command.
 
 ## Notes
 

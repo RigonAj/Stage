@@ -173,6 +173,24 @@ ball_tracking_cpp:
     # width, stamped at the sample's own event time); "circle" = legacy
     # per-detection circle-fit pose (code default for bare ros2 run).
     pose_source: "trace"
+    # Input source at startup: false = live DVXplorer camera (required for a
+    # real session), true = File/reader playback. Before 2026-07-16 the node
+    # always started in File mode and processed no camera events until the
+    # operator clicked the GUI Reader button.
+    use_reader: false
+    # Trace polarity filter: "all" | "positive" | "negative". "all" is robust
+    # to the contrast direction of the real ball; the old GUI startup default
+    # was "negative" and starved the trace ribbon of support.
+    trace_polarity_mode: "all"
+    # Event recording is MANUAL: start/stop it with the GUI REC toggle (or arm
+    # it from launch with record: true). record_file is the H5 target (plain
+    # names land under recordings/). When the writer opens, an existing
+    # non-empty target is archived with a timestamp suffix, never truncated.
+    record: false
+    record_file: "realtest.h5"
+    # Reader-UI preselection (no mode change): the GUI Read-file box starts on
+    # this recordings/ file so File -> Play replays it in one click.
+    default_reader_file: "realtest.h5"
     # Lead/coast prediction sliders, ROS-initialized. Keep 0 (measurements
     # only) when the regression node consumes the output; the launch pins them
     # to 0 under use_ball_regression regardless of these values.

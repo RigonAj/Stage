@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <execution>
 #include <filesystem>
 #include <format>
@@ -1635,14 +1636,43 @@ void Gui::Update() {
         }
         if(ui.save == 1){
             ui.save = 0;
-            path_writer_ = MakeEventPath(std::string(ui.save_file), "events3");
             if (event_writer_ != nullptr) event_writer_->close();
             if (event_reader_ != nullptr) event_reader_->close();
             ui.PausePlayback();
-            event_writer_ = std::make_unique<EventWriter>(path_writer_);
+            OpenWriterFromUi();
             ui.ClearFileTextFocus();
         }
 	}
+}
+
+void Gui::OpenWriterFromUi() {
+    path_writer_ = MakeEventPath(std::string(ui.save_file), "events3");
+
+    // Never truncate a previous recording silently (2026-07-16 data-loss
+    // incident): archive any existing non-empty target with a timestamp
+    // suffix before the writer opens. ~2 KB is an empty H5 header.
+    std::error_code ec;
+    if (fs::exists(path_writer_, ec) && fs::file_size(path_writer_, ec) > 2048) {
+        const std::time_t now = std::time(nullptr);
+        char stamp[32];
+        std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", std::localtime(&now));
+        const fs::path source(path_writer_);
+        fs::path rotated = source.parent_path()
+            / (source.stem().string() + "_" + stamp + source.extension().string());
+        for (int i = 1; fs::exists(rotated, ec) && i < 100; ++i) {
+            rotated = source.parent_path()
+                / (source.stem().string() + "_" + stamp + "_" + std::to_string(i)
+                   + source.extension().string());
+        }
+        fs::rename(source, rotated, ec);
+        if (!ec) {
+            std::cerr << "Previous recording archived as " << rotated.string() << "\n";
+        }
+    }
+
+    event_writer_ = std::make_unique<EventWriter>(path_writer_);
+    std::cerr << "Writer ready at " << path_writer_
+              << " with " << event_writer_->count() << " events\n";
 }
 
 void Gui::ReadStore(dv::EventStore &event) {
@@ -1659,7 +1689,8 @@ void Gui::ReadStore(dv::EventStore &event) {
             LoadReaderCalibrationForReader(path_reader_);
             LoadGroundTruthForReader(path_reader_);
             ui.SetReaderDuration(event_reader_->durationSeconds());
-            std::cerr << "Reader ready with " << event_reader_->count() << " events\n";
+            std::cerr << "Reader ready with " << event_reader_->count() << " events, "
+                      << event_reader_->durationSeconds() << " s\n";
         }
         catch (const std::exception &e) {
             std::cerr << "Reader disabled: " << e.what() << "\n";

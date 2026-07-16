@@ -71,6 +71,57 @@ public:
             static_cast<float>(this->declare_parameter<double>("trace_lead_ms", 0.0)));
         ui.SetTraceHoldMs(
             static_cast<float>(this->declare_parameter<double>("trace_hold_ms", 0.0)));
+        // Input source at startup: false (default) = live DVXplorer camera,
+        // true = File/reader playback. Before this parameter the node always
+        // started in File mode and silently processed no camera events until
+        // the operator clicked "Reader: Camera" (2026-07-16 real-ball session:
+        // zero valid Trace samples). The GUI button still toggles it live, and
+        // loading a recording re-enables reader mode.
+        ui.SetReaderMode(this->declare_parameter<bool>("use_reader", false));
+        // Scripted replay of a recordings/ H5 file: forces reader mode and
+        // autoplays from the start. Empty (default) = no replay.
+        const std::string reader_file =
+            this->declare_parameter<std::string>("reader_file", "");
+        if (!reader_file.empty()) {
+            ui.SetReaderFile(reader_file);
+            RCLCPP_INFO(
+                this->get_logger(),
+                "Replaying recorded events from '%s' (reader_file parameter, autoplay)",
+                reader_file.c_str());
+        }
+        // Preselected file in the reader UI (no mode change): opening the GUI
+        // and clicking File/Play replays this session buffer directly.
+        const std::string default_reader_file =
+            this->declare_parameter<std::string>("default_reader_file", "realtest.h5");
+        if (reader_file.empty() && !default_reader_file.empty()) {
+            ui.SetDefaultReadFile(default_reader_file);
+        }
+        // Trace polarity filter: "all" | "positive" | "negative". The former
+        // hardcoded GUI default was "negative", which starved the trace of
+        // half the ball's events depending on contrast direction.
+        const std::string trace_polarity =
+            this->declare_parameter<std::string>("trace_polarity_mode", "all");
+        if (trace_polarity == "all") {
+            ui.SetTracePolarityMode(0);
+        }
+        else if (trace_polarity == "positive") {
+            ui.SetTracePolarityMode(1);
+        }
+        else if (trace_polarity == "negative") {
+            ui.SetTracePolarityMode(2);
+        }
+        else {
+            throw std::runtime_error(
+                "trace_polarity_mode must be 'all', 'positive' or 'negative', got '"
+                + trace_polarity + "'");
+        }
+        // Event recording is MANUAL by default (GUI REC toggle, or
+        // record:=true to arm it from launch); record_file is the target the
+        // writer opens when recording starts. When a writer opens, an
+        // existing non-empty target is archived with a timestamp suffix
+        // instead of being truncated (2026-07-16 data-loss incident).
+        ui.SetSaveFile(this->declare_parameter<std::string>("record_file", "realtest.h5"));
+        ui.SetRecord(this->declare_parameter<bool>("record", false));
         gui.SetTracePoseCalibration(camera.calibration, ui.BallRadiusMm());
         // Which 3D estimate feeds BallState: "circle" = per-detection circle-fit
         // pose (legacy algorithm, historical default); "trace" = outlier-filtered
@@ -103,6 +154,17 @@ public:
             this->get_logger(),
             "Ball radius set to %.1f mm (ROS parameter ball_radius_mm, adjustable in Option panel)",
             ui.BallRadiusMm());
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Input source: %s (use_reader), trace polarity filter: %s (trace_polarity_mode)",
+            ui.UseReader() ? "File/reader" : "live camera",
+            trace_polarity.c_str());
+        if (ui.Record()) {
+            RCLCPP_INFO(
+                this->get_logger(),
+                "Recording filtered live events to '%s' (record/record_file params; plain names go under recordings/)",
+                this->get_parameter("record_file").as_string().c_str());
+        }
 
         timer_ = this->create_wall_timer(1ms, std::bind(&Pub::timer_callback, this));
     }
@@ -155,6 +217,13 @@ private:
     std::string pose_source_ = "circle";
     // Dedup: latest-sample stamp of the last trace window already consumed.
     int64_t last_trace_source_tmax_us_ = std::numeric_limits<int64_t>::min();
+    // Trace-status heartbeat state (peaks between prints, publish counter).
+    std::optional<rclcpp::Time> last_trace_status_log_;
+    std::size_t trace_status_peak_events_ = 0;
+    float trace_status_peak_length_px_ = 0.0f;
+    bool trace_status_ribbon_ok_seen_ = false;
+    bool trace_status_3d_ok_seen_ = false;
+    std::size_t trace_published_count_ = 0;
     // Last live trajectory fit, kept for lead prediction and coasting.
     std::optional<TraceTrajectoryFit> trace_traj_fit_;
     std::optional<int64_t> timestamp_anchor_event_us_;
@@ -249,6 +318,9 @@ void Pub::timer_callback() {
             camera.Filtered = dv::EventStore();
             gui.ClearCurrentBall3D();
             gui.AddHudText(8.0f, 16.0f,"No DVXplorer camera connected - switch to reader mode or load a .bin file",RED, 22);
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 5000,
+                "No DVXplorer camera connected: no events processed, no BallState will be published");
             gui.Update(); return;}
 
         // Live getNextEventBatch() can be empty between real event batches. Do
@@ -278,6 +350,10 @@ void Pub::timer_callback() {
             camera.Filtered = dv::EventStore();
             gui.ClearCurrentBall3D();
             gui.Update();
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 5000,
+                "File/reader mode with no events: the live camera is NOT processed "
+                "(set use_reader:=false or click 'Reader' -> Camera in the GUI)");
             if (pose_source_ == "trace") {
                 publishTracePose();  // keep coasting at end of playback
             }
@@ -690,6 +766,40 @@ void Pub::publishTracePose() {
     const double holdSeconds = ui.TraceHoldSeconds();
     const rclcpp::Time now = this->get_clock()->now();
 
+    // Terminal heartbeat of the trace pipeline stages: without it a live
+    // session where the ribbon never validates logs nothing at all
+    // (2026-07-16 real-ball session), leaving the failure boundary invisible.
+    // Peaks are tracked between prints because ball flights last ~200 ms and
+    // a 2 s sample would miss the burst.
+    {
+        const Gui::TraceDebugStatus st = gui.CurrentTraceStatus();
+        trace_status_peak_events_ = std::max(trace_status_peak_events_, st.sourceEvents);
+        trace_status_peak_length_px_ = std::max(trace_status_peak_length_px_, st.ribbonLengthPx);
+        trace_status_ribbon_ok_seen_ = trace_status_ribbon_ok_seen_ || st.ribbonValid;
+        trace_status_3d_ok_seen_ = trace_status_3d_ok_seen_ || st.valid3d;
+        if (!last_trace_status_log_.has_value()
+            || (now - *last_trace_status_log_).seconds() >= 2.0) {
+            RCLCPP_INFO(
+                this->get_logger(),
+                "trace status: events=%zu (peak %zu) ribbon=%s (peak len %.0fpx, seen ok=%d) "
+                "world_pts=%zu 3d=%s (seen ok=%d) published=%zu",
+                st.sourceEvents,
+                trace_status_peak_events_,
+                st.ribbonValid ? "ok" : "invalid",
+                trace_status_peak_length_px_,
+                trace_status_ribbon_ok_seen_ ? 1 : 0,
+                st.worldPoints,
+                st.valid3d ? "ok" : "invalid",
+                trace_status_3d_ok_seen_ ? 1 : 0,
+                trace_published_count_);
+            last_trace_status_log_ = now;
+            trace_status_peak_events_ = 0;
+            trace_status_peak_length_px_ = 0.0f;
+            trace_status_ribbon_ok_seen_ = false;
+            trace_status_3d_ok_seen_ = false;
+        }
+    }
+
     const Gui::TraceTrajectory trajectory = gui.CurrentTraceTrajectory();
 
     // A fresh window is one that is valid, has enough support and whose latest
@@ -753,6 +863,7 @@ void Pub::publishBallSample(const cv::Point3f &position, const int64_t timestamp
     }
 
     if (ball_state_publisher_) {
+        ++trace_published_count_;
         ur3e_catch_msgs::msg::BallState msg;
         msg.header.stamp = eventStampToRosTime(timestampUs);
         msg.header.frame_id = camera_frame_id_;

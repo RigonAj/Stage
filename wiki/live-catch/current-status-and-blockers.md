@@ -1,7 +1,7 @@
 # Current Status And Blockers
 
-> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis; independent perception/control review, 2026-07-10
-> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
+> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis; independent perception/control review, 2026-07-10; real-ball ROS graph and log diagnosis, 2026-07-16; tracker reader-mode root cause + offline replay validation, 2026-07-16
+> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Tracker publisher](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Ball regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
 
 ## Overview
 
@@ -95,16 +95,59 @@ See
 [Perception Robustness And Flight Lifecycle](../perception/perception-robustness-flight-lifecycle.md)
 for the phase model, left-policy envelope and ordered validation gates.
 
+## 2026-07-16 Real-Ball Test: Trace Produced No Valid Raw Sample
+
+The second inspected real-camera/real-UR3e session no longer had the duplicate
+stack problem from 2026-07-09. The active topology was correct and singular:
+`ball_tracking_cpp -> /ball_state_raw -> ball_regression_node -> /ball_state ->
+live_catch_node`. The regression node was present and publishing its fixed-rate
+60 Hz heartbeat as designed.
+
+The robot did not move because `ball_state.valid` and
+`catch_telemetry.ball_valid` remained false. Logs showed no regression state
+transition, raw-stamp rejection or camera-to-base TF rejection, which means the
+C++ tracker never delivered a first valid Trace sample on `/ball_state_raw`.
+`live_catch_node` then reported `WATCHDOG stop -> holding: no_valid_ball` and
+kept the arm at its safe target. This is evidence that command/controller
+bring-up and watchdog holding worked; it is not evidence of successful real
+perception.
+
+Current opinion: prioritize a robot-disarmed Trace-only test and make
+`/ball_state_raw` validity repeatable before changing regression gates or robot
+speed. Inspect event support, polarity, ROI, ribbon validity, 3D validity and
+intrinsics loading in that order. The detailed evidence and exact commands are
+recorded in
+[Real Perception Trace Test Runbook](../perception/real-perception-trace-test.md).
+
+**Resolved the same day (code diagnosis + offline validation).** The tracker
+GUI hardcoded `reader_mode = true`: every launch started in File mode and
+processed no live camera events until a manual GUI click, which is why the
+whole session logged startup lines only. The trace polarity filter also
+defaulted to `Negative`. Both are now ROS parameters (`use_reader` default
+live camera, `trace_polarity_mode` default `all`) with throttled idle
+warnings, a 2 s `trace status` heartbeat, manual H5 event recording (REC
+toggle, timestamp-archived `recordings/realtest.h5` target) and scripted
+replay (`reader_file`). Replaying the
+2026-07-09 real-throw recording through the fixed tracker + regression + TF
+chain produced 12–13 valid raw samples and 27 `valid=true` fitted samples on
+`/ball_state` in `base_link` (flight `idle → collecting → tracking → ended`,
+RMS 0.013 m). Blocker 1 below is therefore validated offline; it still needs
+confirmation with live physical throws before arming.
+
 ## Blockers Before Real Perception
 
-1. Validate `T_base_camera` physically.
-2. Publish and verify `base -> camera_optical`.
-3. Publish and verify `wrist_3_link -> hoop_center`; without it, command mode
+1. Obtain repeatable `valid=true` samples from C++ Trace on `/ball_state_raw`
+   during robot-disarmed physical throws. (Validated offline on the 2026-07-09
+   recording after the 2026-07-16 reader-mode/polarity fix; live physical
+   confirmation pending.)
+2. Validate `T_base_camera` physically.
+3. Publish and verify `base -> camera_optical`.
+4. Publish and verify `wrist_3_link -> hoop_center`; without it, command mode
    holds instead of using a fallback disk pose.
-4. Compare `publish_frame=base_link` against `publish_frame=camera_optical`.
-5. Correct or instrument measurement/state/publish timestamps before using
+5. Compare `publish_frame=base_link` against `publish_frame=camera_optical`.
+6. Correct or instrument measurement/state/publish timestamps before using
    latency percentiles to tune prediction lead.
-6. Capture real Trace H5 + rosbag data and validate the flight estimator at
+7. Capture real Trace H5 + rosbag data and validate the flight estimator at
    30/60 Hz with dropouts; synthetic 120 Hz tests are not deployment evidence.
 
 ## 2026-07-02 Pendant Incident (Diagnosed)

@@ -1,6 +1,6 @@
 # Trace Ball Tracking
 
-> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09; GUI-framerate publish cadence analysis, 2026-07-09; independent robustness/timestamp review, 2026-07-10
+> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09; GUI-framerate publish cadence analysis, 2026-07-09; independent robustness/timestamp review, 2026-07-10; input-source/polarity/recording/replay ROS parameters + trace-status heartbeat + offline real-throw validation, 2026-07-16
 > Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Trace analysis](../../src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Gui accumulation/panel](../../src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/Gui.h); [Live-catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md)
 
 ## Overview
@@ -55,6 +55,13 @@ decoupling publish from render is an open task. Each tick:
 1. **Acquire** — `NextBatch()` pulls the next DVXplorer event batch (or the
    reader feeds recorded `.h5` events in file mode). Live batches are often
    empty between real bursts; the loop keeps the last view instead of redrawing.
+   **Input source is ROS-initialized since 2026-07-16** (`use_reader`, default
+   `false` = live camera). Before that, the GUI constructor hardcoded
+   `reader_mode = true`: every launch started in **File mode and silently
+   processed no camera events** until the operator clicked "Reader → Camera" —
+   the root cause of the 2026-07-16 real-ball session producing zero valid
+   Trace samples. File mode with no events now logs a throttled warning
+   instead of staying silent.
 2. **Denoise** — `Filter()` runs dv-processing's background-activity noise
    filter (1 ms activity window, set in the `DvCamera` constructor). This drops
    isolated sensor noise that would otherwise widen the ribbon.
@@ -265,10 +272,43 @@ re-publish.
 | `Trace use raw input` | OFF (Undist) | Feed raw vs undistorted points. |
 | `Circle fit` | OFF | Legacy circle path; not needed for Trace. |
 
-Only lead, hold, radius and calibration are currently launch-initialized. ROI,
-polarity, memory, edge refinement and width smoothing remain GUI-local and
-reset to defaults on restart (full-frame ROI, negative polarity, 40 ms, edge
-refine OFF, width smoothing OFF). This is a reproducibility gap for real bags.
+Launch-initialized parameters: lead, hold, radius, calibration, and since
+2026-07-16 the input source (`use_reader`, default live camera), scripted
+replay (`reader_file`), trace polarity (`trace_polarity_mode`, default `all`)
+and event recording (`record`/`record_file`). ROI, memory, edge refinement and
+width smoothing remain GUI-local and reset to defaults on restart (full-frame
+ROI, 40 ms, edge refine OFF, width smoothing OFF). This is a smaller but still
+open reproducibility gap for real bags.
+
+## Node I/O Parameters and Diagnosis (2026-07-16)
+
+New `ball_tracking_cpp` ROS parameters, all set in `live_catch.yaml` and
+overridable per launch:
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `use_reader` | `false` | `false` = live DVXplorer camera at startup, `true` = File/reader playback. The GUI Reader button still toggles it live. |
+| `reader_file` | `""` | Scripted replay: a `recordings/` H5 file that forces reader mode and autoplays from t=0. Empty = no replay. |
+| `default_reader_file` | `"realtest.h5"` | Reader-UI preselection only (no mode change): the GUI Read-file box starts on this `recordings/` file, so File → Play replays the last recording in one click. Ignored when `reader_file` forces a replay. |
+| `trace_polarity_mode` | `"all"` | Trace polarity filter (`all`/`positive`/`negative`). The old hardcoded GUI default was `negative`, which starved the ribbon of support depending on the ball's contrast direction. |
+| `record` | `false` | Recording is **manual** (GUI REC toggle); `true` arms it from launch. Reader mode never records. Default was briefly `true` on 2026-07-16; reverted after a data-loss incident (empty session recording truncated the previous file). |
+| `record_file` | `"realtest.h5"` | Recording target; plain names land under `recordings/`. When a writer opens, an existing non-empty target is **archived as `<name>_YYYYMMDD_HHMMSS.h5`**, never truncated. |
+
+The node also logs a 2 s **trace-status heartbeat**
+(`trace status: events=… (peak …) ribbon=… world_pts=… 3d=… published=…`)
+tracking stage peaks between prints, so a live session where the ribbon never
+validates now shows *which* stage starves instead of logging nothing
+(the 2026-07-16 failure signature was a log with startup lines only).
+
+Offline validation 2026-07-16: replaying the 2026-07-09 real-throw recording
+(212 354 events, 9.4 s, `recordings/realtest_2026-07-09_backup.h5`) through
+`pose_source=trace` + polarity `all` produced an event peak of ~41 000, a
+valid ribbon (~119 px) and 12–13 valid `BallState` samples with a physically
+coherent approach trajectory; chained through `ball_regression_node` + the
+hand-eye TF it yielded a full `idle → collecting → tracking → ended` flight
+(10 accepted measurements, 0 rejected, RMS 0.013 m) and 27 `valid=true` fitted
+samples on `/ball_state` in `base_link`. The C++ Trace path is therefore
+functional on real data; live validation with physical throws remains.
 
 ## Risks
 

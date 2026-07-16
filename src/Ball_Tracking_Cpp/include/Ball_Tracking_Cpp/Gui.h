@@ -256,6 +256,26 @@ public:
     TraceTrajectory CurrentTraceTrajectory() const {
         return {trace3DValid, traceWorld3D, traceTimes3D, traceTimeOriginUs_};
     }
+    // Snapshot of the trace pipeline stages for terminal diagnosis (the GUI
+    // panels show the same data, but headless/log-based sessions need it too).
+    struct TraceDebugStatus {
+        std::size_t sourceEvents = 0;
+        bool ribbonValid = false;
+        float ribbonLengthPx = 0.0f;
+        std::size_t ribbonInliers = 0;
+        std::size_t worldPoints = 0;
+        bool valid3d = false;
+    };
+    TraceDebugStatus CurrentTraceStatus() const {
+        return {
+            traceSourcePoints_.size(),
+            traceFit_.valid,
+            traceFit_.lengthPx,
+            static_cast<std::size_t>(traceFit_.inlierCount),
+            traceWorld3D.size(),
+            trace3DValid,
+        };
+    }
     const CalibrationData *ReaderCalibrationOverride() const;
     const std::string &ReaderEventPath() const { return path_reader_; }
 
@@ -266,14 +286,16 @@ public:
         }
 
         if (event_writer_ == nullptr) {
-            event_writer_ = std::make_unique<EventWriter>("recordings/events3.h5");
-            std::cerr << "Writer ready with " << event_writer_->count() << " events\n";
+            OpenWriterFromUi();
         }
 
         if (event_writer_) {
             event_writer_->writeStore(event);
         }
     }
+
+    // Opens the H5 event writer at the Ui save_file path ("events3" fallback).
+    void OpenWriterFromUi();
 
     void ReadStore(dv::EventStore &event);
 
@@ -807,6 +829,35 @@ public:
     // output: the measurement layer must never publish extrapolated points.
     void SetTraceLeadMs(float leadMs) { trace_lead_ms = std::clamp(leadMs, 0.0f, 500.0f); }
     void SetTraceHoldMs(float holdMs) { trace_hold_ms = std::clamp(holdMs, 0.0f, 3000.0f); }
+    // ROS-parameter initialization of the input source and trace polarity
+    // filter. Both stay live-togglable from the GUI afterwards.
+    void SetReaderMode(bool enabled) {
+        reader_mode = enabled;
+        if (!enabled) {
+            playback_playing = false;
+        }
+    }
+    void SetTracePolarityMode(int mode) { trace_polarity_mode = std::clamp(mode, 0, 2); }
+    void SetRecord(bool enabled) { record = enabled; }
+    void SetSaveFile(const std::string &name) {
+        std::snprintf(save_file, sizeof(save_file), "%s", name.c_str());
+    }
+    // Scripted replay: select a recordings/ H5 file, force reader mode and
+    // autoplay from the start (diagnosis without GUI interaction).
+    void SetReaderFile(const std::string &name) {
+        std::snprintf(read_file, sizeof(read_file), "%s", name.c_str());
+        reader_source_sequences = false;
+        reader_mode = true;
+        playback_playing = true;
+        lector = 0.0f;
+    }
+    // Preselect a recordings/ file in the reader UI without switching modes:
+    // the Option-panel Read-file box and the File/Play buttons start on it,
+    // so one click replays the session buffer.
+    void SetDefaultReadFile(const std::string &name) {
+        std::snprintf(read_file, sizeof(read_file), "%s", name.c_str());
+        reader_source_sequences = false;
+    }
     bool TraceUseRawInput() const { return trace_use_raw_input; }
     bool TraceUseRadiusGate() const { return trace_radius_gate_enabled; }
     bool TraceEdgeRefineEnabled() const { return trace_edge_refine_enabled; }

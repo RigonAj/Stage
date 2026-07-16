@@ -1,7 +1,7 @@
 # Real Perception Trace Test Runbook
 
-> Sources: Trace pipeline and launch verification, 2026-07-09; local calibration files, 2026-07-09; left policy model selection, 2026-07-09; explicit tracker intrinsics parameter, 2026-07-09; first real command test analysis, 2026-07-09; independent lead/timestamp review, 2026-07-10
-> Raw: [operator procedure](../../docs/Robot_Control/procedure_test_perception_trace.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Procédure session réelle commandée](../../docs/Robot_Control/procedure_lancement_reel_trace_commande.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [live_catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [live_catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [TF publisher](../../scripts/publish_camera_tf.py); [model README](../../data/models/README.md)
+> Sources: Trace pipeline and launch verification, 2026-07-09; local calibration files, 2026-07-09; left policy model selection, 2026-07-09; explicit tracker intrinsics parameter, 2026-07-09; first real command test analysis, 2026-07-09; independent lead/timestamp review, 2026-07-10; real-ball ROS graph and log diagnosis, 2026-07-16; root-cause code diagnosis (reader-mode default) + offline replay validation, 2026-07-16
+> Raw: [operator procedure](../../docs/Robot_Control/procedure_test_perception_trace.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Procédure session réelle commandée](../../docs/Robot_Control/procedure_lancement_reel_trace_commande.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Ball regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py); [live_catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [live_catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [TF publisher](../../scripts/publish_camera_tf.py); [model README](../../data/models/README.md)
 
 ## Overview
 
@@ -100,7 +100,8 @@ fitted 60 Hz `base_link` estimate lands on `ball_state`.
 
 ## Validation
 
-- Raw tracker output: `/ball_state`, `header.frame_id=camera_optical`,
+- Raw tracker output: `/ball_state` without regression, or `/ball_state_raw`
+  with regression; `header.frame_id=camera_optical`,
   `valid=true`, position in metres, positive camera depth for a ball in front of
   the camera.
 - Live-catch dry-run: `/catch_telemetry` publishes during valid throws, and the
@@ -112,6 +113,122 @@ fitted 60 Hz `base_link` estimate lands on `ball_state`.
   on camera-frame samples. `base_link <- hoop_center` is required for realistic
   inference and mandatory before command mode. For the left model, this must be
   the left hoop transform.
+
+## 2026-07-16 Real-Ball Session Diagnosis
+
+The live ROS graph observed during the real-UR3e test was correctly wired and
+had exactly one producer at every boundary:
+
+```text
+DVXplorer events
+  -> ball_tracking_cpp
+  -> /ball_state_raw (camera_optical, fresh valid Trace measurements only)
+  -> ball_regression_node
+  -> /ball_state at 60 Hz (base_link, position + fitted velocity)
+  -> live_catch_node
+```
+
+Active parameters matched the intended real-camera configuration:
+`pose_source=trace`, `ball_state_topic=ball_state_raw`, the dated constrained
+intrinsics file, `ball_radius_mm=45.0`, tracker lead/hold at zero, regression
+rate 60 Hz and regression lead zero. The fitted output nevertheless stayed at
+`position=(0,0,0)`, `valid=false`, and `catch_telemetry.ball_valid=false`.
+
+The decisive evidence is upstream of the regression. Its log contained only
+the startup line: there was no `regression state: idle -> collecting`, no
+skewed-stamp drop and no TF rejection. The tracker log also contained only its
+publisher/radius startup messages. Therefore the regression was alive but had
+not received even a first valid `/ball_state_raw` measurement. Its 60 Hz output
+was the expected invalid heartbeat, not an estimated ball trajectory. The live
+node consequently logged `WATCHDOG stop -> holding: no_valid_ball`; holding the
+robot was the correct safety response.
+
+Assessment: the current blocker is the C++ Trace validity path, not a missing
+node, a duplicate producer, the robot controller or the Python regression. The
+next disarmed test must inspect the perception GUI while the ball crosses the
+ROI: `events: ... accumulated`, `trace ribbon: not enough coherent events` and
+the `Trace 3D` status. First checks are a live DVXplorer source, successful
+intrinsics load, a flight-covering ROI, `Polarity: All` instead of the default
+`Negative`, and enough support (about 500 accumulated events and a trail longer
+than about 35 px). Do not arm until both `/ball_state_raw` and `/ball_state`
+have been observed with `valid=true` during repeatable dry-run throws.
+
+### Root Cause Found and Fixed (2026-07-16, same day)
+
+Code diagnosis of `ball_tracking_cpp` explained the zero-valid-sample session:
+the GUI constructor hardcoded `reader_mode = true`, so **the tracker always
+started in File mode and processed no live camera events** until the operator
+clicked "Reader → Camera". Second aggravating default: the trace polarity
+filter started at `Negative` (`trace_polarity_mode = 2`), discarding half the
+ball's events. Neither state was a ROS parameter, so the launch could not
+force them and the failure was silent (log with startup lines only — exactly
+the observed signature, since the "Using camera calibration" line only prints
+once a first event window is processed).
+
+Fixes shipped the same day (all in `live_catch.yaml`, overridable per launch):
+`use_reader` (default `false` = live camera), `trace_polarity_mode` (default
+`all`), throttled warnings when File mode idles or no camera is connected, a
+2 s `trace status` heartbeat exposing per-stage peaks in the terminal, manual
+H5 event recording (`record` default `false`, GUI REC toggle;
+`record_file` default `recordings/realtest.h5`; an existing non-empty target
+is archived with a timestamp suffix when the writer opens, never truncated)
+and scripted replay (`reader_file`). See
+[Trace Ball Tracking](trace-ball-tracking.md) for the parameter table.
+
+Offline validation on the 2026-07-09 real-throw recording
+(`recordings/realtest_2026-07-09_backup.h5`, 212 354 events, 9.4 s): the
+tracker produced 12–13 `valid=true` raw samples with a coherent approach
+trajectory, and the full tracker → `ball_regression_node` → hand-eye-TF chain
+produced a complete `idle → collecting → tracking → ended` flight and 27
+`valid=true` fitted samples on `/ball_state` in `base_link`. Replay command
+(robot fully disarmed, no driver needed):
+
+```bash
+python3 scripts/publish_camera_tf.py calibration/handeye_result.yaml &
+ros2 run tf2_ros static_transform_publisher --frame-id base_link --child-frame-id base &  # test-only identity
+ros2 run ur3e_live_catch ball_regression_node --ros-args \
+  --params-file src/ur3e_live_catch/config/live_catch.yaml &
+ros2 run ball_tracking_cpp talker --ros-args \
+  --params-file src/ur3e_live_catch/config/live_catch.yaml \
+  -p ball_state_topic:=ball_state_raw \
+  -p use_reader:=true -p reader_file:=realtest_2026-07-09_backup.h5 -p record:=false
+ros2 topic echo /ball_state ur3e_catch_msgs/msg/BallState   # expect valid=true bursts
+```
+
+For live-session ROS-level diagnosis, record a bag alongside the default H5
+event recording:
+
+```bash
+ros2 bag record -o rosbags/real_$(date +%Y%m%d_%H%M%S) \
+  /ball_state_raw /ball_state /catch_telemetry /joint_states /tf /tf_static
+```
+
+Remaining before arming: repeat the same validity with **live physical
+throws** (camera mode is now the default), with the measured 45 mm radius and
+a flight-covering ROI.
+
+Commands used to establish the graph and the failure boundary:
+
+```bash
+ros2 node list | grep -E 'live_catch|ball_regression|ball_tracking'
+ros2 topic info /ball_state_raw --verbose
+ros2 topic info /ball_state --verbose
+ros2 topic info /catch_telemetry --verbose
+ros2 topic echo /catch_telemetry --once
+ros2 param dump /ball_tracking_cpp
+ros2 param dump /ball_regression_node
+```
+
+For the next test, first use **Stop / back to safe** and verify the heartbeat,
+then observe each estimator boundary in separate terminals:
+
+```bash
+ros2 topic echo /catch_telemetry --once | grep command_enabled
+# Expected before a physical throw: command_enabled: false
+
+ros2 topic echo /ball_state_raw
+ros2 topic echo /ball_state
+```
 
 ## Command-Mode Session (Robot Moving)
 
