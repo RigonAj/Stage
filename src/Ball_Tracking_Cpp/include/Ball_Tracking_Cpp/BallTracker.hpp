@@ -150,3 +150,10 @@ private:
 
 };
 coef FitLinear(const std::vector<BallPose3D>& poses);
+
+// DBSCAN output -> circle-tracker input: drops out-of-frame points and pairs
+// each point with its polarity/timestamp. Shared by the ROS node and the
+// offline benchmark so both feed the tracker identically.
+std::vector<BallTrackerClusterInput> BuildTrackerClusters(
+    const std::vector<DvCluster> &clusters,
+    const CalibrationData &calibration);

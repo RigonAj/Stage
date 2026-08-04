@@ -376,14 +376,31 @@ functional on real data; live validation with physical throws remains.
   `TraceImagePointToWorldMeters`, `FilterTraceWorldOutliers`).
 - `src/Ball_Tracking_Cpp/src/Camera.cpp`: acquisition, denoise, undistort,
   subsample, DBSCAN cluster.
-- `src/Ball_Tracking_Cpp/src/Gui.cpp` + `include/.../Gui.h`: accumulation,
-  work-ROI, panel sliders, trajectory getter, visual diagnostics.
+- `src/Ball_Tracking_Cpp/src/TraceRuntime.cpp` + `include/.../TraceRuntime.hpp`
+  (since 2026-08-04): the *stateful* half of the pipeline, extracted from `Gui`
+  so it runs without a window — `TraceAccumulator` (rolling ROI-gated event
+  window, lazy compaction, 120 k cap), `TraceRuntimeSettings` (every knob, with
+  the Ui defaults) and `RunTraceAnalysis` (point source → ribbon fit → 3D).
+  `Gui` and the offline benchmark both drive this; the GUI behavior is
+  unchanged.
+- `src/Ball_Tracking_Cpp/src/SequenceDataset.cpp` +
+  `include/.../SequenceDataset.hpp` (since 2026-08-04): simulated-sequence
+  sidecar discovery, `camera/intrinsics.json`, `labels/ground_truth.csv` and
+  `metadata.json` readers, moved out of the `Gui.cpp` anonymous namespace.
+- `src/Ball_Tracking_Cpp/src/Gui.cpp` + `include/.../Gui.h`: work-ROI, panel
+  sliders, trajectory getter, visual diagnostics; accumulation and analysis are
+  delegated to `TraceRuntime`.
 - `include/Ball_Tracking_Cpp/util.hpp`: `ToMeters` frame remap, circle-pose
   fallback.
-- `src/Ball_Tracking_Cpp/src/BallTracker.cpp`: legacy circle fitting.
+- `src/Ball_Tracking_Cpp/src/BallTracker.cpp`: legacy circle fitting, plus the
+  free `BuildTrackerClusters` shared by the node and the benchmark.
+- `src/Ball_Tracking_Cpp/src/method_comparison_benchmark.cpp`: headless Trace
+  vs circle-fitting comparison against the simulated ground truth — see
+  [Trace vs Circle Fitting Comparison Benchmark](method-comparison-benchmark.md).
 
 ## See Also
 
+- [Trace vs Circle Fitting Comparison Benchmark](method-comparison-benchmark.md)
 - [Real Perception Trace Test Runbook](real-perception-trace-test.md)
 - [Live Catch Loop](../live-catch/live-catch-loop.md)
 - [Message Contracts And Topics](../live-catch/message-contracts-and-topics.md)

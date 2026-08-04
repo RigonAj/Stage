@@ -56,6 +56,11 @@ tmp/
 # Event recordings and converted datasets
 recordings/
 sequences/
+
+# method_comparison_benchmark output (per-detection CSVs and figures).
+# Anchored to the root so the per-sequence evaluation/ folders of the dataset
+# are not caught by it.
+/evaluation/
 *.bin
 *.h5
 *.hdf5

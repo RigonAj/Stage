@@ -240,6 +240,32 @@ python3 scripts/replay_ball_regression.py "$BAG_DIRECTORY" \
 (cd src/ur3e_sysid && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test/ -q)
 ```
 
+## Perception Method Comparison (Trace vs Circle Fitting)
+
+Offline RMSE of both 3D estimators against the Isaac Sim + v2e ground truth.
+Protocol, dataset contract and metric definitions:
+[Trace vs Circle Fitting Comparison Benchmark](../perception/method-comparison-benchmark.md).
+
+```bash
+# One sequence first: check the intrinsics and ball radius in run_manifest.json
+./build/ball_tracking_cpp/method_comparison_benchmark \
+  --sequence sequences/sequence_0001 \
+  --out /tmp/cmp_one
+
+# Whole dataset (auto-discovers any directory with labels/ground_truth.csv
+# and camera/intrinsics.json)
+./build/ball_tracking_cpp/method_comparison_benchmark \
+  --dataset-root /home/rigon/Documents/EventGen/ball_event_dataset_v0 \
+  --out evaluation/method_comparison/run1
+
+python3 scripts/compare_trace_vs_circle.py evaluation/method_comparison/run1
+```
+
+Useful options: `--methods trace` or `--methods circle` to run one estimator,
+`--emit all` to keep every sample of every analysis run, `--time-base zero`
+when the event stream does not start at t=0, `--trace-edge-refine` /
+`--trace-width-smoothing` to evaluate the optional depth-accuracy passes.
+
 ## Isaac Sim2real Checks
 
 On this PC the Isaac training repo lives at
@@ -303,6 +329,7 @@ python3 scripts/update_agent_wiki.py
 
 - [Real Robot Bring-Up Runbook](real-robot-bringup-runbook.md)
 - [Real Perception Trace Test Runbook](../perception/real-perception-trace-test.md)
+- [Trace vs Circle Fitting Comparison Benchmark](../perception/method-comparison-benchmark.md)
 - [Intrinsic Calibration Runbook](../calibration/intrinsic-calibration-runbook.md)
 - [Extrinsic Calibration Runbook](../calibration/extrinsic-calibration-runbook.md)
 - [Rollout Replay And Driver Setup](../replay/rollout-replay-and-driver-setup.md)

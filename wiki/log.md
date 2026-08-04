@@ -622,3 +622,26 @@
   `T_base_camera=[0.409871,-0.585759,0.439655]` m, 1.11 mm mean / 1.87 mm
   maximum pose residual, 1.79 mm leave-one-out and 0.98 px end-to-end RMS.
   Camera tape-measure and live TF parity checks remain pending.
+
+## [2026-08-04] ingest | Trace vs circle-fitting comparison benchmark
+
+- Updated: [Trace vs Circle Fitting Comparison Benchmark](perception/method-comparison-benchmark.md)
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Updated: [Testing And Commands](operations/testing-and-commands.md)
+- Source: new `method_comparison_benchmark` headless harness and
+  `scripts/compare_trace_vs_circle.py`. Replays the Isaac Sim + v2e sequences
+  through both 3D estimators and scores them against the per-instant ground
+  truth (RMSE 3D / per axis / depth, median + p95, signed depth bias,
+  coverage, estimates per second, first-estimate latency, RMSE vs true depth).
+  To let the trace pipeline run without a window, the rolling accumulator and
+  the analysis call sequence moved out of `Gui` into `TraceRuntime`
+  (`TraceAccumulator`, `TraceRuntimeSettings`, `RunTraceAnalysis`), the
+  sequence sidecar readers moved into `SequenceDataset`, and
+  `BuildTrackerClusters` became a free function in `BallTracker`; all three are
+  pure moves, the GUI behavior is unchanged. Intrinsics (fx=fy=520, no
+  distortion) and ball radius (0.02 m) are read from the sequence itself, never
+  from the DVXplorer calibration, and are recorded in `run_manifest.json`.
+  Removed the dead `ball_tracker_h5_benchmark` CMake block left by the previous
+  benchmark, whose duplicated trace maths is the failure this design avoids.
+  Not yet run on the dataset: no build environment and no sequence events in
+  this session.

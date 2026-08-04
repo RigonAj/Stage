@@ -603,3 +603,43 @@ coef FitLinear(const std::vector<BallPose3D>& poses){
     }
     return reg.fit();
 };
+
+std::vector<BallTrackerClusterInput> BuildTrackerClusters(
+    const std::vector<DvCluster> &clusters,
+    const CalibrationData &calibration) {
+
+    std::vector<BallTrackerClusterInput> output;
+    output.reserve(clusters.size());
+
+    for (const auto &cluster : clusters) {
+        BallTrackerClusterInput input;
+        input.maxTimestamp = cluster.maxTimestamp;
+        input.minTimestamp = cluster.minTimestamp;
+
+        const std::vector<cv::Point2f> &points = cluster.points;
+
+        input.points.reserve(points.size());
+        input.polarities.reserve(points.size());
+
+        for (size_t i = 0; i < points.size(); ++i) {
+            const cv::Point2f &point = points[i];
+
+            if (calibration.ready
+                && (point.x < 0.0f
+                    || point.x >= static_cast<float>(calibration.imageSize.width)
+                    || point.y < 0.0f
+                    || point.y >= static_cast<float>(calibration.imageSize.height))) {
+                continue;
+            }
+
+            input.points.emplace_back(point);
+            input.polarities.emplace_back(polar{cluster.polarities[i], cluster.timestamps[i]});
+        }
+
+        if (!input.points.empty()) {
+            output.emplace_back(std::move(input));
+        }
+    }
+
+    return output;
+}

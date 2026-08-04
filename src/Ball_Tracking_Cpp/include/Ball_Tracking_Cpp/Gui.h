@@ -19,7 +19,9 @@
 
 #include "EventWriter.h"
 #include "Camera.hpp"
+#include "SequenceDataset.hpp"
 #include "TraceAnalysis.hpp"
+#include "TraceRuntime.hpp"
 #include "raygui.h"
 
 static constexpr double RENDER_FPS = 60.0;
@@ -104,10 +106,7 @@ private:
     const std::vector<cv::Point2f> *traceFloatPoints = nullptr;
     const std::vector<int64_t> *traceFloatTimestamps = nullptr;
     const std::vector<bool> *traceFloatPolarities = nullptr;
-    std::vector<cv::Point2f> traceAccumulatedPoints;
-    std::vector<int64_t> traceAccumulatedTimestamps;
-    std::vector<bool> traceAccumulatedPolarities;
-    int64_t traceLastAccumulatedTimestampUs = std::numeric_limits<int64_t>::min();
+    TraceAccumulator traceAccumulator_;
     std::vector<TracePoint> traceSourcePoints_;
     std::string traceSourceLabel_;
     Color traceSourceColor_{MAROON};
@@ -133,9 +132,7 @@ private:
     std::vector<Vector3> traceGroundTruthWorld3D;
     std::vector<Vector3> traceGroundTruthEstimateWorld3D;
     std::string tracePoseText3D = "Trace pose: unavailable";
-    std::vector<float> groundTruthTimesSeconds;
-    std::vector<Vector3> groundTruthWorld3D;
-    std::string groundTruthSourcePath;
+    sequence_dataset::GroundTruthTable groundTruth_;
     CalibrationData readerCalibrationOverride{};
     bool readerCalibrationOverrideReady = false;
 

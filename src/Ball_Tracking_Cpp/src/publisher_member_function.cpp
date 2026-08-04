@@ -578,41 +578,7 @@ void Pub::timer_callback() {
 }
 
 std::vector<BallTrackerClusterInput> Pub::buildTrackerClusters() const {
-    std::vector<BallTrackerClusterInput> output;
-    const auto &cameraClusters = camera.Clusters();
-    output.reserve(cameraClusters.size());
-
-    for (const auto &cluster : cameraClusters) {
-        BallTrackerClusterInput input;
-        input.maxTimestamp = cluster.maxTimestamp;
-        input.minTimestamp = cluster.minTimestamp;
-
-        const std::vector<cv::Point2f> &points = cluster.points;
-
-        input.points.reserve(points.size());
-        input.polarities.reserve(points.size());
-
-        for (size_t i = 0; i < points.size(); ++i) {
-            const cv::Point2f &point = points[i];
-
-            if (camera.calibration.ready
-                && (point.x < 0.0f
-                    || point.x >= static_cast<float>(camera.calibration.imageSize.width)
-                    || point.y < 0.0f
-                    || point.y >= static_cast<float>(camera.calibration.imageSize.height))) {
-                continue;
-            }
-
-            input.points.emplace_back(point);
-            input.polarities.emplace_back(polar{cluster.polarities[i], cluster.timestamps[i]});
-        }
-
-        if (!input.points.empty()) {
-            output.emplace_back(std::move(input));
-        }
-    }
-
-    return output;
+    return BuildTrackerClusters(camera.Clusters(), camera.calibration);
 }
 
 BallTrackerSettings Pub::trackerSettings() const {

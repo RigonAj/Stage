@@ -34,7 +34,9 @@ add_executable(talker
   src/publisher_member_function.cpp
   src/EventWriter.cpp
   src/Gui.cpp
+  src/SequenceDataset.cpp
   src/TraceAnalysis.cpp
+  src/TraceRuntime.cpp
   src/Camera.cpp
   src/BallTracker.cpp
 )
@@ -89,48 +91,52 @@ else()
   message(STATUS "LTO not supported: ${LTO_CHECK_OUTPUT}")
 endif()
 
-set(BENCHMARK_INSTALL_TARGETS)
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ball_tracker_h5_benchmark.cpp
-   AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/TraceBenchmark.cpp)
-  add_executable(ball_tracker_h5_benchmark
-    src/ball_tracker_h5_benchmark.cpp
-    src/TraceBenchmark.cpp
-    src/EventWriter.cpp
-  )
+# Headless offline comparison of the two 3D estimators against the simulated
+# ground truth. No rclcpp, no Gui: it drives TraceRuntime and BallTracker
+# directly. raylib is still linked because TraceAnalysis uses its Vector2/
+# Vector3/Color types, but no window is ever created.
+add_executable(method_comparison_benchmark
+  src/method_comparison_benchmark.cpp
+  src/BallTracker.cpp
+  src/Camera.cpp
+  src/EventWriter.cpp
+  src/SequenceDataset.cpp
+  src/TraceAnalysis.cpp
+  src/TraceRuntime.cpp
+)
 
-  ament_target_dependencies(ball_tracker_h5_benchmark
-    dv-processing
-    OpenCV
-  )
+ament_target_dependencies(method_comparison_benchmark
+  dv-processing
+  OpenCV
+)
 
-  target_include_directories(ball_tracker_h5_benchmark PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/Ball_Tracking_Cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../.deps/prefix/include
-    ${OpenCV_INCLUDE_DIRS}
-    /usr/include/eigen3
-    ${HDF5_INCLUDE_DIRS}
-  )
+target_include_directories(method_comparison_benchmark PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/Ball_Tracking_Cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${DBSCAN_DIR}
+  ${RAYLIB_INCLUDE_DIRS}
+  ${HDF5_INCLUDE_DIRS}
+)
 
-  target_link_libraries(ball_tracker_h5_benchmark
-    ${OpenCV_LIBS}
-    Eigen3::Eigen
-    ${HDF5_LIBRARIES}
-  )
+target_link_libraries(method_comparison_benchmark
+  ${OpenCV_LIBS}
+  Eigen3::Eigen
+  fmt::fmt
+  ${RAYLIB_LINK_LIBRARIES}
+  ${HDF5_LIBRARIES}
+  TBB::tbb
+  m
+  pthread
+)
 
-  target_compile_options(ball_tracker_h5_benchmark PRIVATE
-    -O3
-  )
-
-  set_target_properties(ball_tracker_h5_benchmark PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/..
-  )
-
-  list(APPEND BENCHMARK_INSTALL_TARGETS ball_tracker_h5_benchmark)
-endif()
+target_compile_options(method_comparison_benchmark PRIVATE
+  -w
+  -O3
+)
 
 install(TARGETS
   talker
-  ${BENCHMARK_INSTALL_TARGETS}
+  method_comparison_benchmark
   DESTINATION lib/${PROJECT_NAME}
 )
 
