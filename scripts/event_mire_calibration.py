@@ -1631,8 +1631,9 @@ def fetch_external_layout(
 ) -> Tuple[List[ScreenDot], Dict[str, object]]:
     """Read the layout currently displayed by the phone from serve_phone_mire.py.
 
-    Refuses a layout flagged as not real-fullscreen: the px->mm mapping (and
-    the screen-center origin) would be wrong.
+    Refuses any layout that is not explicitly landscape and real-fullscreen:
+    otherwise the px->mm mapping and screen-center frame can change silently
+    between sessions.
     """
     url = base_url.rstrip("/") + "/api/current_layout"
     try:
@@ -1643,11 +1644,9 @@ def fetch_external_layout(
     if "error" in payload:
         raise RuntimeError(f"mire server: {payload['error']} (ouvrir la page sur le telephone)")
     screen = payload.get("screen", {})
-    if not screen.get("fullscreen_ok"):
-        raise RuntimeError(
-            "le telephone n'est pas en vrai plein ecran "
-            f"(viewport {screen.get('viewport_px')} vs panneau {screen.get('panel_px')})"
-        )
+    screen_error = external_layout_screen_error(screen)
+    if screen_error is not None:
+        raise RuntimeError(screen_error)
     dots = [
         ScreenDot(
             row=int(dot["row"]),
@@ -1669,6 +1668,23 @@ def fetch_external_layout(
     if len(dots) != expected:
         raise RuntimeError(f"layout invalide: {len(dots)} points au lieu de {expected}")
     return dots, payload
+
+
+def external_layout_screen_error(screen: object) -> Optional[str]:
+    """Return why a phone screen geometry is unsafe for hand-eye capture."""
+    if not isinstance(screen, dict):
+        return "geometrie ecran absente dans le layout de la mire"
+    if screen.get("landscape_ok") is not True:
+        return (
+            "format paysage requis pour la mire telephone "
+            f"(viewport {screen.get('viewport_px')}, panneau {screen.get('panel_px')})"
+        )
+    if screen.get("fullscreen_ok") is not True:
+        return (
+            "le telephone n'est pas en vrai plein ecran "
+            f"(viewport {screen.get('viewport_px')} vs panneau {screen.get('panel_px')})"
+        )
+    return None
 
 
 def solve_mire_pose_with_ambiguity(
@@ -4206,6 +4222,35 @@ def run_self_test() -> int:
             print(f"handeye rejection case {idx} failed: {reason_text!r}")
             return 1
     print("handeye rejection gates ok")
+
+    landscape_screen = {
+        "viewport_px": {"width": 2712, "height": 1220},
+        "panel_px": {"width": 2712, "height": 1220},
+        "landscape_ok": True,
+        "fullscreen_ok": True,
+    }
+    portrait_screen = {
+        "viewport_px": {"width": 1220, "height": 2712},
+        "panel_px": {"width": 1220, "height": 2712},
+        "landscape_ok": False,
+        "fullscreen_ok": True,
+    }
+    cropped_screen = {
+        "viewport_px": {"width": 2712, "height": 1100},
+        "panel_px": {"width": 2712, "height": 1220},
+        "landscape_ok": True,
+        "fullscreen_ok": False,
+    }
+    if external_layout_screen_error(landscape_screen) is not None:
+        print("landscape phone layout rejected")
+        return 1
+    if external_layout_screen_error(portrait_screen) is None:
+        print("portrait phone layout accepted")
+        return 1
+    if external_layout_screen_error(cropped_screen) is None:
+        print("non-fullscreen phone layout accepted")
+        return 1
+    print("phone landscape/fullscreen gates ok")
 
     sample = build_handeye_sample(0, tf_start, tf_end, [0.1] * 6, pnp, matches)
     required_keys = {

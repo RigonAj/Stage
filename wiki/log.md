@@ -555,3 +555,70 @@
   The 2026-07-09 real throw remains safe in
   `recordings/realtest_2026-07-09_backup.h5` and was restored to
   `recordings/realtest.h5` for the one-click GUI replay.
+
+## [2026-07-17] ingest | Perception latency optimization (render-decoupled trace analysis, incremental undistortion)
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Source: `ball_tracking_cpp` latency pass ("la perception est défois lente").
+  Root causes: (1) `UpdateTraceAnalysis()` only ran inside `Gui::Draw()` behind
+  the 60 FPS render gate, so every fresh publish waited up to 16.7 ms; (2) the
+  live loop re-undistorted the full ~484 ms filtered window every 1 ms tick;
+  (3) `KeepRecentFiltered` rebuilt the window by per-event copy; (4) DBSCAN ran
+  even with circle fitting OFF. Changes: `Gui::RefreshTraceAnalysis()` (dirty
+  flag + settings signature, rate-limited by new ROS param
+  `trace_analysis_period_ms`, default 4 ms) called from the timer tick, with
+  `publishTracePose()` before `gui.Update()`; new
+  `DvCamera::UndistortLiveIncremental` undistorts only the fresh batch into a
+  rolling shallow-sliced `dv::EventStore` window (replaces
+  KeepRecentFiltered+Undistort in live mode); paused reader reuses the cached
+  undistorted window (no per-tick H5 re-read); DBSCAN/cluster path gated to
+  circle-fitting-ON or non-Trace views. Replay validation on
+  `realtest_2026-07-09_backup.h5`: peak 41 589 events, ribbon 118 px,
+  19 published samples (12–13 before, same throw).
+
+## [2026-07-17] ingest | Trace memory default 150 ms, slider range 1-500 ms
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Source: user request after the latency pass. `trace_memory_ms` default
+  40 -> 150 ms; "Trace ms" slider and `TraceMemorySeconds()` clamp
+  40-3000 -> 1-500 ms (Gui.h). Replay of realtest_2026-07-09_backup.h5 at
+  150 ms: peak ~116 070 accumulated events, ribbon 280 px, 15 published
+  samples (vs ~41 k / 118 px / 19 at 40 ms) - longer trail and stabler
+  depth per sample, slightly heavier ribbon fits.
+
+## [2026-07-17] ingest | Burst-lag fix: lazy trace compaction, 24k analysis cap, adaptive analysis period
+
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Source: user report "ca lag enormement quand je lance la balle". At 150 ms
+  the accumulation peaks at ~116 k events: the per-tick full-rewrite
+  compaction in AppendTraceEvents ran O(window) at 1 kHz, and FitTraceRibbon
+  ran all its O(n) passes plus a per-bin std::sort on 116 k points up to
+  250 Hz. Changes: (1) lazy amortized compaction (sorted stale prefix erased
+  only when it dominates; exact cutoff applied at analysis time via new
+  BuildTracePointSource minTimestampUs param); (2) analysis input capped at
+  24 000 stride-subsampled points (new maxPoints param) - also bounds the
+  Trace-view point drawing; (3) RefreshTraceAnalysis period adapts to 2x the
+  measured duration of the previous run (<= 50 ms). Replay validation:
+  peak analyzed events exactly 24 000, ribbon 298 px (quality unchanged),
+  17 published samples (15 before the cap at 150 ms).
+
+## [2026-07-23] ingest | Force the phone hand-eye mire to landscape
+
+- Updated: [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md)
+- Source: calibration-session diagnosis and code changes in
+  `serve_phone_mire.py`, `phone_mire.html` and `event_mire_calibration.py`.
+  Fullscreen now requests the browser landscape lock; the server marks
+  portrait or viewport/panel orientation mismatches unsafe and never caches
+  them; the collector independently refuses F11 unless the layout explicitly
+  reports `screen.landscape_ok=true`. Synthetic server and collector checks
+  cover accepted landscape, rejected portrait and cache preservation.
+
+## [2026-07-23] ingest | Promote the strict-landscape physical hand-eye solve
+
+- Updated: [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md)
+- Source: `handeye_samples_20260723_093733.json` and the generated
+  `calibration/handeye_result.yaml`. Promoted the standalone 13-pose
+  strict-landscape session as the current numerical reference:
+  `T_base_camera=[0.409871,-0.585759,0.439655]` m, 1.11 mm mean / 1.87 mm
+  maximum pose residual, 1.79 mm leave-one-out and 0.98 px end-to-end RMS.
+  Camera tape-measure and live TF parity checks remain pending.

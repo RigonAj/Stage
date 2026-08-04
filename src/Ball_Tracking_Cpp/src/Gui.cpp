@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <execution>
 #include <filesystem>
@@ -667,7 +668,7 @@ void Gui::Draw() {
     }
     UpdateTexture(cpuTexture, pixelBuffer.data());
 
-    UpdateTraceAnalysis();
+    RefreshTraceAnalysis();
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
@@ -705,12 +706,101 @@ void Gui::Draw2DScene() {
     DrawImageTrajectory2D();
 }
 
-// Runs the full trace pipeline once per rendered frame and caches the
-// results in members; every view (Trace, 3D, TOP, RMSE) reads from this
-// cache so the computation never runs twice in a frame.
+namespace {
+uint64_t HashMix(uint64_t h, uint64_t v) {
+    h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    return h;
+}
+
+uint64_t HashMixFloat(uint64_t h, float f) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &f, sizeof(bits));
+    return HashMix(h, bits);
+}
+}
+
+// Signature of every Ui setting the trace pipeline reads: a change reruns
+// the analysis even when the accumulated events did not move (paused-reader
+// slider tuning).
+uint64_t Gui::TraceAnalysisSettingsSignature() const {
+    uint64_t h = 0;
+    h = HashMix(h, static_cast<uint64_t>(ui.TracePolarityMode()));
+    h = HashMix(h, ui.TraceUseRawInput() ? 1 : 0);
+    h = HashMix(h, ui.TraceUseRadiusGate() ? 1 : 0);
+    h = HashMix(h, ui.TraceEdgeRefineEnabled() ? 1 : 0);
+    h = HashMix(h, ui.TraceWidthSmoothingEnabled() ? 1 : 0);
+    h = HashMix(h, ui.TraceCurveAverageEnabled() ? 1 : 0);
+    h = HashMix(h, static_cast<uint64_t>(ui.TraceLineOrder()));
+    h = HashMix(h, static_cast<uint64_t>(ui.TraceSupportMinCount()));
+    h = HashMix(h, static_cast<uint64_t>(ui.TraceSupportMaxCount()));
+    h = HashMixFloat(h, ui.TraceLineBinWidthPx());
+    h = HashMixFloat(h, ui.TraceLineWindowPx());
+    h = HashMixFloat(h, ui.TracePcaPeriodMs());
+    h = HashMixFloat(h, ui.TraceWidthStepPx());
+    h = HashMixFloat(h, ui.TraceSupportDivisor());
+    h = HashMixFloat(h, ui.TraceSupportRadiusPx());
+    h = HashMixFloat(h, ui.TraceBorderRatio());
+    h = HashMixFloat(h, ui.TraceFollowWindowPx());
+    h = HashMixFloat(h, ui.BallRadiusMm());
+    return h;
+}
+
+void Gui::RefreshTraceAnalysis() {
+    const uint64_t signature = TraceAnalysisSettingsSignature();
+    if (signature != traceAnalysisSettingsSig_) {
+        traceAnalysisSettingsSig_ = signature;
+        traceAnalysisDirty_ = true;
+    }
+
+    if (!traceAnalysisDirty_) {
+        return;
+    }
+
+    // Rate limit: skip this tick but stay dirty, the next tick retries. The
+    // period adapts to the measured cost of the previous run so the analysis
+    // never eats more than ~a third of the loop during event bursts.
+    const auto now = std::chrono::steady_clock::now();
+    const double effectivePeriodMs = std::min(
+        50.0,
+        std::max(
+            static_cast<double>(traceAnalysisMinPeriodMs_),
+            2.0 * lastTraceAnalysisDurationMs_));
+    if (last_trace_analysis_time_.time_since_epoch().count() != 0) {
+        const double sinceMs =
+            std::chrono::duration<double, std::milli>(now - last_trace_analysis_time_).count();
+        if (sinceMs < effectivePeriodMs) {
+            return;
+        }
+    }
+
+    last_trace_analysis_time_ = now;
+    traceAnalysisDirty_ = false;
+    UpdateTraceAnalysis();
+    lastTraceAnalysisDurationMs_ =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - now).count();
+}
+
+// Runs the full trace pipeline and caches the results in members; every
+// view (Trace, 3D, TOP, RMSE) and the ROS trace publisher read from this
+// cache. Call RefreshTraceAnalysis() instead of this: it dedups reruns on
+// unchanged events/settings.
 void Gui::UpdateTraceAnalysis() {
     const int polarityMode = ui.TracePolarityMode();
     const TraceSupportEdgeSettings supportEdge = MakeTraceSupportEdgeSettings(ui);
+
+    // Exact trace-memory cutoff (the accumulator compacts lazily, so the
+    // buffer may still hold an aged-out prefix), and a hard cap on the
+    // points entering the ribbon fit so an event burst cannot blow up the
+    // per-run cost (stride subsampling keeps the trail distribution; bins
+    // still get hundreds of events each at this cap).
+    constexpr std::size_t kMaxTraceAnalysisPoints = 24000;
+    int64_t traceCutoffUs = std::numeric_limits<int64_t>::min();
+    if (traceLastAccumulatedTimestampUs != std::numeric_limits<int64_t>::min()) {
+        const int64_t memoryUs =
+            static_cast<int64_t>(ui.TraceMemorySeconds() * 1.0e6);
+        traceCutoffUs = traceLastAccumulatedTimestampUs - std::max<int64_t>(memoryUs, 1);
+    }
 
     TracePointSourceResult source = BuildTracePointSource(
         traceAccumulatedPoints,
@@ -726,7 +816,9 @@ void Gui::UpdateTraceAnalysis() {
         ui.TraceUseRawInput(),
         ui.TraceUseRadiusGate(),
         traceMotionWindowValid,
-        polarityMode
+        polarityMode,
+        traceCutoffUs,
+        kMaxTraceAnalysisPoints
     );
     traceSourceLabel_ = std::move(source.label);
     traceSourceColor_ = source.color;
@@ -1888,6 +1980,12 @@ void Gui::ClearTrajectory3D() {
 }
 
 void Gui::SetTracePoseCalibration(const CalibrationData &calibration, float ballRadiusMm) {
+    if (traceCalibration.sourcePath != calibration.sourcePath
+        || traceCalibration.ready != calibration.ready
+        || traceCalibration.useFisheyeModel != calibration.useFisheyeModel
+        || traceBallRadiusMm != ballRadiusMm) {
+        traceAnalysisDirty_ = true;
+    }
     traceCalibration = calibration;
     traceBallRadiusMm = ballRadiusMm;
 }
@@ -1926,9 +2024,13 @@ void Gui::SetTraceMotionWindow(
     traceMotionXMin = std::min(xMin, xMax);
     traceMotionXMax = std::max(xMin, xMax);
     traceMotionTimestampUs = timestampUs;
+    traceAnalysisDirty_ = true;
 }
 
 void Gui::ClearTraceMotionWindow() {
+    if (traceMotionWindowValid) {
+        traceAnalysisDirty_ = true;
+    }
     traceMotionWindowValid = false;
     traceMotionParabolaValid = false;
     traceMotionCircle = {};
@@ -2017,6 +2119,7 @@ void Gui::AppendTraceEvents(
     }
 
     const int64_t previousLastTimestamp = traceLastAccumulatedTimestampUs;
+    const std::size_t sizeBeforeAppend = traceAccumulatedPoints.size();
     traceAccumulatedPoints.reserve(traceAccumulatedPoints.size() + points.size());
     traceAccumulatedTimestamps.reserve(traceAccumulatedTimestamps.size() + timestamps.size());
     traceAccumulatedPolarities.reserve(traceAccumulatedPolarities.size() + points.size());
@@ -2051,6 +2154,10 @@ void Gui::AppendTraceEvents(
 
     traceLastAccumulatedTimestampUs = std::max(traceLastAccumulatedTimestampUs, newestInBatch);
 
+    if (traceAccumulatedPoints.size() != sizeBeforeAppend) {
+        traceAnalysisDirty_ = true;
+    }
+
     if (traceAccumulatedPoints.empty()) {
         return;
     }
@@ -2059,29 +2166,36 @@ void Gui::AppendTraceEvents(
     const int64_t memoryUs = static_cast<int64_t>(ui.TraceMemorySeconds() * 1.0e6);
     const int64_t cutoffTimestamp = traceLastAccumulatedTimestampUs - std::max<int64_t>(memoryUs, 1);
 
-    std::size_t write = 0;
-    for (std::size_t read = 0; read < traceAccumulatedPoints.size(); ++read) {
-        if (traceAccumulatedTimestamps[read] < cutoffTimestamp) {
-            continue;
-        }
-
-        if (write != read) {
-            traceAccumulatedPoints[write] = traceAccumulatedPoints[read];
-            traceAccumulatedTimestamps[write] = traceAccumulatedTimestamps[read];
-            traceAccumulatedPolarities[write] = traceAccumulatedPolarities[read];
-        }
-        ++write;
+    // Lazy compaction: the timestamps are appended in order, so the aged-out
+    // events form a sorted prefix. Erasing it is O(remaining), so it only
+    // happens once the stale prefix dominates — the per-tick cost stays
+    // O(batch) instead of O(window) (the old full rewrite ran at 1 kHz over
+    // the whole accumulation and froze the loop during event bursts). The
+    // analysis applies the exact cutoff itself when reading the buffer.
+    const auto firstFresh = std::lower_bound(
+        traceAccumulatedTimestamps.begin(),
+        traceAccumulatedTimestamps.end(),
+        cutoffTimestamp);
+    const std::size_t stale =
+        static_cast<std::size_t>(firstFresh - traceAccumulatedTimestamps.begin());
+    if (stale >= 4096 && stale * 2 >= traceAccumulatedTimestamps.size()) {
+        traceAccumulatedPoints.erase(
+            traceAccumulatedPoints.begin(),
+            traceAccumulatedPoints.begin() + static_cast<std::ptrdiff_t>(stale));
+        traceAccumulatedTimestamps.erase(
+            traceAccumulatedTimestamps.begin(),
+            traceAccumulatedTimestamps.begin() + static_cast<std::ptrdiff_t>(stale));
+        traceAccumulatedPolarities.erase(
+            traceAccumulatedPolarities.begin(),
+            traceAccumulatedPolarities.begin() + static_cast<std::ptrdiff_t>(stale));
     }
-
-    traceAccumulatedPoints.resize(write);
-    traceAccumulatedTimestamps.resize(write);
-    traceAccumulatedPolarities.resize(write);
 
     if (traceAccumulatedPoints.size() > kMaxAccumulatedTraceEvents) {
         const std::size_t removeCount = traceAccumulatedPoints.size() - kMaxAccumulatedTraceEvents;
         traceAccumulatedPoints.erase(traceAccumulatedPoints.begin(), traceAccumulatedPoints.begin() + static_cast<std::ptrdiff_t>(removeCount));
         traceAccumulatedTimestamps.erase(traceAccumulatedTimestamps.begin(), traceAccumulatedTimestamps.begin() + static_cast<std::ptrdiff_t>(removeCount));
         traceAccumulatedPolarities.erase(traceAccumulatedPolarities.begin(), traceAccumulatedPolarities.begin() + static_cast<std::ptrdiff_t>(removeCount));
+        traceAnalysisDirty_ = true;
     }
 }
 
@@ -2090,6 +2204,7 @@ void Gui::ResetTraceAccumulation() {
     traceAccumulatedTimestamps.clear();
     traceAccumulatedPolarities.clear();
     traceLastAccumulatedTimestampUs = std::numeric_limits<int64_t>::min();
+    traceAnalysisDirty_ = true;
 }
 
 void Gui::ClearTrace3D() {

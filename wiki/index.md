@@ -15,7 +15,7 @@ Event-camera ball tracking and 3D pose estimation.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, ROI/ribbon/width-depth pipeline, output contract, GUI-capped cadence, event-clock re-anchoring, binary live confidence, and the 2026-07-16 I/O parameters (camera-mode startup, polarity all, H5 recording, scripted replay, trace-status heartbeat) validated offline on a real throw. | 2026-07-16 |
+| [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, ROI/ribbon/width-depth pipeline, output contract, event-clock re-anchoring, binary live confidence, the 2026-07-16 I/O parameters (camera-mode startup, polarity all, H5 recording, scripted replay, trace-status heartbeat), and the 2026-07-17 latency optimization (analysis/publish decoupled from the 60 FPS render via `trace_analysis_period_ms`, incremental live undistortion, paused-reader cache, DBSCAN gated off in the live-catch config). | 2026-07-17 |
 | [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure for calibrated real Trace and the single `--tracker` stack; the 2026-07-16 no-valid-sample diagnosis, its root cause (tracker started in File/reader mode) and the offline replay validation of the fixed chain. | 2026-07-16 |
 | [Perception Robustness And Flight Lifecycle](perception/perception-robustness-flight-lifecycle.md) | Independent review of the 2026-07-09 incident: lead=0 default decision, timestamp/quality gaps, explicit throw lifecycle, left-policy envelope and validation gates. | 2026-07-10 |
 
@@ -25,8 +25,8 @@ Camera intrinsics, hand-eye calibration and TF contracts.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire workflow, dated 2026-07-10 physical transform example with validation metrics, base_link parity gates and remaining physical checks. | 2026-07-10 |
-| [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md) | Operator checklist for the physical eye-to-hand session: persistent optional-phone layout startup, prerequisites, capture, solve acceptance gates, TF publication and validation. | 2026-07-10 |
+| [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire workflow, current strict-landscape 2026-07-23 physical transform with validation metrics, base_link parity gates and remaining physical checks. | 2026-07-23 |
+| [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md) | Operator checklist for the physical eye-to-hand session: strict landscape-only phone mire with browser/server/collector guards, persistent safe layout, capture, solve acceptance gates, TF publication and validation. | 2026-07-23 |
 | [Intrinsic Calibration Runbook](calibration/intrinsic-calibration-runbook.md) | Operator checklist to redo DVXplorer intrinsics: working/output dirs, env.sh `calib` alias, event-mire capture, robust solve and acceptance gates. | 2026-07-09 |
 | [Frames And Transforms](calibration/frames-and-transforms.md) | `base_link` policy frame, TF, UI robot orientation, hold_side-driven hoop_center TF (right/left racket mount), hoop radius distinction and unit contracts used by perception, live catch and UI. | 2026-07-06 |
 

@@ -144,6 +144,12 @@
       updatePanelInfo(vp);
       updateWarning();
       configureCanvas(vp);
+      if (layout.screen.landscape_ok !== true) {
+        draw(false);
+        throw new Error(
+          "FORMAT PAYSAGE REQUIS: activer la rotation paysage du telephone puis recommencer."
+        );
+      }
       lastLit = null;
       draw(staticMode);
     }
@@ -160,7 +166,13 @@
     }
 
     function updateWarning() {
-      if (layout && !layout.screen.fullscreen_ok) {
+      if (layout && layout.screen.landscape_ok !== true) {
+        warning.textContent =
+          "FORMAT PAYSAGE REQUIS: viewport " +
+          layout.screen.viewport_px.width + "x" + layout.screen.viewport_px.height +
+          " - capture hand-eye bloquee";
+        warning.style.display = "block";
+      } else if (layout && !layout.screen.fullscreen_ok) {
         warning.textContent =
           "PAS EN PLEIN ECRAN REEL: viewport " +
           layout.screen.viewport_px.width + "x" + layout.screen.viewport_px.height +
@@ -169,6 +181,17 @@
         warning.style.display = "block";
       } else {
         warning.style.display = "none";
+      }
+    }
+
+    async function requestLandscapeOrientation() {
+      const orientation = window.screen && window.screen.orientation;
+      if (!orientation || typeof orientation.lock !== "function") return;
+      try {
+        await orientation.lock("landscape");
+      } catch (_error) {
+        // The strict server/collector checks remain authoritative when the
+        // browser does not support or authorize orientation locking.
       }
     }
 
@@ -234,6 +257,7 @@
       } catch (_error) {
         // The fullscreen check below will flag a cropped viewport anyway.
       }
+      await requestLandscapeOrientation();
       // Let the browser settle into its fullscreen viewport before measuring.
       await new Promise((resolve) => window.setTimeout(resolve, 350));
       try {
@@ -251,7 +275,12 @@
     async function refreshAfterViewportChange() {
       if (!running) return;
       try { await fetchLayout(); }
-      catch (_error) { /* keep the previous layout; next resize retries */ }
+      catch (error) {
+        running = false;
+        draw(false);
+        panel.classList.remove("hidden");
+        errorLabel.textContent = error.message;
+      }
     }
 
     document.getElementById("start").addEventListener("click", () => start(false));

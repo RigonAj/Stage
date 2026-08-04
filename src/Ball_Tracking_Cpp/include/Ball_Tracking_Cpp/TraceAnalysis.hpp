@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -149,7 +150,8 @@ std::vector<TracePoint> BuildTracePointsFromFloatSource(
     const std::vector<cv::Point2f> &pointsSource,
     const std::vector<int64_t> &timestamps,
     const std::vector<bool> *polarities,
-    int polarityMode);
+    int polarityMode,
+    int64_t minTimestampUs = std::numeric_limits<int64_t>::min());
 
 struct TracePointSourceResult {
     std::vector<TracePoint> points;
@@ -157,6 +159,10 @@ struct TracePointSourceResult {
     Color color = MAROON;
 };
 
+// minTimestampUs drops accumulated events older than the trace memory window
+// at analysis time (the accumulator compacts lazily for performance).
+// maxPoints (> 0) stride-subsamples the source so the ribbon fit cost stays
+// bounded during high event-rate bursts.
 TracePointSourceResult BuildTracePointSource(
     const std::vector<cv::Point2f> &accumulatedPoints,
     const std::vector<int64_t> &accumulatedTimestamps,
@@ -171,7 +177,9 @@ TracePointSourceResult BuildTracePointSource(
     bool useRawInput,
     bool useRadiusGate,
     bool motionWindowValid,
-    int polarityMode);
+    int polarityMode,
+    int64_t minTimestampUs = std::numeric_limits<int64_t>::min(),
+    std::size_t maxPoints = 0);
 
 float Quantile(std::vector<float> values, float q);
 

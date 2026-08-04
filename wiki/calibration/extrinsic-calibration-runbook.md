@@ -1,6 +1,6 @@
 # Extrinsic Calibration Runbook (Eye-To-Hand Session)
 
-> Sources: camera-base calibration reference, 2026-06-12; calibration scripts code review, 2026-07-06
+> Sources: camera-base calibration reference, 2026-06-12; calibration scripts code review, 2026-07-06; strict landscape phone-mire guard, 2026-07-23
 > Raw: [Camera-base calibration](../../docs/Robot_Control/ur3e_camera_base_calibration.md); [Session launcher](../../scripts/run_handeye_session.sh); [Solver](../../scripts/solve_handeye.py); [Collector](../../scripts/event_mire_calibration.py); [TF publisher](../../scripts/publish_camera_tf.py)
 
 ## Overview
@@ -36,11 +36,14 @@ tab by its pytest suite. A French condensed version of this procedure lives at
 ```bash
 cd ~/Dv-Rosws/Dv-Rosws && source /opt/ros/humble/setup.bash && source install/setup.bash
 python3 scripts/solve_handeye.py --self-test
+python3 scripts/serve_phone_mire.py --self-test
 python3 scripts/event_mire_calibration.py --self-test
 ```
 
-Both must print `self-test ok`. Never trust the solver conventions (both
-measured inputs inverted, both outputs read directly) without this test.
+All three must print `self-test ok`. Never trust the solver conventions (both
+measured inputs inverted, both outputs read directly) without this test. The
+phone-mire server test also verifies that portrait layouts are rejected and
+cannot replace the persistent landscape cache.
 
 ## Capture Session
 
@@ -57,6 +60,16 @@ after the PC-side server restarts. The printed `http://<ip>:8081/` remains
 available when the operator wants to start or refresh the phone display. A
 phone-reported non-fullscreen layout is still rejected because its metric
 geometry is unsafe for calibration.
+
+**Landscape is mandatory.** On entering fullscreen, the phone page requests
+the browser orientation lock to landscape. Because that API is not guaranteed
+on every Android/browser combination, the server independently marks any
+portrait or viewport/panel orientation mismatch unsafe, never persists it in
+the layout cache, and the collector refuses F11 unless
+`screen.landscape_ok=true`. The phone should report approximately
+2711×1219/2712×1220 px, 154.50×69.55 mm and 18.97 mm dot spacing. A portrait
+report (approximately 1219×2711 px and 14.22 mm spacing) must be corrected on
+the phone before capture; it must never be mixed with a landscape session.
 
 Per pose (target 15–20 accepted samples):
 

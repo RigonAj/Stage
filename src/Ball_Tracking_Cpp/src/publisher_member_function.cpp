@@ -71,6 +71,12 @@ public:
             static_cast<float>(this->declare_parameter<double>("trace_lead_ms", 0.0)));
         ui.SetTraceHoldMs(
             static_cast<float>(this->declare_parameter<double>("trace_hold_ms", 0.0)));
+        // Minimum interval between two trace-analysis runs. The analysis is
+        // refreshed from the timer tick as soon as new events arrive (it no
+        // longer waits for the 60 FPS render frame); this bounds its CPU cost
+        // when live batches arrive at kHz rates. 0 = analyze every new batch.
+        gui.SetTraceAnalysisMinPeriodMs(
+            static_cast<float>(this->declare_parameter<double>("trace_analysis_period_ms", 4.0)));
         // Input source at startup: false (default) = live DVXplorer camera,
         // true = File/reader playback. Before this parameter the node always
         // started in File mode and silently processed no camera events until
@@ -237,6 +243,14 @@ private:
     Gui gui;
     BallTracker tracker;
 
+    // Reader fast path: last (file, time, window) already read + undistorted.
+    // While these are unchanged (paused reader), the tick reuses the cached
+    // undistorted window instead of re-reading the H5 and re-undistorting.
+    std::string last_reader_processed_path_;
+    double last_reader_processed_time_s_ = -1.0;
+    double last_reader_processed_window_s_ = -1.0;
+    bool reader_processed_valid_ = false;
+
     std::optional<BallTrackerResult> paused_reader_tracking_cache_;
     double paused_reader_tracking_time_seconds_ = -1.0;
     double paused_reader_tracking_window_seconds_ = -1.0;
@@ -311,7 +325,10 @@ void Pub::timer_callback() {
         gui.ClearPoses = false;
     }
 
+    bool readerNeedsReprocess = false;
+
     if (!ui.UseReader()) {
+        reader_processed_valid_ = false;
         camera.NextBatch();
 
         if (!camera.isCameraRunning()) {
@@ -338,29 +355,40 @@ void Pub::timer_callback() {
         if (ui.Record() && camera.FilteredAvailable()) {
             gui.WriteStore(camera.Filtered);
         }
-
-        camera.KeepRecentFiltered(ui.PlaybackWindowSeconds());
     }
     else {
-        dv::EventStore readerEvents;
-        gui.ReadStore(readerEvents);
+        // Paused reader on an unchanged window: the cached undistorted window
+        // from the previous tick is still valid, skip the H5 re-read and the
+        // full-window re-undistortion (the sliders keep working: clustering
+        // reruns below and the trace analysis reruns on any setting change).
+        readerNeedsReprocess =
+            !reader_processed_valid_
+            || gui.ReaderEventPath() != last_reader_processed_path_
+            || std::fabs(ui.PlaybackTimeSeconds() - last_reader_processed_time_s_) > 1.0e-9
+            || std::fabs(ui.PlaybackWindowSeconds() - last_reader_processed_window_s_) > 1.0e-9;
 
-        if (readerEvents.isEmpty()) {
-            camera.Events.reset();
-            camera.Filtered = dv::EventStore();
-            gui.ClearCurrentBall3D();
-            gui.Update();
-            RCLCPP_WARN_THROTTLE(
-                this->get_logger(), *this->get_clock(), 5000,
-                "File/reader mode with no events: the live camera is NOT processed "
-                "(set use_reader:=false or click 'Reader' -> Camera in the GUI)");
-            if (pose_source_ == "trace") {
-                publishTracePose();  // keep coasting at end of playback
+        if (readerNeedsReprocess) {
+            reader_processed_valid_ = false;
+            dv::EventStore readerEvents;
+            gui.ReadStore(readerEvents);
+
+            if (readerEvents.isEmpty()) {
+                camera.Events.reset();
+                camera.Filtered = dv::EventStore();
+                gui.ClearCurrentBall3D();
+                gui.Update();
+                RCLCPP_WARN_THROTTLE(
+                    this->get_logger(), *this->get_clock(), 5000,
+                    "File/reader mode with no events: the live camera is NOT processed "
+                    "(set use_reader:=false or click 'Reader' -> Camera in the GUI)");
+                if (pose_source_ == "trace") {
+                    publishTracePose();  // keep coasting at end of playback
+                }
+                return;
             }
-            return;
+            camera.Events = std::move(readerEvents);
+            camera.Filtered = *camera.Events;
         }
-        camera.Events = std::move(readerEvents);
-        camera.Filtered = *camera.Events;
     }
 
     if (!camera.FilteredAvailable()) {
@@ -382,14 +410,25 @@ void Pub::timer_callback() {
     gui.ClearCurrentBall3D();
     applyInputCalibration();
 
-    // Undistort must run on the full filtered window: the trace accumulation
-    // feeds on the undistorted points, and running it after Echantillon would
-    // cap the trail density to Maxevent subsampled events per window.
     const int maxEvent = static_cast<int>(ui.Maxevent());
     const int bandwidth = ui.Bandwidth();
     const uint32_t minNb = static_cast<uint32_t>(ui.MinNb());
 
-    camera.Undistort();
+    // Undistortion strategy: the live path undistorts only the fresh batch
+    // and maintains a rolling undistorted window (the per-tick full-window
+    // recompute was the main CPU cost of the loop). The reader path still
+    // recomputes the loaded window, but only when the playback position,
+    // window or file actually changed.
+    if (!ui.UseReader()) {
+        camera.UndistortLiveIncremental(ui.PlaybackWindowSeconds());
+    }
+    else if (readerNeedsReprocess) {
+        camera.Undistort();
+        last_reader_processed_path_ = gui.ReaderEventPath();
+        last_reader_processed_time_s_ = ui.PlaybackTimeSeconds();
+        last_reader_processed_window_s_ = ui.PlaybackWindowSeconds();
+        reader_processed_valid_ = true;
+    }
     camera.Echantillon(maxEvent);
     gui.nb_event = camera.SampleCount();
 
@@ -397,10 +436,15 @@ void Pub::timer_callback() {
 
     const auto t_cluster_start = clock::now();
 
-    camera.Cluster(box, ui.Alpha(), bandwidth, minNb);
-
-    const auto trackerClusters = buildTrackerClusters();
-    drawDbscanClusters(trackerClusters);
+    // DBSCAN feeds the legacy circle tracker and the cluster overlay of the
+    // non-trace views; skip it entirely when neither consumer is active
+    // (Trace view with circle fitting off = the live-catch configuration).
+    std::vector<BallTrackerClusterInput> trackerClusters;
+    if (ui.CircleFittingEnabled() || !ui.ShowTraceView()) {
+        camera.Cluster(box, ui.Alpha(), bandwidth, minNb);
+        trackerClusters = buildTrackerClusters();
+        drawDbscanClusters(trackerClusters);
+    }
 
     const auto t_cluster_end = clock::now();
     const auto t_post_start = clock::now();
@@ -469,17 +513,36 @@ void Pub::timer_callback() {
         gui.ClearTraceMotionWindow();
     }
 
+    // Live: feed the trace with just the fresh batch (its timestamp dedup
+    // would skip the rest of the window anyway). Reader: keep the full-window
+    // vectors, the loaded window is arbitrary.
     if (ui.TraceUseRawInput()) {
-        gui.AppendTraceEvents(
-            camera.RawFilteredPoints(),
-            camera.RawFilteredTimestamps(),
-            &camera.RawFilteredPolarities());
+        if (!ui.UseReader()) {
+            gui.AppendTraceEvents(
+                camera.LiveBatchRawPoints(),
+                camera.LiveBatchRawTimestamps(),
+                &camera.LiveBatchRawPolarities());
+        }
+        else {
+            gui.AppendTraceEvents(
+                camera.RawFilteredPoints(),
+                camera.RawFilteredTimestamps(),
+                &camera.RawFilteredPolarities());
+        }
     }
     else {
-        gui.AppendTraceEvents(
-            camera.UndistortedFilteredPoints(),
-            camera.UndistortedFilteredTimestamps(),
-            &camera.UndistortedFilteredPolarities());
+        if (!ui.UseReader()) {
+            gui.AppendTraceEvents(
+                camera.LiveBatchUndistortedPoints(),
+                camera.LiveBatchUndistortedTimestamps(),
+                &camera.LiveBatchUndistortedPolarities());
+        }
+        else {
+            gui.AppendTraceEvents(
+                camera.UndistortedFilteredPoints(),
+                camera.UndistortedFilteredTimestamps(),
+                &camera.UndistortedFilteredPolarities());
+        }
     }
 
     drawTrackerResult(tracking);
@@ -497,6 +560,14 @@ void Pub::timer_callback() {
         gui.AddHudText(8.0f, 42.0f, "Ball pose: no valid 3D estimate", MAROON, 22);
     }
 
+    // Refresh the trace analysis from this tick's events and publish BEFORE
+    // the render gate: a fresh pose no longer waits up to 16.7 ms for the
+    // next 60 FPS frame (RefreshTraceAnalysis dedups unchanged runs).
+    gui.RefreshTraceAnalysis();
+    if (pose_source_ == "trace") {
+        publishTracePose();
+    }
+
     const auto t_end = clock::now();
     gui.ms_pre = std::chrono::duration<double, std::milli>(t_pre_end - t_loop_start).count();
     gui.ms_cluster = std::chrono::duration<double, std::milli>(t_cluster_end - t_cluster_start).count();
@@ -504,12 +575,6 @@ void Pub::timer_callback() {
     gui.ms_loop = std::chrono::duration<double, std::milli>(t_end - t_loop_start).count();
 
     gui.Update();
-
-    // The trace analysis is refreshed inside gui.Update(), so the trace pose
-    // is published after it, from this frame's ribbon fit.
-    if (pose_source_ == "trace") {
-        publishTracePose();
-    }
 }
 
 std::vector<BallTrackerClusterInput> Pub::buildTrackerClusters() const {
@@ -650,6 +715,8 @@ void Pub::drawDbscanClusters(const std::vector<BallTrackerClusterInput> &cluster
 
 void Pub::resetTracks() {
     tracker.Reset();
+    camera.ResetLiveWindow();
+    reader_processed_valid_ = false;
     paused_reader_tracking_cache_.reset();
     paused_reader_tracking_time_seconds_ = -1.0;
     paused_reader_tracking_window_seconds_ = -1.0;

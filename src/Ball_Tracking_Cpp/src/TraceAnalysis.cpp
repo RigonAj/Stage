@@ -53,7 +53,8 @@ std::vector<TracePoint> BuildTracePointsFromFloatSource(
     const std::vector<cv::Point2f> &pointsSource,
     const std::vector<int64_t> &timestamps,
     const std::vector<bool> *polarities,
-    int polarityMode) {
+    int polarityMode,
+    int64_t minTimestampUs) {
 
     std::vector<TracePoint> points;
     const std::size_t count = std::min(pointsSource.size(), timestamps.size());
@@ -61,6 +62,9 @@ std::vector<TracePoint> BuildTracePointsFromFloatSource(
     points.reserve(count);
 
     for (std::size_t i = 0; i < count; ++i) {
+        if (timestamps[i] < minTimestampUs) {
+            continue;
+        }
         const bool polarity = hasPolarities ? (*polarities)[i] : true;
         if (hasPolarities && !AcceptTracePolarity(polarity, polarityMode)) {
             continue;
@@ -95,7 +99,9 @@ TracePointSourceResult BuildTracePointSource(
     bool useRawInput,
     bool useRadiusGate,
     bool motionWindowValid,
-    int polarityMode) {
+    int polarityMode,
+    int64_t minTimestampUs,
+    std::size_t maxPoints) {
 
     TracePointSourceResult result;
     result.label = useRawInput
@@ -112,7 +118,8 @@ TracePointSourceResult BuildTracePointSource(
             accumulatedPoints,
             accumulatedTimestamps,
             &accumulatedPolarities,
-            polarityMode);
+            polarityMode,
+            minTimestampUs);
     }
 
     if (result.points.empty()
@@ -153,6 +160,19 @@ TracePointSourceResult BuildTracePointSource(
         result.label = std::string("rounded current window fallback | pol=")
             + TracePolarityModeName(polarityMode);
         result.color = MAROON;
+    }
+
+    // Bound the analysis cost during high event-rate bursts: keep at most
+    // maxPoints via stride subsampling, which preserves the temporal and
+    // spatial distribution of the trail (points are in timestamp order).
+    if (maxPoints > 0 && result.points.size() > maxPoints) {
+        const std::size_t step =
+            (result.points.size() + maxPoints - 1) / maxPoints;
+        std::size_t write = 0;
+        for (std::size_t i = 0; i < result.points.size(); i += step) {
+            result.points[write++] = result.points[i];
+        }
+        result.points.resize(write);
     }
 
     return result;

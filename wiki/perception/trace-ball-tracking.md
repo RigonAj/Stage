@@ -1,6 +1,6 @@
 # Trace Ball Tracking
 
-> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09; GUI-framerate publish cadence analysis, 2026-07-09; independent robustness/timestamp review, 2026-07-10; input-source/polarity/recording/replay ROS parameters + trace-status heartbeat + offline real-throw validation, 2026-07-16
+> Sources: Repository README, 2026-06-29; project synthesis, 2026-06-29; trace pose publication, 2026-07-03; full perception pipeline detail + ROI-gated accumulation + lead/coast prediction, 2026-07-08; ball radius ROS launch parameter, 2026-07-09; sampled display path, 2026-07-09; explicit camera_calibration_file parameter, 2026-07-09; GUI-framerate publish cadence analysis, 2026-07-09; independent robustness/timestamp review, 2026-07-10; input-source/polarity/recording/replay ROS parameters + trace-status heartbeat + offline real-throw validation, 2026-07-16; latency optimization (render-decoupled analysis, incremental undistortion, gated clustering), 2026-07-17
 > Raw: [README](../../README.md); [Synthese projet](../../docs/Context/synthese_projet.md); [Publisher node](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Trace analysis](../../src/Ball_Tracking_Cpp/src/TraceAnalysis.cpp); [Camera front-end](../../src/Ball_Tracking_Cpp/src/Camera.cpp); [Gui accumulation/panel](../../src/Ball_Tracking_Cpp/include/Ball_Tracking_Cpp/Gui.h); [Live-catch launch](../../src/ur3e_live_catch/launch/live_catch.launch.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md)
 
 ## Overview
@@ -44,13 +44,16 @@ metres for `BallState.position`. The published frame is `camera_optical`
 
 ## Pipeline — Front-End (per timer tick, `Camera.cpp`)
 
-The ROS node timer is declared at 1 ms (`publisher_member_function.cpp`,
-`timer_callback`), but the loop is **effectively capped at the GUI framerate**:
-`gui.Update()` renders with raylib `SetTargetFPS(60)` and `EndDrawing` blocks
-to hold the frame time, serializing acquisition, Trace analysis AND
-publication behind the render (2026-07-09 analysis). A heavy render (3D view,
-high `Max Events`) therefore drops the `BallState` cadence below 60 Hz;
-decoupling publish from render is an open task. Each tick:
+The ROS node timer runs at 1 ms (`publisher_member_function.cpp`,
+`timer_callback`). **Since 2026-07-17 the Trace analysis and the publish are
+decoupled from the render**: `Gui::RefreshTraceAnalysis()` reruns the trace
+pipeline from the timer tick as soon as the accumulated events (or a relevant
+slider) change — rate-limited by the `trace_analysis_period_ms` ROS parameter
+(default 4 ms) — and `publishTracePose()` runs *before* `gui.Update()`. A
+fresh pose therefore no longer waits up to 16.7 ms for the next 60 FPS frame
+(the pre-2026-07-17 behavior, where `UpdateTraceAnalysis()` only ran inside
+`Draw()`). Rendering itself stays gated at 60 FPS and still shares the thread,
+so a heavy render frame can delay the *next* tick by a few ms. Each tick:
 
 1. **Acquire** — `NextBatch()` pulls the next DVXplorer event batch (or the
    reader feeds recorded `.h5` events in file mode). Live batches are often
@@ -65,29 +68,40 @@ decoupling publish from render is an open task. Each tick:
 2. **Denoise** — `Filter()` runs dv-processing's background-activity noise
    filter (1 ms activity window, set in the `DvCamera` constructor). This drops
    isolated sensor noise that would otherwise widen the ribbon.
-3. **Rolling filtered window** — `KeepRecentFiltered(timeslice)` keeps a
-   rolling window of filtered events (default `timeslice` ≈ 484 ms). This is
-   the full pre-subsampling window used by undistortion, Trace accumulation and
-   fallback logic.
-4. **Undistort** — `Undistort()` produces two parallel streams: the **raw**
-   filtered points and the **undistorted** points (`cv::undistortPoints`, or
-   `cv::fisheye` when the calibration is fisheye), each clamped to image bounds.
-   The trace can consume either (`Trace use raw input`, default undistorted).
-   Undistortion runs on the **full** filtered window on purpose — the trace
-   needs full trail density, so it must run before subsampling.
-5. **Subsample for display + cluster** — `Echantillon(maxevent)` decimates the
+3. **Undistort + rolling window (live, incremental since 2026-07-17)** —
+   `UndistortLiveIncremental(timeslice)` undistorts **only the fresh filtered
+   batch** (`cv::undistortPoints`, or `cv::fisheye` when the calibration is
+   fisheye) and merges it into a rolling undistorted window (default
+   `timeslice` ≈ 484 ms) via shallow `dv::EventStore` slices. This replaced
+   the old `KeepRecentFiltered` + full-window `Undistort()` pair, which
+   re-undistorted the entire ~484 ms window every tick — the main per-tick CPU
+   cost and the cause of lag spikes during event bursts. The window resets on
+   a backward time jump or a calibration/input switch. **Reader mode** keeps
+   the full-window `Undistort()` recompute, but only reruns it when the
+   playback file/position/window actually changed (a paused reader no longer
+   re-reads the H5 and re-undistorts every tick). Both paths expose the raw
+   and undistorted streams; the trace consumes either (`Trace use raw input`,
+   default undistorted) and, in live mode, is fed just the fresh batch (its
+   timestamp dedup made re-scanning the whole window per tick pure overhead).
+4. **Subsample for display + cluster** — `Echantillon(maxevent)` decimates the
    filtered window into `Samples`. The GUI 2D texture draws only these sampled
-   events to avoid lag; `Cluster(box, alpha, bandwidth, minNb)` also consumes
-   them for the legacy circle fitter. Trace still accumulates from the full raw
-   or undistorted filtered streams before this display subsampling.
+   events to avoid lag. `Cluster(box, alpha, bandwidth, minNb)` (DBSCAN) and
+   the tracker-cluster conversion **only run when circle fitting is ON or a
+   non-Trace view is displayed** (since 2026-07-17): in the live-catch
+   configuration (Trace view, circle fitting OFF) the whole DBSCAN path is
+   skipped every tick.
 
 ## Pipeline — Trace Accumulation (`Gui::AppendTraceEvents`)
 
 The trace is built from a **rolling time window** of events, not one frame:
 
-- **Window** = the last `trace_memory_ms` of events (default **40 ms**, slider
-  up to 3000 ms). Older events age out each tick; a hard cap of 120 000 events
-  bounds memory.
+- **Window** = the last `trace_memory_ms` of events (default **150 ms** since
+  2026-07-17, slider 1–500 ms; was 40 ms). A hard cap of 120 000 events bounds
+  memory. **Compaction is lazy since 2026-07-17**: aged-out events form a
+  sorted prefix that is erased only once it dominates the buffer (the old
+  full rewrite ran at 1 kHz over the whole accumulation and froze the loop
+  during event bursts); the analysis applies the exact window cutoff itself
+  when reading the buffer, so the fitted window stays exact.
 - **Spatial gate = fixed work-ROI (since 2026-07-08).** Only events inside a
   user-set rectangle (`WorkRoiX/Y/W/H`, image pixels, drawn as an orange box on
   the 2D views) are accumulated. This replaced the old circle-derived motion
@@ -196,8 +210,18 @@ sample (Option A — prediction lives in C++):
    are always events).
 
 Deduplication: a window is only re-fitted when its latest sample stamp
-strictly advances, so repeated render frames on the same events do not
-re-publish.
+strictly advances, so repeated ticks on the same accumulated events do not
+re-publish. Upstream of that, `RefreshTraceAnalysis()` itself dedups: it only
+reruns the ribbon/3D analysis when the accumulation changed or a
+trace-relevant setting changed (settings signature), and at most once per
+`trace_analysis_period_ms` (ROS parameter, default 4 ms — so up to ~250
+fresh publishes/s during a throw, vs at most 60/s before 2026-07-17). Two
+cost bounds protect the loop during event bursts: the analysis input is
+stride-subsampled to at most **24 000 points** (bins still get hundreds of
+events each; on the 2026-07-09 replay the ribbon is unchanged, 298 px), and
+the effective analysis period adapts to twice the measured duration of the
+previous run (≤ 50 ms), so a heavy fit throttles itself instead of starving
+acquisition and rendering.
 
 ## Output Contract
 
@@ -225,7 +249,7 @@ re-publish.
   stabler depth cue than a single blob radius; it also yields the 2D path for a
   short trajectory in one window.
 - **Rolling time window (not per-frame)**: a single event frame is too sparse
-  for a ribbon; a window gives the trail its length. Short default (40 ms) keeps
+  for a ribbon; a window gives the trail its length. A short window keeps
   the mid-window lag small; widen it to capture more of a flight (needed for a
   reliable prediction — see risks).
 - **ROI gate instead of circle motion window**: decouples the primary algorithm
@@ -254,7 +278,7 @@ re-publish.
 
 | Slider | Default | Effect |
 |---|---|---|
-| `Trace ms` (`trace_memory_ms`) | 40 | Accumulation window length. Longer = more trail/support and better prediction, more mid-window lag. |
+| `Trace ms` (`trace_memory_ms`) | 150 (was 40 until 2026-07-17; slider 1–500 ms) | Accumulation window length. Longer = more trail/support and better prediction, more mid-window lag. On the 2026-07-09 replay, 150 ms gives a 298 px ribbon (vs ~118 px at 40 ms); the ribbon fit input is capped at 24 000 stride-subsampled points, so a longer window no longer inflates the per-run cost. |
 | `Lead ms` (`trace_lead_ms`, ROS param since 2026-07-09) | 0 | Publish position predicted at latest + lead. Pinned to 0 by the live-catch launch when `use_ball_regression:=true`: the measurement layer must not publish extrapolated points into the regression. |
 | `Hold ms` (`trace_hold_ms`, ROS param since 2026-07-09) | 0 | Coast duration after the ball leaves the ROI. Pinned to 0 under the regression for the same reason (coast points carry confidence < 1 and the regression drops them anyway). |
 | `ROI x/y/w/h` | full frame | Fixed work-ROI; crop out the robot region. |
@@ -277,8 +301,8 @@ Launch-initialized parameters: lead, hold, radius, calibration, and since
 replay (`reader_file`), trace polarity (`trace_polarity_mode`, default `all`)
 and event recording (`record`/`record_file`). ROI, memory, edge refinement and
 width smoothing remain GUI-local and reset to defaults on restart (full-frame
-ROI, 40 ms, edge refine OFF, width smoothing OFF). This is a smaller but still
-open reproducibility gap for real bags.
+ROI, 150 ms, edge refine OFF, width smoothing OFF). This is a smaller but
+still open reproducibility gap for real bags.
 
 ## Node I/O Parameters and Diagnosis (2026-07-16)
 
@@ -327,12 +351,13 @@ functional on real data; live validation with physical throws remains.
 - **Single-mover assumption**: without a follow-window, two movers inside the
   ROI corrupt the ribbon — keep the ROI tight around the ball's path and off the
   robot.
-- **Publish cadence tied to the render loop**: fresh-window publishes happen at
-  most once per GUI frame (`SetTargetFPS(60)`, dedup by latest sample stamp),
-  irregularly; coast publishes in bursts every callback. `ball_state_raw` is
-  therefore NOT a guaranteed 60 Hz — the downstream `ball_regression_node`
-  resamples it to a clean 60 Hz `ball_state` and is the recommended feed for
-  the policy ([Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md)).
+- **Publish cadence is event-driven, not fixed-rate**: since 2026-07-17
+  fresh-window publishes follow new event batches (rate-limited by
+  `trace_analysis_period_ms`, default 4 ms) instead of the 60 FPS render gate,
+  so `ball_state_raw` is faster but still irregular — the downstream
+  `ball_regression_node` resamples it to a clean 60 Hz `ball_state` and
+  remains the recommended feed for the policy
+  ([Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md)).
 - **Quality is not propagated**: a marginal but valid fresh ribbon gets the
   same confidence 1.0 as a well-conditioned one. Regression measurement-purity
   gating removes coast points only; it cannot reject live depth fits without a

@@ -259,36 +259,190 @@ void DvCamera::Undistort() {
     Filtered = std::move(output);
 }
 
-void DvCamera::KeepRecentFiltered(double windowSeconds) {
-    if (Filtered.isEmpty()) {
+namespace {
+// Drops window-buffer entries older than cutoff, but only once the stale
+// prefix dominates: the erase is O(remaining), so amortizing it keeps the
+// per-tick cost proportional to the batch instead of the whole window. The
+// buffers may briefly hold up to ~2x the window; their only consumer (the
+// trace-view fallback display) tolerates that.
+void TrimStalePrefix(
+    std::vector<cv::Point2f> &points,
+    std::vector<int64_t> &timestamps,
+    std::vector<bool> &polarities,
+    int64_t cutoffTimestamp) {
+    if (timestamps.empty()) {
         return;
     }
+
+    const auto firstFresh =
+        std::lower_bound(timestamps.begin(), timestamps.end(), cutoffTimestamp);
+    const std::size_t stale =
+        static_cast<std::size_t>(firstFresh - timestamps.begin());
+
+    if (stale >= 4096 && stale * 2 >= timestamps.size()) {
+        points.erase(points.begin(), points.begin() + static_cast<std::ptrdiff_t>(stale));
+        timestamps.erase(timestamps.begin(), timestamps.begin() + static_cast<std::ptrdiff_t>(stale));
+        polarities.erase(polarities.begin(), polarities.begin() + static_cast<std::ptrdiff_t>(stale));
+    }
+}
+}
+
+void DvCamera::ResetLiveWindow() {
+    liveWindow_ = dv::EventStore();
+    liveBatchRawPoints_.clear();
+    liveBatchRawTimestamps_.clear();
+    liveBatchRawPolarities_.clear();
+    liveBatchUndistortedPoints_.clear();
+    liveBatchUndistortedTimestamps_.clear();
+    liveBatchUndistortedPolarities_.clear();
+    rawFilteredPoints_.clear();
+    rawFilteredTimestamps_.clear();
+    rawFilteredPolarities_.clear();
+    undistortedFilteredPoints_.clear();
+    undistortedFilteredTimestamps_.clear();
+    undistortedFilteredPolarities_.clear();
+}
+
+void DvCamera::UndistortLiveIncremental(double windowSeconds) {
+    liveBatchRawPoints_.clear();
+    liveBatchRawTimestamps_.clear();
+    liveBatchRawPolarities_.clear();
+    liveBatchUndistortedPoints_.clear();
+    liveBatchUndistortedTimestamps_.clear();
+    liveBatchUndistortedPolarities_.clear();
 
     if (windowSeconds <= 0.0) {
         windowSeconds = 0.001;
     }
 
-    for (const auto& e : Filtered) {
-        recentFiltered_.emplace_back(e);
-    }
-
-    if (recentFiltered_.isEmpty()) {
+    if (Filtered.isEmpty()) {
+        Filtered = liveWindow_;
         return;
     }
 
-    const int64_t newestTimestamp = recentFiltered_.getHighestTime();
-    const int64_t windowUs = static_cast<int64_t>(windowSeconds * 1.0e6);
-    const int64_t cutoffTimestamp = newestTimestamp - std::max<int64_t>(windowUs, 1);
-
-    dv::EventStore output;
-    for (const auto& e : recentFiltered_) {
-        if (e.timestamp() >= cutoffTimestamp) {
-            output.emplace_back(e);
-        }
+    // Backward time jump (camera restart / clock reset): the rolling window
+    // is stale, and EventStore::add throws on out-of-order data.
+    if (!liveWindow_.isEmpty()
+        && Filtered.getLowestTime() < liveWindow_.getHighestTime()) {
+        ResetLiveWindow();
     }
 
-    recentFiltered_ = std::move(output);
-    Filtered = recentFiltered_;
+    const dv::EventStore batch = Filtered;
+
+    liveBatchRawPoints_.reserve(batch.size());
+    liveBatchRawTimestamps_.reserve(batch.size());
+    liveBatchRawPolarities_.reserve(batch.size());
+
+    for (const auto& e : batch) {
+        liveBatchRawPoints_.emplace_back(
+            static_cast<float>(e.x()),
+            static_cast<float>(e.y())
+        );
+        liveBatchRawTimestamps_.emplace_back(e.timestamp());
+        liveBatchRawPolarities_.emplace_back(e.polarity());
+    }
+
+    dv::EventStore undistortedBatch;
+
+    if (calibration.ready
+        && !calibration.cameraMatrix.empty()
+        && !calibration.distortionCoefficients.empty()) {
+        std::vector<cv::Point2f> undistortedPoints;
+
+        if (calibration.useFisheyeModel) {
+            cv::fisheye::undistortPoints(
+                liveBatchRawPoints_,
+                undistortedPoints,
+                calibration.cameraMatrix,
+                calibration.distortionCoefficients,
+                cv::noArray(),
+                calibration.cameraMatrix
+            );
+        }
+        else {
+            cv::undistortPoints(
+                liveBatchRawPoints_,
+                undistortedPoints,
+                calibration.cameraMatrix,
+                calibration.distortionCoefficients,
+                cv::noArray(),
+                calibration.cameraMatrix
+            );
+        }
+
+        liveBatchUndistortedPoints_.reserve(undistortedPoints.size());
+        liveBatchUndistortedTimestamps_.reserve(undistortedPoints.size());
+        liveBatchUndistortedPolarities_.reserve(undistortedPoints.size());
+
+        for (size_t i = 0; i < undistortedPoints.size(); ++i) {
+            const float xf = undistortedPoints[i].x;
+            const float yf = undistortedPoints[i].y;
+            const int x = static_cast<int>(std::lround(xf));
+            const int y = static_cast<int>(std::lround(yf));
+
+            if (x >= 0
+                && x < calibration.imageSize.width
+                && y >= 0
+                && y < calibration.imageSize.height) {
+
+                liveBatchUndistortedPoints_.emplace_back(xf, yf);
+                liveBatchUndistortedTimestamps_.emplace_back(liveBatchRawTimestamps_[i]);
+                liveBatchUndistortedPolarities_.emplace_back(liveBatchRawPolarities_[i]);
+
+                undistortedBatch.emplace_back(
+                    liveBatchRawTimestamps_[i],
+                    static_cast<int16_t>(x),
+                    static_cast<int16_t>(y),
+                    static_cast<bool>(liveBatchRawPolarities_[i])
+                );
+            }
+        }
+    }
+    else {
+        // No calibration: pass raw events through so the pipeline keeps working.
+        liveBatchUndistortedPoints_ = liveBatchRawPoints_;
+        liveBatchUndistortedTimestamps_ = liveBatchRawTimestamps_;
+        liveBatchUndistortedPolarities_ = liveBatchRawPolarities_;
+        undistortedBatch = batch;
+    }
+
+    liveWindow_.add(undistortedBatch);
+
+    if (liveWindow_.isEmpty()) {
+        Filtered = liveWindow_;
+        return;
+    }
+
+    const int64_t windowUs =
+        std::max<int64_t>(static_cast<int64_t>(windowSeconds * 1.0e6), 1);
+    const int64_t cutoffTimestamp = liveWindow_.getHighestTime() - windowUs;
+
+    if (liveWindow_.getLowestTime() < cutoffTimestamp) {
+        liveWindow_ = liveWindow_.sliceTime(cutoffTimestamp);
+    }
+
+    Filtered = liveWindow_;
+
+    // Rolling full-window copies kept for the trace-view fallback source.
+    rawFilteredPoints_.insert(
+        rawFilteredPoints_.end(), liveBatchRawPoints_.begin(), liveBatchRawPoints_.end());
+    rawFilteredTimestamps_.insert(
+        rawFilteredTimestamps_.end(), liveBatchRawTimestamps_.begin(), liveBatchRawTimestamps_.end());
+    rawFilteredPolarities_.insert(
+        rawFilteredPolarities_.end(), liveBatchRawPolarities_.begin(), liveBatchRawPolarities_.end());
+    undistortedFilteredPoints_.insert(
+        undistortedFilteredPoints_.end(), liveBatchUndistortedPoints_.begin(), liveBatchUndistortedPoints_.end());
+    undistortedFilteredTimestamps_.insert(
+        undistortedFilteredTimestamps_.end(), liveBatchUndistortedTimestamps_.begin(), liveBatchUndistortedTimestamps_.end());
+    undistortedFilteredPolarities_.insert(
+        undistortedFilteredPolarities_.end(), liveBatchUndistortedPolarities_.begin(), liveBatchUndistortedPolarities_.end());
+
+    TrimStalePrefix(rawFilteredPoints_, rawFilteredTimestamps_, rawFilteredPolarities_, cutoffTimestamp);
+    TrimStalePrefix(
+        undistortedFilteredPoints_,
+        undistortedFilteredTimestamps_,
+        undistortedFilteredPolarities_,
+        cutoffTimestamp);
 }
 
 void DvCamera::Echantillon(int maxevent) {

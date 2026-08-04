@@ -83,7 +83,9 @@ def compute_layout_payload(
     fullscreen viewport; if the viewport is smaller than the panel (browser
     bars, letterboxing) the page is NOT in real fullscreen and the px->mm
     mapping of dot positions no longer references the screen center, so the
-    payload flags it.
+    payload flags it. Hand-eye capture additionally requires landscape for
+    both the viewport and panel; portrait remains representable only so the
+    phone page and collector can reject it explicitly.
     """
     if panel_width_px is None or panel_height_px is None:
         panel_width_px, panel_height_px = viewport_width_px, viewport_height_px
@@ -100,6 +102,10 @@ def compute_layout_payload(
         abs(viewport_width_px - panel_width_px) <= max(2, 0.01 * panel_width_px)
         and abs(viewport_height_px - panel_height_px) <= max(2, 0.01 * panel_height_px)
     )
+    landscape_ok = (
+        viewport_width_px > viewport_height_px
+        and panel_width_px > panel_height_px
+    )
     return {
         "created_at": datetime.now().isoformat(timespec="milliseconds"),
         "pattern": {
@@ -115,6 +121,8 @@ def compute_layout_payload(
             "size_mm": {"width": width_mm, "height": height_mm},
             "mm_per_px": {"x": mm_per_px_x, "y": mm_per_px_y},
             "fullscreen_ok": fullscreen_ok,
+            "orientation": "landscape" if landscape_ok else "portrait_or_inconsistent",
+            "landscape_ok": landscape_ok,
         },
         "render": {"blink_hz": blink_hz, "gradient_softness_percent": gradient_softness},
         "layout": meta,
@@ -143,7 +151,11 @@ class MireState:
             return False
         screen = payload.get("screen")
         dots = payload.get("dots")
-        if not isinstance(screen, dict) or screen.get("fullscreen_ok") is not True:
+        if (
+            not isinstance(screen, dict)
+            or screen.get("fullscreen_ok") is not True
+            or screen.get("landscape_ok") is not True
+        ):
             return False
         if not isinstance(dots, list) or len(dots) != EXPECTED_DOTS:
             return False
@@ -295,6 +307,7 @@ def run_self_test() -> int:
     screen = payload["screen"]
     check("landscape maps 154.50 mm to width", screen["size_mm"]["width"] == 154.50)
     check("landscape fullscreen detected", screen["fullscreen_ok"] is True)
+    check("landscape orientation accepted", screen["landscape_ok"] is True)
     check("19 dots served", len(payload["dots"]) == EXPECTED_DOTS)
 
     # Single source of truth: served dots == direct build_mire_layout output.
@@ -314,11 +327,13 @@ def run_self_test() -> int:
         abs(payload["layout"]["spacing_x_mm"] - meta["spacing_x_mm"]) < 1e-12,
     )
 
-    # Portrait orientation flips the mm mapping.
+    # Portrait remains measurable for a clear UI diagnostic, but is forbidden
+    # for hand-eye and must never replace the persistent landscape cache.
     portrait = compute_layout_payload(
         1220, 2712, 1220, 2712, DEFAULT_SCREEN_WIDTH_MM, DEFAULT_SCREEN_HEIGHT_MM, 6.0, 55
     )
     check("portrait maps 69.55 mm to width", portrait["screen"]["size_mm"]["width"] == 69.55)
+    check("portrait orientation rejected", portrait["screen"]["landscape_ok"] is False)
 
     # Browser bar stealing pixels must be flagged as not fullscreen.
     cropped = compute_layout_payload(
@@ -338,26 +353,36 @@ def run_self_test() -> int:
         cache_path = Path(tmp_dir) / "phone_mire_layout.json"
         state = MireState(
             cache_path,
-            portrait,
+            payload,
             (DEFAULT_SCREEN_WIDTH_MM, DEFAULT_SCREEN_HEIGHT_MM),
         )
         check("startup layout available without phone", state.source() == "poco-default")
         state.set(payload)
         restored = MireState(
             cache_path,
-            portrait,
+            payload,
             (DEFAULT_SCREEN_WIDTH_MM, DEFAULT_SCREEN_HEIGHT_MM),
         )
         check("fullscreen phone layout restored", restored.source() == "cache")
         state.set(cropped)
         restored_after_cropped = MireState(
             cache_path,
-            portrait,
+            payload,
             (DEFAULT_SCREEN_WIDTH_MM, DEFAULT_SCREEN_HEIGHT_MM),
         )
         check(
             "non-fullscreen layout does not replace cache",
             restored_after_cropped.get()["screen"]["fullscreen_ok"] is True,
+        )
+        state.set(portrait)
+        restored_after_portrait = MireState(
+            cache_path,
+            payload,
+            (DEFAULT_SCREEN_WIDTH_MM, DEFAULT_SCREEN_HEIGHT_MM),
+        )
+        check(
+            "portrait layout does not replace cache",
+            restored_after_portrait.get()["screen"]["landscape_ok"] is True,
         )
 
     check("page file exists", PAGE_PATH.is_file())
@@ -416,6 +441,9 @@ def main(argv=None) -> int:
         return run_self_test()
     if args.fallback_width_px <= 0 or args.fallback_height_px <= 0:
         print("error: fallback viewport dimensions must be positive", file=sys.stderr)
+        return 2
+    if args.fallback_width_px <= args.fallback_height_px:
+        print("error: fallback viewport must be landscape (width > height)", file=sys.stderr)
         return 2
     fallback = compute_layout_payload(
         args.fallback_width_px,

@@ -65,7 +65,12 @@ public:
     void NextBatch();
     void Filter();
     void Undistort();
-    void KeepRecentFiltered(double windowSeconds);
+    // Live-camera fast path: undistorts only the fresh filtered batch held in
+    // Filtered and merges it into a rolling undistorted window of
+    // windowSeconds (shallow EventStore slices, no full-window recompute).
+    // Replaces the KeepRecentFiltered + Undistort pair of the live loop.
+    void UndistortLiveIncremental(double windowSeconds);
+    void ResetLiveWindow();
     void Echantillon(int maxevent);
     void Cluster(Box box,float alpha, int bandwidth, uint32_t minNb);
 
@@ -76,6 +81,15 @@ public:
     const std::vector<cv::Point2f>& UndistortedFilteredPoints() const { return undistortedFilteredPoints_; }
     const std::vector<int64_t>& UndistortedFilteredTimestamps() const { return undistortedFilteredTimestamps_; }
     const std::vector<bool>& UndistortedFilteredPolarities() const { return undistortedFilteredPolarities_; }
+    // Fresh-batch outputs of UndistortLiveIncremental: feeding the trace
+    // accumulator with just the new events avoids re-scanning the whole
+    // window every tick (its dedup would skip the old ones anyway).
+    const std::vector<cv::Point2f>& LiveBatchRawPoints() const { return liveBatchRawPoints_; }
+    const std::vector<int64_t>& LiveBatchRawTimestamps() const { return liveBatchRawTimestamps_; }
+    const std::vector<bool>& LiveBatchRawPolarities() const { return liveBatchRawPolarities_; }
+    const std::vector<cv::Point2f>& LiveBatchUndistortedPoints() const { return liveBatchUndistortedPoints_; }
+    const std::vector<int64_t>& LiveBatchUndistortedTimestamps() const { return liveBatchUndistortedTimestamps_; }
+    const std::vector<bool>& LiveBatchUndistortedPolarities() const { return liveBatchUndistortedPolarities_; }
 
     bool ClustersAvailable() const { return !clusters_.empty(); }
     bool isCameraRunning() const { return capture_ && capture_->isRunning(); }
@@ -102,7 +116,13 @@ private:
     dv::noise::BackgroundActivityNoiseFilter<dv::EventStore> filter_;
 
     dv::EventStore boxed_;
-    dv::EventStore recentFiltered_;
+    dv::EventStore liveWindow_;
+    std::vector<cv::Point2f> liveBatchRawPoints_;
+    std::vector<int64_t> liveBatchRawTimestamps_;
+    std::vector<bool> liveBatchRawPolarities_;
+    std::vector<cv::Point2f> liveBatchUndistortedPoints_;
+    std::vector<int64_t> liveBatchUndistortedTimestamps_;
+    std::vector<bool> liveBatchUndistortedPolarities_;
     std::vector<DvCluster> clusters_;
     std::vector<cv::Point2f> rawFilteredPoints_;
     std::vector<int64_t> rawFilteredTimestamps_;

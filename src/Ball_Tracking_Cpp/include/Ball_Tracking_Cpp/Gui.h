@@ -146,6 +146,15 @@ private:
     void Draw2DScene();
     void DrawTraceScene();
     void UpdateTraceAnalysis();
+    uint64_t TraceAnalysisSettingsSignature() const;
+    // Trace-analysis refresh state: the analysis reruns only when the
+    // accumulated events or a relevant setting changed (dirty flag +
+    // settings signature), rate-limited by traceAnalysisMinPeriodMs_.
+    bool traceAnalysisDirty_ = true;
+    uint64_t traceAnalysisSettingsSig_ = 0;
+    float traceAnalysisMinPeriodMs_ = 4.0f;
+    double lastTraceAnalysisDurationMs_ = 0.0;
+    std::chrono::steady_clock::time_point last_trace_analysis_time_{};
     void Draw3DScene();
     void DrawHudTexts();
     void UpdateTrajectoryQuality();
@@ -166,6 +175,17 @@ public:
 
     void Draw();
     void Update();
+    // Reruns the trace pipeline if the accumulated events or a relevant
+    // setting changed since the last run. Called from the node's timer tick
+    // so a fresh publish never waits for the 60 FPS render gate (Draw calls
+    // it too, as a safety net for early-return ticks).
+    void RefreshTraceAnalysis();
+    void MarkTraceAnalysisDirty() { traceAnalysisDirty_ = true; }
+    // Minimum interval between two trace-analysis runs (0 = every new batch);
+    // bounds the CPU cost when live batches arrive at kHz rates.
+    void SetTraceAnalysisMinPeriodMs(float periodMs) {
+        traceAnalysisMinPeriodMs_ = std::clamp(periodMs, 0.0f, 50.0f);
+    }
     void DrawTopView();
     void DrawView();
     void SetDisplayView(const dv::EventStore *events) { displayView = events; }
@@ -325,7 +345,7 @@ public:
         timeslice = 484.32f;
         trace_width_step_px = 8.0f;
         trace_line_window_px = 65.69f;
-        trace_memory_ms = 40.0f;
+        trace_memory_ms = 150.0f;
         trace_line_bin_width_px = 4.0f;
         trace_line_order = 2.0f;
         trace_pca_period_ms = 36.10f;
@@ -400,7 +420,7 @@ public:
 
         if (traceView) {
             sliderAt(0, 0, "Window ms", timeslice, 1.0f, 500.0f);
-            sliderAt(1, 0, "Trace ms", trace_memory_ms, 40.0f, 3000.0f);
+            sliderAt(1, 0, "Trace ms", trace_memory_ms, 1.0f, 500.0f);
             sliderAt(2, 0, "Bin width px", trace_line_bin_width_px, 1.0f, 48.0f);
             sliderAt(3, 0, "Local window", trace_line_window_px, 8.0f, 240.0f);
             sliderAt(0, 1, "Width step px", trace_width_step_px, 8.0f, 90.0f);
@@ -798,7 +818,7 @@ public:
     float TraceBorderPercent() const { return TraceBorderRatio() * 100.0f; }
     int TracePolarityMode() const { return std::clamp(trace_polarity_mode, 0, 2); }
     double TraceMemorySeconds() const {
-        return static_cast<double>(std::clamp(trace_memory_ms, 40.0f, 3000.0f)) * 1.0e-3;
+        return static_cast<double>(std::clamp(trace_memory_ms, 1.0f, 500.0f)) * 1.0e-3;
     }
     // Prediction lead: publish the trajectory position at (latest sample + lead).
     double TraceLeadSeconds() const {
@@ -911,7 +931,7 @@ private:
     float timeslice = 484.32f;
     float trace_width_step_px = 8.0f;
     float trace_line_window_px = 65.69f;
-    float trace_memory_ms = 40.0f;
+    float trace_memory_ms = 150.0f;
     float trace_line_bin_width_px = 4.0f;
     float trace_line_order = 2.0f;
     float trace_pca_period_ms = 36.10f;

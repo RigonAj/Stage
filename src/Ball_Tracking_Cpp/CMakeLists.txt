@@ -78,6 +78,17 @@ target_compile_options(talker PRIVATE
   -march=native
 )
 
+# Link-time optimization: the 1 kHz timer path crosses translation units
+# (publisher -> Camera -> Gui) on every tick; LTO lets the compiler inline
+# across them.
+include(CheckIPOSupported)
+check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_CHECK_OUTPUT)
+if(LTO_SUPPORTED)
+  set_target_properties(talker PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+else()
+  message(STATUS "LTO not supported: ${LTO_CHECK_OUTPUT}")
+endif()
+
 set(BENCHMARK_INSTALL_TARGETS)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ball_tracker_h5_benchmark.cpp
    AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/TraceBenchmark.cpp)
