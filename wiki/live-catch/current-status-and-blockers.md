@@ -1,14 +1,15 @@
 # Current Status And Blockers
 
-> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis; independent perception/control review, 2026-07-10; real-ball ROS graph and log diagnosis, 2026-07-16; tracker reader-mode root cause + offline replay validation, 2026-07-16
+> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis; independent perception/control review, 2026-07-10; real-ball ROS graph and log diagnosis, 2026-07-16; tracker reader-mode root cause + offline replay validation, 2026-07-16; first real ball caught, 2026-08-05
 > Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Tracker publisher](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Ball regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
 
 ## Overview
 
-The live-catch code path is implemented. The virtual-ball path has now been
-validated through real UR3e command streaming, but it is still slow under the
-current bring-up limits. Real perception deployment still has blocking
-calibration, TF, watchdog and latency validation work.
+The live-catch code path is implemented and has now caught a real ball
+end-to-end (2026-08-05), at roughly a 1-in-5 success rate. The virtual-ball path
+was validated earlier through real UR3e command streaming but is still slow
+under the current bring-up limits. Making the real catch reliable still needs
+the calibration, TF, timestamp and latency validation work listed below.
 
 ## Working
 
@@ -133,6 +134,26 @@ chain produced 12–13 valid raw samples and 27 `valid=true` fitted samples on
 `/ball_state` in `base_link` (flight `idle → collecting → tracking → ended`,
 RMS 0.013 m). Blocker 1 below is therefore validated offline; it still needs
 confirmation with live physical throws before arming.
+
+## 2026-08-05 First Real Ball Caught
+
+User hardware report, 2026-08-05: the full chain — real event camera, Trace
+perception, policy, command mode armed — **intercepted a hand-thrown ball and
+held it in the net**. This is the first end-to-end success and supersedes the
+"real perception deployment is blocked" framing above for the happy path.
+
+It is not yet reliable: roughly **1 catch in 5 throws**. Two causes reported,
+neither quantified yet:
+
+- **Chain latency**: the net reaches the interception point late enough to miss
+  a fast ball. Blocker 6 below (timestamp instrumentation before using latency
+  percentiles) is now the direct path to fixing this.
+- **Apparent spatial offset** between the aimed position and the ball's real
+  position. Origin not yet separated between residual perception bias, residual
+  `T_base_camera` error, and sim-to-real dynamics mismatch. Blockers 2–5 below
+  are the way to isolate the calibration/TF share.
+
+Treat both as open; the user has stated they will address them later.
 
 ## Blockers Before Real Perception
 

@@ -622,3 +622,77 @@
   `T_base_camera=[0.409871,-0.585759,0.439655]` m, 1.11 mm mean / 1.87 mm
   maximum pose residual, 1.79 mm leave-one-out and 0.98 px end-to-end RMS.
   Camera tape-measure and live TF parity checks remain pending.
+
+## [2026-08-04] ingest | Quantitative Trace vs circle-fitting benchmark
+
+- Updated: [Trace Vs Circle Fitting Benchmark](perception/trace-vs-circle-benchmark.md)
+- Updated: [Trace Ball Tracking](perception/trace-ball-tracking.md)
+- Source: new headless `ball_tracker_h5_benchmark` replaying Isaac/v2e
+  sequences through both production pipelines, plus the extended EventGen
+  benchmark chain. Nominal regime (3 detailed sequences, ~1.0-1.4 m): Trace
+  RMSE 3D 0.058 m vs circle 0.215 m at equal detection rate. Far/fast regime
+  (138 sequences of `benchmark_fast_throw_0500`, 1.8-3.4 m, ball 6-11 px):
+  both collapse on depth, Trace 1.72 m at 74% detection vs circle 0.42 m at
+  2.8% detection. The pre-existing benchmark figures (RMSE 2D 118 px, RMSE 3D
+  1.30 m) are recorded as void: they came from a stand-in implementation that
+  never called the Trace algorithm and was deleted at commit `889a684`.
+
+## [2026-08-04] ingest | Scale-dependent apparent-size bias in the Trace edge estimator
+
+- Updated: [Trace Vs Circle Fitting Benchmark](perception/trace-vs-circle-benchmark.md)
+- Source: per-sample comparison of measured apparent size against ground-truth
+  diameter over 141 sequences. The ribbon width is near-unbiased on a 15-21 px
+  ball (ratio 0.96) but loses 35% on a 6-11 px one (ratio 0.65), while the
+  image-plane track stays at 2.18 px. Cause: `EstimateSupportedEdges` corrects
+  the pixel-centre-to-border offset with a fraction of the measured width
+  (`rawWidth * borderRatio`) where the offset is a constant ~0.5 px per side.
+  No other exposed Trace parameter recovers it (best 1.08 m vs 1.66 m).
+  New opt-in `TraceSupportEdgeSettings::borderPixels` replaces the proportional
+  term with a constant; default 0 keeps live behaviour unchanged. At 0.9 px the
+  nominal regime goes from RMSE 3D 0.058 m to 0.039 m with width ratio 0.99, and
+  the far regime from 1.716 m to 0.672 m. Residual erosion in the support-radius
+  edge walk remains: the optimum is still regime-dependent (0.9 px vs 1.75 px).
+
+## [2026-08-04] ingest | Density-adaptive edge correction fixes the Trace depth bias
+
+- Updated: [Trace Vs Circle Fitting Benchmark](perception/trace-vs-circle-benchmark.md)
+- Source: ablation and parameter search over 141 Isaac/v2e sequences. The
+  ribbon width estimator lost 35% on a 6-11 px ball because
+  `EstimateSupportedEdges` corrected the pixel-centre-to-border offset with a
+  fraction of the measured width, and because the support-radius walk erodes
+  the edge by an amount set by event density. Two opt-in fields, both
+  defaulting to 0 so live behaviour is unchanged: `borderPixels` (constant,
+  quantisation) and `borderSpacingFactor` (scales the measured edge sample gap,
+  self-calibrating to sparsity). At 0.75 / 1.75 a single setting serves both
+  regimes: RMSE 3D 1.716 -> 0.157 m on the 138 fast throws and 0.058 -> 0.045 m
+  on the detailed sequences, at unchanged detection rate, with the width ratio
+  measured/true going to 0.99 and 1.00. An ablation shows 91% of the gain comes
+  from the edge correction alone and that a 13-parameter tuned profile is worse
+  than baseline without it. Circle fitting's collapse to a 1.3% detection rate
+  at range is traced to the polarity-symmetry gate (v2e output is ~85/15
+  imbalanced against a 0.29 tolerance) plus the stateful depth-jump gate, now
+  exposed as `BallTrackerSettings::depthJumpGateMm` with the 250 mm default.
+  New: `scripts/tune_trace_params.py` (train/test split, UI clamp bounds,
+  detection-rate floor).
+
+## [2026-08-05] ingest | First real ball caught end-to-end
+
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- User hardware report: the full chain (real event camera, Trace perception,
+  policy, command armed) intercepted a hand-thrown ball and held it in the net.
+  First end-to-end success. Not reliable yet: ~1 catch in 5 throws, with two
+  unquantified causes reported — chain latency (net arrives late) and an
+  apparent spatial offset between aimed and real ball position, not yet
+  separated between perception bias, residual `T_base_camera` error and
+  sim-to-real dynamics mismatch. Existing blockers 2-6 remain the path to both.
+
+## [2026-08-18] ingest | Report figure regeneration script
+
+- Updated: [Trace Vs Circle Fitting Benchmark](perception/trace-vs-circle-benchmark.md)
+- Source: new `scripts/plot_report_figures.py`, added while reworking
+  `Stage_summary.tex` after the tutor review. It rebuilds two computed report
+  figures from data already on disk: the Trace trajectory-convergence plot from
+  a benchmark sequence's matched samples, and the intrinsic calibration pose
+  diversity (tilt 1.3-43.4 deg, median 12.3 deg, distances 0.41-0.80 m) from the
+  intrinsics report JSON. No pipeline or contract change.
+

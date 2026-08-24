@@ -109,7 +109,25 @@ struct TraceSupportEdgeSettings {
     std::size_t minLocalSupport = 3;
     std::size_t maxLocalSupport = 9;
     float supportRadiusPx = 1.75f;
+    // Outward correction applied to each supported edge, because events are
+    // reported at integer pixel centres while the object's edge lies beyond
+    // the outermost centre.
+    //
+    // borderRatio scales that correction with the measured width, which only
+    // holds for a large trail: the pixel-centre-to-border offset is a constant
+    // (~0.5 px per side), so a proportional term under-corrects a small ball.
+    // Measured on Isaac sequences: the width comes out at 0.96x truth for a
+    // 15-21 px ball but 0.65x for a 6-11 px one.
+    //
+    // Set borderPixels > 0 to use that constant instead of the proportional
+    // term. Left at 0 the legacy proportional behaviour is unchanged.
     float borderRatio = 0.035f;
+    float borderPixels = 0.0f;
+    // Multiplies the measured sample spacing at the edge, so the correction
+    // adapts to how sparsely the trail is sampled instead of needing a
+    // per-distance constant. Setting either borderPixels or this one > 0
+    // switches off the legacy proportional term.
+    float borderSpacingFactor = 0.0f;
 };
 
 struct TraceRibbonFit {

@@ -222,6 +222,21 @@ Lint the compiled LLM wiki:
 python3 scripts/lint_llm_wiki.py
 ```
 
+Replay Isaac/v2e sequences through both perception pipelines and score them
+against ground truth (see
+[Trace Vs Circle Fitting Benchmark](wiki/perception/trace-vs-circle-benchmark.md)):
+
+```bash
+./build/ball_tracker_h5_benchmark --events-h5 sequences/sequence_0001/events_v2e/events_filtered.h5 --ground-truth sequences/sequence_0001/labels/ground_truth.csv --camera sequences/sequence_0001/camera/intrinsics.json --metadata sequences/sequence_0001/metadata.json --output-trace /tmp/det_trace.csv --output-circle /tmp/det_circle.csv --runtime-output /tmp/runtime.json --mode both
+```
+
+Search perception parameters against that ground truth (train/test split, UI
+clamp bounds, detection-rate floor):
+
+```bash
+python3 scripts/tune_trace_params.py --sequences sequences/sequence_0001 sequences/sequence_0002 sequences/sequence_0003 --trials 100 --jobs 6 --out /tmp/tune.json
+```
+
 ## Editing Rules
 
 - Keep robot-safety behavior explicit and testable.

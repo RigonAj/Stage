@@ -11,6 +11,46 @@ namespace {
 constexpr float kPi = 3.14159265358979323846f;
 }
 
+std::vector<BallTrackerClusterInput> BuildTrackerClusterInputs(
+    const std::vector<DvCluster> &clusters,
+    const CalibrationData &calibration) {
+
+    std::vector<BallTrackerClusterInput> output;
+    output.reserve(clusters.size());
+
+    for (const auto &cluster : clusters) {
+        BallTrackerClusterInput input;
+        input.maxTimestamp = cluster.maxTimestamp;
+        input.minTimestamp = cluster.minTimestamp;
+
+        const std::vector<cv::Point2f> &points = cluster.points;
+
+        input.points.reserve(points.size());
+        input.polarities.reserve(points.size());
+
+        for (size_t i = 0; i < points.size(); ++i) {
+            const cv::Point2f &point = points[i];
+
+            if (calibration.ready
+                && (point.x < 0.0f
+                    || point.x >= static_cast<float>(calibration.imageSize.width)
+                    || point.y < 0.0f
+                    || point.y >= static_cast<float>(calibration.imageSize.height))) {
+                continue;
+            }
+
+            input.points.emplace_back(point);
+            input.polarities.emplace_back(polar{cluster.polarities[i], cluster.timestamps[i]});
+        }
+
+        if (!input.points.empty()) {
+            output.emplace_back(std::move(input));
+        }
+    }
+
+    return output;
+}
+
 BallTracker::BallTracker() {
     circle_centers_.reserve(50000);
     world_track_.reserve(2000);
@@ -306,7 +346,7 @@ BallTrackerResult BallTracker::Update(
 
                 if (pose.has_value()) {
                     const bool bad = last_ball_pose_.has_value()
-                        && std::fabs(pose->depthMm - last_ball_pose_->depthMm) > 250.0f
+                        && std::fabs(pose->depthMm - last_ball_pose_->depthMm) > settings.depthJumpGateMm
                         && last_ball_pose_->depthMm != 0.0f;
                     if(bad) continue;
                     pose->timestampUs = poseTimestampUs;

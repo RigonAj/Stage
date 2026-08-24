@@ -198,6 +198,37 @@ float Quantile(std::vector<float> values, float q) {
     return values[index];
 }
 
+// Median gap between consecutive samples at one end of a sorted list. It
+// measures how densely the ribbon is sampled right at its edge, which is what
+// decides how far inside the true edge the outermost sample falls.
+float EdgeSampleSpacing(const std::vector<float> &sortedValues, std::size_t edgeSamples, bool fromLow) {
+    if (sortedValues.size() < 2 || edgeSamples < 2) {
+        return 0.0f;
+    }
+
+    const std::size_t count = std::min(edgeSamples, sortedValues.size());
+    std::vector<float> gaps;
+    gaps.reserve(count - 1);
+
+    for (std::size_t i = 1; i < count; ++i) {
+        const float a = fromLow
+            ? sortedValues[i - 1]
+            : sortedValues[sortedValues.size() - i];
+        const float b = fromLow
+            ? sortedValues[i]
+            : sortedValues[sortedValues.size() - i - 1];
+        gaps.push_back(std::fabs(b - a));
+    }
+
+    if (gaps.empty()) {
+        return 0.0f;
+    }
+
+    const std::size_t mid = gaps.size() / 2;
+    std::nth_element(gaps.begin(), gaps.begin() + static_cast<std::ptrdiff_t>(mid), gaps.end());
+    return gaps[mid];
+}
+
 TraceEdgeEstimate EstimateSupportedEdges(
     const std::vector<float> &values,
     std::size_t minSupportCount,
@@ -273,7 +304,35 @@ TraceEdgeEstimate EstimateSupportedEdges(
         return estimate;
     }
 
-    const float pixelCenterToBorderPx = std::clamp(rawWidth * settings.borderRatio, 0.0f, 1.5f);
+    // How far the outermost accepted sample sits from the object's real edge.
+    //
+    // Legacy: a fraction of the measured width. That is wrong dimensionally --
+    // the offset does not scale with the object -- and under-corrects a small
+    // ball, which is what biased the trace depth at range.
+    //
+    // borderPixels: a constant, correct for pixel quantisation (~0.5 px) but
+    // blind to the second effect, the support-radius edge erosion, whose size
+    // depends on how sparsely the trail is sampled.
+    //
+    // borderSpacingFactor: scales the *measured* sample spacing near the edge.
+    // For samples with mean spacing s the true edge sits about s beyond the
+    // outermost one, so this term self-calibrates: large on a sparse trail,
+    // negligible on a dense one. Combined with borderPixels it is meant to
+    // hold across ball sizes instead of needing a per-regime constant.
+    float pixelCenterToBorderPx;
+    if (settings.borderPixels > 0.0f || settings.borderSpacingFactor > 0.0f) {
+        const std::size_t edgeSamples = std::clamp<std::size_t>(localSupport, 2, finiteValues.size() / 2);
+        const float lowSpacing = EdgeSampleSpacing(finiteValues, edgeSamples, true);
+        const float highSpacing = EdgeSampleSpacing(finiteValues, edgeSamples, false);
+        const float spacing = 0.5f * (lowSpacing + highSpacing);
+        pixelCenterToBorderPx = std::clamp(
+            settings.borderPixels + settings.borderSpacingFactor * spacing,
+            0.0f,
+            4.0f);
+    }
+    else {
+        pixelCenterToBorderPx = std::clamp(rawWidth * settings.borderRatio, 0.0f, 1.5f);
+    }
     low -= pixelCenterToBorderPx;
     high += pixelCenterToBorderPx;
 

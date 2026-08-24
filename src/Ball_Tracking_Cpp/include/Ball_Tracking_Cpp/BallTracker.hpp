@@ -29,6 +29,12 @@ struct BallTrackerSettings {
     BallSliceMode sliceMode = BallSliceMode::RecentEvents;
     int temporalSliceCount = 5;
     int eventsPerSlice = 100;
+    // Rejects a pose whose depth jumps more than this from the previous one.
+    // The gate is stateful and does NOT update the reference on rejection, so
+    // once the noise exceeds it the tracker latches and emits nothing further.
+    // Fine at close range where depth is stable; raise it when the apparent
+    // radius is small and depth noise legitimately exceeds the threshold.
+    float depthJumpGateMm = 250.0f;
 };
 
 struct BallTrackerClusterInput {
@@ -79,6 +85,13 @@ struct BallTrackerResult {
     coef plan;
 
 };
+
+// DBSCAN output -> tracker input. Events falling outside the calibrated image
+// rectangle are dropped, and empty clusters are not forwarded. Shared by the
+// live ROS node and the offline benchmark so both feed the tracker identically.
+std::vector<BallTrackerClusterInput> BuildTrackerClusterInputs(
+    const std::vector<DvCluster> &clusters,
+    const CalibrationData &calibration);
 
 class BallTracker {
 public:

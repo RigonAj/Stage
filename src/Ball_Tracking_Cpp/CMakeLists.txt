@@ -34,6 +34,7 @@ add_executable(talker
   src/publisher_member_function.cpp
   src/EventWriter.cpp
   src/Gui.cpp
+  src/SequenceData.cpp
   src/TraceAnalysis.cpp
   src/Camera.cpp
   src/BallTracker.cpp
@@ -89,13 +90,20 @@ else()
   message(STATUS "LTO not supported: ${LTO_CHECK_OUTPUT}")
 endif()
 
+# Headless offline benchmark: replays an H5 sequence through the same Trace and
+# circle-fitting code the live node runs. It links raylib for the Vector2/Vector3
+# types TraceAnalysis uses, but never calls InitWindow.
 set(BENCHMARK_INSTALL_TARGETS)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ball_tracker_h5_benchmark.cpp
-   AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/TraceBenchmark.cpp)
+   AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/OfflineBenchmark.cpp)
   add_executable(ball_tracker_h5_benchmark
     src/ball_tracker_h5_benchmark.cpp
-    src/TraceBenchmark.cpp
+    src/OfflineBenchmark.cpp
+    src/SequenceData.cpp
     src/EventWriter.cpp
+    src/Camera.cpp
+    src/BallTracker.cpp
+    src/TraceAnalysis.cpp
   )
 
   ament_target_dependencies(ball_tracker_h5_benchmark
@@ -105,8 +113,12 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ball_tracker_h5_benchmark.cpp
 
   target_include_directories(ball_tracker_h5_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Ball_Tracking_Cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${DBSCAN_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../.deps/prefix/include
     ${OpenCV_INCLUDE_DIRS}
+    ${RAYLIB_INCLUDE_DIRS}
+    ${LIBUSB_INCLUDE_DIRS}
     /usr/include/eigen3
     ${HDF5_INCLUDE_DIRS}
   )
@@ -114,10 +126,21 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ball_tracker_h5_benchmark.cpp
   target_link_libraries(ball_tracker_h5_benchmark
     ${OpenCV_LIBS}
     Eigen3::Eigen
+    fmt::fmt
+    ${RAYLIB_LINK_LIBRARIES}
+    ${LIBUSB_LIBRARIES}
     ${HDF5_LIBRARIES}
+    TBB::tbb
+    GL
+    m
+    pthread
+    dl
+    rt
+    X11
   )
 
   target_compile_options(ball_tracker_h5_benchmark PRIVATE
+    -w
     -O3
   )
 

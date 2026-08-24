@@ -384,6 +384,7 @@ functional on real data; live validation with physical throws remains.
 
 ## See Also
 
+- [Trace Vs Circle Fitting Benchmark](trace-vs-circle-benchmark.md)
 - [Real Perception Trace Test Runbook](real-perception-trace-test.md)
 - [Live Catch Loop](../live-catch/live-catch-loop.md)
 - [Message Contracts And Topics](../live-catch/message-contracts-and-topics.md)
