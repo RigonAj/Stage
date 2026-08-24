@@ -17,6 +17,7 @@ Event-camera ball tracking and 3D pose estimation.
 |---------|---------|---------|
 | [Trace Ball Tracking](perception/trace-ball-tracking.md) | Trace algorithm, ROI/ribbon/width-depth pipeline, output contract, event-clock re-anchoring, binary live confidence, the 2026-07-16 I/O parameters (camera-mode startup, polarity all, H5 recording, scripted replay, trace-status heartbeat), and the 2026-07-17 latency optimization (analysis/publish decoupled from the 60 FPS render via `trace_analysis_period_ms`, incremental live undistortion, paused-reader cache, DBSCAN gated off in the live-catch config). | 2026-07-17 |
 | [Trace Vs Circle Fitting Benchmark](perception/trace-vs-circle-benchmark.md) | Headless offline benchmark replaying Isaac/v2e sequences through both production pipelines: intrinsics/frame/timestamp contracts, the scale-dependent apparent-size bias of the ribbon edge estimator and its density-adaptive fix (RMSE 3D 1.72 -> 0.157 m at range, 0.058 -> 0.045 m nominal), why circle fitting collapses to a 1.3% detection rate at range, the parameter-search script and its ablation, and why the pre-2026-08-04 benchmark numbers are void. | 2026-08-04 |
+| [Real Throw Session Analysis — 2026-08-24](perception/real-throw-session-2026-08-24.md) | [Archived] Quantitative H5/rosbag analysis of four real throws: operator outcomes, far-range depth outlier, policy-envelope mismatch, 156-185 ms raw-to-motion latency, hoop proximity, extrinsic comparison and prioritized fixes. | 2026-08-24 |
 | [Real Perception Trace Test Runbook](perception/real-perception-trace-test.md) | Operator procedure for calibrated real Trace and the single `--tracker` stack; the 2026-07-16 no-valid-sample diagnosis, its root cause (tracker started in File/reader mode) and the offline replay validation of the fixed chain. | 2026-07-16 |
 | [Perception Robustness And Flight Lifecycle](perception/perception-robustness-flight-lifecycle.md) | Independent review of the 2026-07-09 incident: lead=0 default decision, timestamp/quality gaps, explicit throw lifecycle, left-policy envelope and validation gates. | 2026-07-10 |
 
@@ -26,7 +27,7 @@ Camera intrinsics, hand-eye calibration and TF contracts.
 
 | Article | Summary | Updated |
 |---------|---------|---------|
-| [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire workflow, current strict-landscape 2026-07-23 physical transform with validation metrics, base_link parity gates and remaining physical checks. | 2026-07-23 |
+| [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md) | Intrinsics, phone-mire workflow, cleaned 18-pose 2026-08-24 hand-eye candidate and validation metrics, prior-transform discrepancy, base_link parity gates and remaining physical checks. | 2026-08-24 |
 | [Extrinsic Calibration Runbook](calibration/extrinsic-calibration-runbook.md) | Operator checklist for the physical eye-to-hand session: strict landscape-only phone mire with browser/server/collector guards, persistent safe layout, capture, solve acceptance gates, TF publication and validation. | 2026-07-23 |
 | [Intrinsic Calibration Runbook](calibration/intrinsic-calibration-runbook.md) | Operator checklist to redo DVXplorer intrinsics: working/output dirs, env.sh `calib` alias, event-mire capture, robust solve and acceptance gates. | 2026-07-09 |
 | [Frames And Transforms](calibration/frames-and-transforms.md) | `base_link` policy frame, TF, UI robot orientation, hold_side-driven hoop_center TF (right/left racket mount), hoop radius distinction and unit contracts used by perception, live catch and UI. | 2026-07-06 |
@@ -49,7 +50,7 @@ Closed-loop perception-to-policy-to-robot path.
 | [Message Contracts And Topics](live-catch/message-contracts-and-topics.md) | `BallState`, raw/fitted topics, velocity/confidence/heartbeat contracts, single-producer rule, lead=0 default and the measurement-vs-state timestamp mismatch. | 2026-07-10 |
 | [Safety And Commanding](live-catch/safety-and-commanding.md) | Command modes, model/v_safe_scale runtime gates, safety/watchdog, 500 Hz streaming, ±2π gate, producer-conflict protection and the open synchronous command-authority exclusivity gap. | 2026-07-10 |
 | [Single Producer Contract](live-catch/single-producer-contract.md) | 2026-07-09 duplicate live_catch_node / dual ball_state producer incident, failure signatures (twitching robot, flapping UI command state), diagnostics watchdog, UI flap detection, `--tracker` stack rule and pre-command checks. | 2026-07-09 |
-| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, diagnosed duplicate-stack incident, lead=0 baseline and the 2026-07-16 real-ball result: reader-mode root cause fixed, perception chain validated offline on the recorded throw, live-throw confirmation pending. | 2026-07-16 |
+| [Current Status And Blockers](live-catch/current-status-and-blockers.md) | Working state, first real catch, remaining latency/spatial-offset work, and the cleaned 2026-08-24 hand-eye candidate awaiting physical TF validation. | 2026-08-24 |
 
 ## sim-to-real
 

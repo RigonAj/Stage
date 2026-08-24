@@ -696,3 +696,27 @@
   diversity (tilt 1.3-43.4 deg, median 12.3 deg, distances 0.41-0.80 m) from the
   intrinsics report JSON. No pipeline or contract change.
 
+## [2026-08-24] ingest | Generate the cleaned 18-pose hand-eye result
+
+- Updated: [Camera And Hand-Eye Calibration](calibration/camera-and-handeye-calibration.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Source: `handeye_samples_20260824_150722_clean.json` and the regenerated
+  `calibration/handeye_result.yaml`. Original sample index 1 was excluded as a
+  180-degree mire-association flip; the remaining 18 poses pass the numerical
+  runbook gates (1.60 mm mean / 2.56 mm maximum pose residual, 1.66 mm
+  leave-one-out, 1.65 px end-to-end RMS). Physical overlay and TF parity remain
+  required because `T_base_camera` differs from the 2026-07-23 reference by
+  16.32 mm / 3.70 deg despite no reported camera movement.
+
+## [2026-08-24] query | Archived: Quantitative real-throw H5/rosbag analysis
+
+- Created: [Real Throw Session Analysis — 2026-08-24](perception/real-throw-session-2026-08-24.md)
+- Updated: [Current Status And Blockers](live-catch/current-status-and-blockers.md)
+- Evidence: `recordings/realtest.h5` and
+  `rosbags/real_20260824_160858`; four synchronized throws, with the first
+  three labelled failures and the last deliberately thrown into the net.
+- Findings: plausible ~1.8 m starting depth for the distant throws but one
+  incompatible 3.943 m late outlier; policy-envelope violations; 156-185 ms
+  raw-to-motion latency; no hoop-plane flight termination; live Trace still
+  uses the legacy proportional edge correction instead of the benchmarked
+  density-adaptive fields.

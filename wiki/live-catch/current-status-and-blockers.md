@@ -1,7 +1,7 @@
 # Current Status And Blockers
 
-> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis; independent perception/control review, 2026-07-10; real-ball ROS graph and log diagnosis, 2026-07-16; tracker reader-mode root cause + offline replay validation, 2026-07-16; first real ball caught, 2026-08-05
-> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Tracker publisher](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Ball regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py)
+> Sources: live-catch implementation status, 2026-06-30; remaining work checklist, 2026-06-29; inconsistency review, 2026-06-30; 2026-07-02 pendant incident analysis; user hardware report, 2026-07-02; v_safe_scale UI implementation, 2026-07-03; ball regression publisher, 2026-07-03; 2026-07-09 first real Trace command test analysis; independent perception/control review, 2026-07-10; real-ball ROS graph and log diagnosis, 2026-07-16; tracker reader-mode root cause + offline replay validation, 2026-07-16; first real ball caught, 2026-08-05; cleaned physical hand-eye solve, 2026-08-24; quantitative real H5/rosbag session, 2026-08-24
+> Raw: [Implementation status](../../docs/Robot_Control/ur3e_live_catch_implementation_status.md); [Reste a faire](../../docs/reste_a_faire.md); [Incoherences](../../docs/incoherences_code_logique.md); [Analyse pipeline commande](../../docs/Robot_Control/analyse_pipeline_commande_trace_2026-07-09.md); [Perception/control review](../../docs/Robot_Control/revue_perception_robuste_controle_fluide_2026-07-10.md); [Tracker publisher](../../src/Ball_Tracking_Cpp/src/publisher_member_function.cpp); [Ball regression node](../../src/ur3e_live_catch/ur3e_live_catch/ball_regression_node.py); [Live-catch config](../../src/ur3e_live_catch/config/live_catch.yaml); [Web UI app](../../src/ur3e_web_ui/ur3e_web_ui/app.py); [Catch panel](../../src/ur3e_web_ui/ur3e_web_ui/static/js/catch_panel.js); [Live catch node](../../src/ur3e_live_catch/ur3e_live_catch/live_catch_node.py); [Hand-eye result](../../calibration/handeye_result.yaml); [Cleaned hand-eye samples](../../recordings/mire_calibration/handeye/handeye_samples_20260824_150722_clean.json); [Real-session rosbag metadata](../../rosbags/real_20260824_160858/metadata.yaml); [Real event recording](../../recordings/realtest.h5)
 
 ## Overview
 
@@ -9,7 +9,11 @@ The live-catch code path is implemented and has now caught a real ball
 end-to-end (2026-08-05), at roughly a 1-in-5 success rate. The virtual-ball path
 was validated earlier through real UR3e command streaming but is still slow
 under the current bring-up limits. Making the real catch reliable still needs
-the calibration, TF, timestamp and latency validation work listed below.
+the calibration, TF, timestamp and latency validation work listed below. A
+quantitative four-throw H5/rosbag session on 2026-08-24 now confirms that the
+full live topic and command chain records correctly; its primary measured
+issues are far-range depth, out-of-domain throws and 156-185 ms from first raw
+detection to first significant robot motion.
 
 ## Working
 
@@ -155,21 +159,41 @@ neither quantified yet:
 
 Treat both as open; the user has stated they will address them later.
 
-## Blockers Before Real Perception
+## 2026-08-24 Quantitative Four-Throw Session
 
-1. Obtain repeatable `valid=true` samples from C++ Trace on `/ball_state_raw`
-   during robot-disarmed physical throws. (Validated offline on the 2026-07-09
-   recording after the 2026-07-16 reader-mode/polarity fix; live physical
-   confirmation pending.)
-2. Validate `T_base_camera` physically.
+The latest H5 plus rosbag contains four synchronized live throws with raw and
+fitted ball states, telemetry, joint states, controller commands, TF and speed
+scaling. The operator labels the first three as failures and the last as a ball
+deliberately thrown into the net. The perceived minimum ball-to-hoop-center
+distances are respectively 14.2, 46.4, 33.2 and 11.3 cm, consistent with the
+last label but not an independent spatial ground truth.
+
+Measured raw-to-first-motion latency is 156-185 ms, of which only 34-39 ms is
+between significant target and significant actual joint movement. The second
+throw contains a late raw depth jump to 3.943 m. Several initial positions or
+velocities are outside the `latest-left` training envelope, and the fitted
+state remains valid after passing the robot because the regression has no
+hoop-plane end state. The complete evidence, caveats and prioritized fixes are
+archived in
+[Real Throw Session Analysis — 2026-08-24](../perception/real-throw-session-2026-08-24.md).
+
+## Current Reliability Blockers
+
+1. Improve the repeatable live `valid=true` samples now demonstrated on
+   `/ball_state_raw`: reject far-range depth discontinuities and wire the
+   benchmarked density-adaptive edge correction into the live Trace path.
+2. Validate `T_base_camera` physically. The cleaned 18-pose solve generated on
+   2026-08-24 passes its numerical gates, but differs from the 2026-07-23
+   reference by `16.32 mm / 3.70 deg` although no camera movement was reported.
 3. Publish and verify `base -> camera_optical`.
 4. Publish and verify `wrist_3_link -> hoop_center`; without it, command mode
    holds instead of using a fallback disk pose.
 5. Compare `publish_frame=base_link` against `publish_frame=camera_optical`.
 6. Correct or instrument measurement/state/publish timestamps before using
    latency percentiles to tune prediction lead.
-7. Capture real Trace H5 + rosbag data and validate the flight estimator at
-   30/60 Hz with dropouts; synthetic 120 Hz tests are not deployment evidence.
+7. Extend the now-completed real Trace H5 + rosbag capture with controlled
+   spatial ground truth and normal, individually labelled throws; the current
+   four-throw bag validates observability, not centimetric accuracy.
 
 ## 2026-07-02 Pendant Incident (Diagnosed)
 
